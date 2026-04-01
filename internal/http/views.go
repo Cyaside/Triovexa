@@ -17,16 +17,17 @@ type incidentListPageData struct {
 }
 
 type incidentDetailPageData struct {
-	Incident          domain.Incident
-	Triage            *domain.TriageResult
-	Evidence          []domain.EvidenceItem
-	Documents         []domain.DocumentReference
-	Actions           []domain.CandidateAction
-	PolicyDecisions   []domain.PolicyDecision
-	ApprovalRecords   []domain.ApprovalRecord
-	ExecutionRecords  []domain.ExecutionRecord
-	KillSwitchEnabled bool
-	AuditTrail        []domain.AuditEvent
+	Incident            domain.Incident
+	Triage              *domain.TriageResult
+	Evidence            []domain.EvidenceItem
+	Documents           []domain.DocumentReference
+	Actions             []domain.CandidateAction
+	PolicyDecisions     []domain.PolicyDecision
+	ApprovalRecords     []domain.ApprovalRecord
+	ExecutionRecords    []domain.ExecutionRecord
+	VerificationResults []domain.VerificationResult
+	KillSwitchEnabled   bool
+	AuditTrail          []domain.AuditEvent
 }
 
 var templateFuncs = template.FuncMap{
@@ -72,6 +73,15 @@ var templateFuncs = template.FuncMap{
 		}
 		return filtered
 	},
+	"executionFor": func(executionRecordID string, records []domain.ExecutionRecord) *domain.ExecutionRecord {
+		for _, record := range records {
+			if record.ID == executionRecordID {
+				copy := record
+				return &copy
+			}
+		}
+		return nil
+	},
 }
 
 var incidentListTemplate = template.Must(template.New("incident-list").Funcs(templateFuncs).Parse(`
@@ -94,7 +104,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
 </head>
 <body>
   <h1>Incident List</h1>
-  <p class="muted">Operator view untuk Phase 4 low-risk execution MVP.</p>
+  <p class="muted">Operator view untuk Phase 5 verification and escalation.</p>
   {{if .KillSwitchEnabled}}
   <p class="banner">Kill switch sedang aktif. Evaluasi dan triage tetap berjalan, tetapi action baru akan diblok oleh policy.</p>
   {{end}}
@@ -317,6 +327,33 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
           {{end}}
         {{else}}
           <tr><td colspan="6">Belum ada execution record.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card" style="margin-top:1rem;">
+    <h2>Verification Results</h2>
+    <table>
+      <thead>
+        <tr><th>Action ID</th><th>Execution ID</th><th>Status</th><th>Created</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        {{if .VerificationResults}}
+          {{range .VerificationResults}}
+          <tr>
+            <td>{{with executionFor .ExecutionRecordID $.ExecutionRecords}}{{.CandidateActionID}}{{else}}-{{end}}</td>
+            <td>{{.ExecutionRecordID}}</td>
+            <td><span class="pill">{{.Status}}</span></td>
+            <td>{{formatTime .CreatedAt}}</td>
+            <td>
+              <p>{{.Notes}}</p>
+              <pre>{{formatJSON .EvidenceJSON}}</pre>
+            </td>
+          </tr>
+          {{end}}
+        {{else}}
+          <tr><td colspan="5">Belum ada verification result.</td></tr>
         {{end}}
       </tbody>
     </table>

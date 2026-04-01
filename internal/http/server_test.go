@@ -301,6 +301,29 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 		t.Fatalf("incident state after verification = %v, want %q", incidentValue["State"], "resolved")
 	}
 
+	verificationResponse, err := http.Get(api.URL + "/actions/" + actionID + "/verification")
+	if err != nil {
+		t.Fatalf("get verification results: %v", err)
+	}
+	defer verificationResponse.Body.Close()
+
+	if verificationResponse.StatusCode != http.StatusOK {
+		t.Fatalf("verification status = %d, want %d", verificationResponse.StatusCode, http.StatusOK)
+	}
+
+	var verificationPayload map[string]any
+	if err := json.NewDecoder(verificationResponse.Body).Decode(&verificationPayload); err != nil {
+		t.Fatalf("decode verification response: %v", err)
+	}
+
+	latestVerification, ok := verificationPayload["latest"].(map[string]any)
+	if !ok {
+		t.Fatalf("latest verification result is missing from response")
+	}
+	if status, ok := latestVerification["Status"].(string); !ok || status != "success" {
+		t.Fatalf("verification latest status = %v, want %q", latestVerification["Status"], "success")
+	}
+
 	killSwitchBody, err := json.Marshal(map[string]bool{"enabled": true})
 	if err != nil {
 		t.Fatalf("marshal kill switch payload: %v", err)

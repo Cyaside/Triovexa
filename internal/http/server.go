@@ -68,7 +68,7 @@ func NewServer(
 			Environment:         cfg.Environment,
 			KillSwitchEnabled:   killSwitchState.Enabled,
 			KillSwitchUpdatedAt: killSwitchState.UpdatedAt.Format(time.RFC3339),
-			Phase:               "phase-04-low-risk-execution-mvp",
+			Phase:               "phase-05-verification-escalation",
 			AvailableEndpoints: []string{
 				"GET /health",
 				"GET /debug/tools",
@@ -77,6 +77,7 @@ func NewServer(
 				"GET /incidents/{id}",
 				"GET /incidents/{id}/triage",
 				"GET /incidents/{id}/actions",
+				"GET /actions/{id}/verification",
 				"POST /actions/{id}/approve",
 				"POST /actions/{id}/reject",
 				"POST /actions/{id}/execute",
@@ -140,18 +141,47 @@ func NewServer(
 	})
 
 	mux.HandleFunc("/actions/", func(w http.ResponseWriter, r *http.Request) {
-		if approvalService == nil && executionService == nil {
+		if approvalService == nil && executionService == nil && r.Method != http.MethodGet {
 			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "action workflow is not configured"})
-			return
-		}
-
-		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
 
 		actionPath := strings.TrimPrefix(r.URL.Path, "/actions/")
 		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(actionPath, "/verification"):
+			actionID := strings.TrimSuffix(actionPath, "/verification")
+			if _, err := repository.GetCandidateAction(r.Context(), actionID); err != nil {
+				if errors.Is(err, storage.ErrNotFound) {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "candidate action not found"})
+					return
+				}
+				logger.Error("failed to load candidate action before verification lookup", slog.String("error", err.Error()))
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load candidate action"})
+				return
+			}
+
+			results, err := repository.ListVerificationResultsByAction(r.Context(), actionID)
+			if err != nil {
+				logger.Error("failed to list verification results", slog.String("error", err.Error()))
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get verification results"})
+				return
+			}
+
+			var latest *domain.VerificationResult
+			if len(results) > 0 {
+				copy := results[len(results)-1]
+				latest = &copy
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"action_id":            actionID,
+				"verification_results": results,
+				"latest":               latest,
+			})
+			return
+		case r.Method != http.MethodPost:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
 		case strings.HasSuffix(actionPath, "/approve"):
 			if approvalService == nil {
 				writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "approval workflow is not configured"})
@@ -359,6 +389,13 @@ func NewServer(
 			return
 		}
 
+		verificationResults, err := repository.ListVerificationResults(r.Context(), incidentID)
+		if err != nil {
+			logger.Error("failed to list verification results", slog.String("error", err.Error()))
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get verification results"})
+			return
+		}
+
 		var triageResult *domain.TriageResult
 		result, err := repository.GetTriageResult(r.Context(), incidentID)
 		if err == nil {
@@ -370,15 +407,16 @@ func NewServer(
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
-			"incident":          record,
-			"triage":            triageResult,
-			"evidence":          evidence,
-			"documents":         documents,
-			"candidate_actions": actions,
-			"policy_decisions":  policyDecisions,
-			"approval_records":  approvalRecords,
-			"execution_records": executionRecords,
-			"audit_events":      auditEvents,
+			"incident":             record,
+			"triage":               triageResult,
+			"evidence":             evidence,
+			"documents":            documents,
+			"candidate_actions":    actions,
+			"policy_decisions":     policyDecisions,
+			"approval_records":     approvalRecords,
+			"execution_records":    executionRecords,
+			"verification_results": verificationResults,
+			"audit_events":         auditEvents,
 		})
 	})
 
@@ -458,6 +496,12 @@ func NewServer(
 			return
 		}
 
+		verificationResults, err := repository.ListVerificationResults(r.Context(), incidentID)
+		if err != nil {
+			http.Error(w, "failed to load verification results", http.StatusInternalServerError)
+			return
+		}
+
 		auditEvents, err := repository.ListAuditEvents(r.Context(), incidentID)
 		if err != nil {
 			http.Error(w, "failed to load audit trail", http.StatusInternalServerError)
@@ -474,16 +518,17 @@ func NewServer(
 		}
 
 		renderIncidentDetail(w, incidentDetailPageData{
-			Incident:          record,
-			Triage:            triageResult,
-			Evidence:          evidence,
-			Documents:         documents,
-			Actions:           actions,
-			PolicyDecisions:   policyDecisions,
-			ApprovalRecords:   approvalRecords,
-			ExecutionRecords:  executionRecords,
-			KillSwitchEnabled: approvalService != nil && approvalService.KillSwitchState().Enabled,
-			AuditTrail:        auditEvents,
+			Incident:            record,
+			Triage:              triageResult,
+			Evidence:            evidence,
+			Documents:           documents,
+			Actions:             actions,
+			PolicyDecisions:     policyDecisions,
+			ApprovalRecords:     approvalRecords,
+			ExecutionRecords:    executionRecords,
+			VerificationResults: verificationResults,
+			KillSwitchEnabled:   approvalService != nil && approvalService.KillSwitchState().Enabled,
+			AuditTrail:          auditEvents,
 		})
 	})
 
