@@ -125,6 +125,17 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			note TEXT NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS execution_records (
+			id TEXT PRIMARY KEY,
+			candidate_action_id TEXT NOT NULL REFERENCES candidate_actions(id) ON DELETE CASCADE,
+			idempotency_key TEXT NOT NULL,
+			initiated_by TEXT NOT NULL,
+			executor_type TEXT NOT NULL,
+			status TEXT NOT NULL,
+			started_at TIMESTAMPTZ NOT NULL,
+			finished_at TIMESTAMPTZ NOT NULL,
+			result_json JSONB NOT NULL
+		);`,
 	}
 
 	for _, statement := range statements {
@@ -766,6 +777,101 @@ func (s *PostgresStore) ListApprovalRecords(ctx context.Context, incidentID stri
 			&record.Decision,
 			&record.Note,
 			&record.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+
+	return records, rows.Err()
+}
+
+func (s *PostgresStore) SaveExecutionRecord(ctx context.Context, record domain.ExecutionRecord) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO execution_records (id, candidate_action_id, idempotency_key, initiated_by, executor_type, status, started_at, finished_at, result_json)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+		ON CONFLICT(id) DO UPDATE SET
+			idempotency_key = excluded.idempotency_key,
+			initiated_by = excluded.initiated_by,
+			executor_type = excluded.executor_type,
+			status = excluded.status,
+			started_at = excluded.started_at,
+			finished_at = excluded.finished_at,
+			result_json = excluded.result_json
+	`,
+		record.ID,
+		record.CandidateActionID,
+		record.IdempotencyKey,
+		record.InitiatedBy,
+		record.ExecutorType,
+		record.Status,
+		record.StartedAt.UTC(),
+		record.FinishedAt.UTC(),
+		record.ResultJSON,
+	)
+	return err
+}
+
+func (s *PostgresStore) ListExecutionRecords(ctx context.Context, incidentID string) ([]domain.ExecutionRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT er.id, er.candidate_action_id, er.idempotency_key, er.initiated_by, er.executor_type, er.status, er.started_at, er.finished_at, er.result_json
+		FROM execution_records er
+		INNER JOIN candidate_actions ca ON ca.id = er.candidate_action_id
+		WHERE ca.incident_id = $1
+		ORDER BY er.started_at ASC
+	`, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []domain.ExecutionRecord
+	for rows.Next() {
+		var record domain.ExecutionRecord
+		if err := rows.Scan(
+			&record.ID,
+			&record.CandidateActionID,
+			&record.IdempotencyKey,
+			&record.InitiatedBy,
+			&record.ExecutorType,
+			&record.Status,
+			&record.StartedAt,
+			&record.FinishedAt,
+			&record.ResultJSON,
+		); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+
+	return records, rows.Err()
+}
+
+func (s *PostgresStore) ListExecutionRecordsByAction(ctx context.Context, actionID string) ([]domain.ExecutionRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, candidate_action_id, idempotency_key, initiated_by, executor_type, status, started_at, finished_at, result_json
+		FROM execution_records
+		WHERE candidate_action_id = $1
+		ORDER BY started_at ASC
+	`, actionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []domain.ExecutionRecord
+	for rows.Next() {
+		var record domain.ExecutionRecord
+		if err := rows.Scan(
+			&record.ID,
+			&record.CandidateActionID,
+			&record.IdempotencyKey,
+			&record.InitiatedBy,
+			&record.ExecutorType,
+			&record.Status,
+			&record.StartedAt,
+			&record.FinishedAt,
+			&record.ResultJSON,
 		); err != nil {
 			return nil, err
 		}

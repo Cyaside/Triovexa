@@ -45,9 +45,19 @@ func main() {
 	catalog := execution.DefaultCatalog()
 	generator := triage.NewHeuristicGenerator()
 	actionGenerator := remediation.NewHeuristicGenerator(catalog)
-	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), approval.NewKillSwitch(cfg.KillSwitchEnabled))
+	killSwitch := approval.NewKillSwitch(cfg.KillSwitchEnabled)
+	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
+	executionService := execution.NewService(
+		repository,
+		catalog,
+		execution.NewDemoAdapter(cfg.DemoServiceBaseURL),
+		killSwitch,
+		cfg.ActionExecutionTimeout,
+		cfg.ActionExecutionRetries,
+		cfg.ActionExecutionCooldown,
+	)
 	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService)
-	server := apphttp.NewServer(cfg, logger, repository, incidentService, policyService)
+	server := apphttp.NewServer(cfg, logger, repository, incidentService, policyService, executionService)
 
 	logger.Info("starting server",
 		slog.String("addr", server.Addr),

@@ -145,6 +145,102 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 		writeJSON(w, http.StatusAccepted, state.snapshot())
 	})
 
+	mux.HandleFunc("/actions/restart-worker", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var payload struct {
+			WorkerID string `json:"worker_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if payload.WorkerID == "" {
+			payload.WorkerID = "worker-primary"
+		}
+
+		state.apply(State{
+			Mode:           ModeHealthy,
+			ErrorRate:      0.04,
+			LatencyMs:      190,
+			QueueBacklog:   24,
+			WorkerHealthy:  true,
+			LastDeploy:     state.snapshot().LastDeploy,
+			LastUpdatedUTC: time.Now().UTC(),
+		})
+		logger.Info("demo action executed", slog.String("action", "restart_demo_worker"), slog.String("worker_id", payload.WorkerID))
+		writeJSON(w, http.StatusOK, map[string]any{
+			"action":    "restart_demo_worker",
+			"worker_id": payload.WorkerID,
+			"applied":   true,
+			"snapshot":  state.snapshot(),
+		})
+	})
+
+	mux.HandleFunc("/actions/retry-job", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var payload struct {
+			JobID string `json:"job_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if payload.JobID == "" {
+			payload.JobID = "backlog-drain-batch"
+		}
+
+		state.apply(State{
+			Mode:           ModeHealthy,
+			ErrorRate:      0.03,
+			LatencyMs:      170,
+			QueueBacklog:   8,
+			WorkerHealthy:  true,
+			LastDeploy:     state.snapshot().LastDeploy,
+			LastUpdatedUTC: time.Now().UTC(),
+		})
+		logger.Info("demo action executed", slog.String("action", "retry_demo_background_job"), slog.String("job_id", payload.JobID))
+		writeJSON(w, http.StatusOK, map[string]any{
+			"action":   "retry_demo_background_job",
+			"job_id":   payload.JobID,
+			"applied":  true,
+			"snapshot": state.snapshot(),
+		})
+	})
+
+	mux.HandleFunc("/actions/refresh-cache", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var payload struct {
+			CacheKey string `json:"cache_key"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if payload.CacheKey == "" {
+			payload.CacheKey = "all"
+		}
+
+		state.apply(State{
+			Mode:           ModeHealthy,
+			ErrorRate:      0.02,
+			LatencyMs:      150,
+			QueueBacklog:   4,
+			WorkerHealthy:  true,
+			LastDeploy:     state.snapshot().LastDeploy,
+			LastUpdatedUTC: time.Now().UTC(),
+		})
+		logger.Info("demo action executed", slog.String("action", "refresh_demo_cache"), slog.String("cache_key", payload.CacheKey))
+		writeJSON(w, http.StatusOK, map[string]any{
+			"action":    "refresh_demo_cache",
+			"cache_key": payload.CacheKey,
+			"applied":   true,
+			"snapshot":  state.snapshot(),
+		})
+	})
+
 	return &http.Server{
 		Addr:              cfg.Address,
 		Handler:           withLogging(logger, mux),

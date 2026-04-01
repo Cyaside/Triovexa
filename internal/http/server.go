@@ -12,6 +12,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/approval"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/domain"
+	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/storage"
 )
@@ -32,6 +33,7 @@ func NewServer(
 	repository storage.Repository,
 	incidentService *incident.Service,
 	approvalService *approval.Service,
+	executionService *execution.Service,
 ) *http.Server {
 	mux := http.NewServeMux()
 
@@ -66,7 +68,7 @@ func NewServer(
 			Environment:         cfg.Environment,
 			KillSwitchEnabled:   killSwitchState.Enabled,
 			KillSwitchUpdatedAt: killSwitchState.UpdatedAt.Format(time.RFC3339),
-			Phase:               "phase-03-policy-approval-workflow",
+			Phase:               "phase-04-low-risk-execution-mvp",
 			AvailableEndpoints: []string{
 				"GET /health",
 				"GET /debug/tools",
@@ -77,6 +79,7 @@ func NewServer(
 				"GET /incidents/{id}/actions",
 				"POST /actions/{id}/approve",
 				"POST /actions/{id}/reject",
+				"POST /actions/{id}/execute",
 				"POST /admin/kill-switch",
 				"GET /ui/incidents",
 				"GET /ui/incidents/{id}",
@@ -137,8 +140,8 @@ func NewServer(
 	})
 
 	mux.HandleFunc("/actions/", func(w http.ResponseWriter, r *http.Request) {
-		if approvalService == nil {
-			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "approval workflow is not configured"})
+		if approvalService == nil && executionService == nil {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "action workflow is not configured"})
 			return
 		}
 
@@ -150,6 +153,10 @@ func NewServer(
 		actionPath := strings.TrimPrefix(r.URL.Path, "/actions/")
 		switch {
 		case strings.HasSuffix(actionPath, "/approve"):
+			if approvalService == nil {
+				writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "approval workflow is not configured"})
+				return
+			}
 			actionID := strings.TrimSuffix(actionPath, "/approve")
 			approvedBy, note, wantsHTML, err := parseApprovalRequest(r)
 			if err != nil {
@@ -171,6 +178,10 @@ func NewServer(
 
 			writeJSON(w, http.StatusOK, map[string]any{"action": action})
 		case strings.HasSuffix(actionPath, "/reject"):
+			if approvalService == nil {
+				writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "approval workflow is not configured"})
+				return
+			}
 			actionID := strings.TrimSuffix(actionPath, "/reject")
 			approvedBy, note, wantsHTML, err := parseApprovalRequest(r)
 			if err != nil {
@@ -191,6 +202,38 @@ func NewServer(
 			}
 
 			writeJSON(w, http.StatusOK, map[string]any{"action": action})
+		case strings.HasSuffix(actionPath, "/execute"):
+			if executionService == nil {
+				writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "execution workflow is not configured"})
+				return
+			}
+			actionID := strings.TrimSuffix(actionPath, "/execute")
+			candidateAction, candidateErr := repository.GetCandidateAction(r.Context(), actionID)
+			if candidateErr != nil {
+				logger.Error("failed to load candidate action before execute", slog.String("error", candidateErr.Error()))
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": candidateErr.Error()})
+				return
+			}
+
+			initiatedBy, _, wantsHTML, err := parseApprovalRequest(r)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+
+			record, err := executionService.ExecuteAction(r.Context(), actionID, initiatedBy)
+			if err != nil {
+				logger.Error("failed to execute action", slog.String("error", err.Error()))
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+
+			if wantsHTML {
+				http.Redirect(w, r, "/ui/incidents/"+candidateAction.IncidentID, http.StatusSeeOther)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{"execution": record})
 		default:
 			http.NotFound(w, r)
 		}
@@ -309,6 +352,13 @@ func NewServer(
 			return
 		}
 
+		executionRecords, err := repository.ListExecutionRecords(r.Context(), incidentID)
+		if err != nil {
+			logger.Error("failed to list execution records", slog.String("error", err.Error()))
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get execution records"})
+			return
+		}
+
 		var triageResult *domain.TriageResult
 		result, err := repository.GetTriageResult(r.Context(), incidentID)
 		if err == nil {
@@ -327,6 +377,7 @@ func NewServer(
 			"candidate_actions": actions,
 			"policy_decisions":  policyDecisions,
 			"approval_records":  approvalRecords,
+			"execution_records": executionRecords,
 			"audit_events":      auditEvents,
 		})
 	})
@@ -401,6 +452,12 @@ func NewServer(
 			return
 		}
 
+		executionRecords, err := repository.ListExecutionRecords(r.Context(), incidentID)
+		if err != nil {
+			http.Error(w, "failed to load execution records", http.StatusInternalServerError)
+			return
+		}
+
 		auditEvents, err := repository.ListAuditEvents(r.Context(), incidentID)
 		if err != nil {
 			http.Error(w, "failed to load audit trail", http.StatusInternalServerError)
@@ -424,6 +481,7 @@ func NewServer(
 			Actions:           actions,
 			PolicyDecisions:   policyDecisions,
 			ApprovalRecords:   approvalRecords,
+			ExecutionRecords:  executionRecords,
 			KillSwitchEnabled: approvalService != nil && approvalService.KillSwitchState().Enabled,
 			AuditTrail:        auditEvents,
 		})

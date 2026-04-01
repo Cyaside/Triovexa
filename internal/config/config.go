@@ -19,34 +19,40 @@ const (
 )
 
 type Config struct {
-	ServiceName        string
-	Environment        string
-	HTTPPort           string
-	DatabaseURL        string
-	DocsRoot           string
-	DemoServiceBaseURL string
-	ReadTimeout        time.Duration
-	WriteTimeout       time.Duration
-	IdleTimeout        time.Duration
-	ShutdownTimeout    time.Duration
-	KillSwitchEnabled  bool
-	LogLevel           slog.Level
+	ServiceName             string
+	Environment             string
+	HTTPPort                string
+	DatabaseURL             string
+	DocsRoot                string
+	DemoServiceBaseURL      string
+	ActionExecutionTimeout  time.Duration
+	ActionExecutionCooldown time.Duration
+	ActionExecutionRetries  int
+	ReadTimeout             time.Duration
+	WriteTimeout            time.Duration
+	IdleTimeout             time.Duration
+	ShutdownTimeout         time.Duration
+	KillSwitchEnabled       bool
+	LogLevel                slog.Level
 }
 
 func Load() Config {
 	return Config{
-		ServiceName:        getEnv("APP_NAME", "triovexa"),
-		Environment:        getEnv("APP_ENV", defaultEnvironment),
-		HTTPPort:           getEnv("HTTP_PORT", defaultHTTPPort),
-		DatabaseURL:        getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disable"),
-		DocsRoot:           getEnv("DOCS_ROOT", "docs"),
-		DemoServiceBaseURL: getEnv("DEMO_SERVICE_BASE_URL", "http://localhost:8090"),
-		ReadTimeout:        getDurationEnv("HTTP_READ_TIMEOUT", defaultReadTimeout),
-		WriteTimeout:       getDurationEnv("HTTP_WRITE_TIMEOUT", defaultWriteTimeout),
-		IdleTimeout:        getDurationEnv("HTTP_IDLE_TIMEOUT", defaultIdleTimeout),
-		ShutdownTimeout:    getDurationEnv("HTTP_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
-		KillSwitchEnabled:  getBoolEnv("KILL_SWITCH_ENABLED", false),
-		LogLevel:           getLogLevelEnv("LOG_LEVEL", slog.LevelInfo),
+		ServiceName:             getEnv("APP_NAME", "triovexa"),
+		Environment:             getEnv("APP_ENV", defaultEnvironment),
+		HTTPPort:                getEnv("HTTP_PORT", defaultHTTPPort),
+		DatabaseURL:             getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disable"),
+		DocsRoot:                getEnv("DOCS_ROOT", "docs"),
+		DemoServiceBaseURL:      getEnv("DEMO_SERVICE_BASE_URL", "http://localhost:8090"),
+		ActionExecutionTimeout:  getDurationEnv("ACTION_EXECUTION_TIMEOUT", 5*time.Second),
+		ActionExecutionCooldown: getDurationEnv("ACTION_EXECUTION_COOLDOWN", time.Minute),
+		ActionExecutionRetries:  getIntEnv("ACTION_EXECUTION_RETRIES", 1),
+		ReadTimeout:             getDurationEnv("HTTP_READ_TIMEOUT", defaultReadTimeout),
+		WriteTimeout:            getDurationEnv("HTTP_WRITE_TIMEOUT", defaultWriteTimeout),
+		IdleTimeout:             getDurationEnv("HTTP_IDLE_TIMEOUT", defaultIdleTimeout),
+		ShutdownTimeout:         getDurationEnv("HTTP_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
+		KillSwitchEnabled:       getBoolEnv("KILL_SWITCH_ENABLED", false),
+		LogLevel:                getLogLevelEnv("LOG_LEVEL", slog.LevelInfo),
 	}
 }
 
@@ -127,4 +133,18 @@ func getLogLevelEnv(key string, fallback slog.Level) slog.Level {
 	default:
 		return fallback
 	}
+}
+
+func getIntEnv(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,21 +35,38 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	mustWriteFile(t, filepath.Join(docsRoot, "runbooks", "restart-demo-worker.md"), "# Restart demo worker\n\nWorker backlog handling.")
 	mustWriteFile(t, filepath.Join(docsRoot, "postmortems", "checkout-timeout-after-deploy.md"), "# Checkout timeout after deploy\n\nTimeout observed after deploy.")
 
-	demoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/state" {
-			http.NotFound(w, r)
-			return
-		}
+	var demoStateMu sync.Mutex
+	demoState := demo.Snapshot{
+		Mode:           demo.ModeTimeoutAfterDeploy,
+		ErrorRate:      0.27,
+		LatencyMs:      1200,
+		QueueBacklog:   40,
+		WorkerHealthy:  true,
+		LastDeploy:     "v1.2.3",
+		LastUpdatedUTC: time.Now().UTC(),
+	}
 
-		_ = json.NewEncoder(w).Encode(demo.Snapshot{
-			Mode:           demo.ModeTimeoutAfterDeploy,
-			ErrorRate:      0.27,
-			LatencyMs:      1200,
-			QueueBacklog:   40,
-			WorkerHealthy:  true,
-			LastDeploy:     "v1.2.3",
-			LastUpdatedUTC: time.Now().UTC(),
-		})
+	demoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		demoStateMu.Lock()
+		defer demoStateMu.Unlock()
+
+		switch r.URL.Path {
+		case "/state":
+			_ = json.NewEncoder(w).Encode(demoState)
+		case "/actions/refresh-cache":
+			demoState.Mode = demo.ModeHealthy
+			demoState.ErrorRate = 0.02
+			demoState.LatencyMs = 150
+			demoState.QueueBacklog = 4
+			demoState.WorkerHealthy = true
+			demoState.LastUpdatedUTC = time.Now().UTC()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"action":  "refresh_demo_cache",
+				"applied": true,
+			})
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer demoServer.Close()
 
@@ -59,7 +77,9 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	catalog := execution.DefaultCatalog()
 	generator := triage.NewHeuristicGenerator()
 	actionGenerator := remediation.NewHeuristicGenerator(catalog)
-	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), approval.NewKillSwitch(false))
+	killSwitch := approval.NewKillSwitch(false)
+	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
+	executionService := execution.NewService(repository, catalog, execution.NewDemoAdapter(demoServer.URL), killSwitch, 2*time.Second, 1, time.Minute)
 	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService)
 
 	server := NewServer(config.Config{
@@ -73,7 +93,7 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 		WriteTimeout:       5 * time.Second,
 		IdleTimeout:        5 * time.Second,
 		ShutdownTimeout:    5 * time.Second,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, incidentService, policyService)
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, incidentService, policyService, executionService)
 
 	api := httptest.NewServer(server.Handler)
 	defer api.Close()
@@ -219,6 +239,30 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 		t.Fatalf("approve status = %d, want %d", approveResponse.StatusCode, http.StatusOK)
 	}
 
+	executeBody, err := json.Marshal(map[string]string{
+		"approved_by": "operator-a",
+		"note":        "execute low-risk action",
+	})
+	if err != nil {
+		t.Fatalf("marshal execute payload: %v", err)
+	}
+
+	executeRequest, err := http.NewRequest(http.MethodPost, api.URL+"/actions/"+actionID+"/execute", bytes.NewReader(executeBody))
+	if err != nil {
+		t.Fatalf("create execute request: %v", err)
+	}
+	executeRequest.Header.Set("Content-Type", "application/json")
+
+	executeResponse, err := http.DefaultClient.Do(executeRequest)
+	if err != nil {
+		t.Fatalf("execute action: %v", err)
+	}
+	defer executeResponse.Body.Close()
+
+	if executeResponse.StatusCode != http.StatusOK {
+		t.Fatalf("execute status = %d, want %d", executeResponse.StatusCode, http.StatusOK)
+	}
+
 	actionsAfterApproveResponse, err := http.Get(api.URL + "/incidents/" + incidentID + "/actions")
 	if err != nil {
 		t.Fatalf("get candidate actions after approval: %v", err)
@@ -232,8 +276,8 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 		t.Fatalf("decode actions after approval response: %v", err)
 	}
 
-	if status, ok := actionsAfterApprovePayload.Actions[0]["Status"].(string); !ok || status != "approved" {
-		t.Fatalf("candidate action status after approval = %v, want %q", actionsAfterApprovePayload.Actions[0]["Status"], "approved")
+	if status, ok := actionsAfterApprovePayload.Actions[0]["Status"].(string); !ok || status != "succeeded" {
+		t.Fatalf("candidate action status after execution = %v, want %q", actionsAfterApprovePayload.Actions[0]["Status"], "succeeded")
 	}
 
 	killSwitchBody, err := json.Marshal(map[string]bool{"enabled": true})

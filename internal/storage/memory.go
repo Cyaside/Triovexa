@@ -18,6 +18,7 @@ type MemoryStore struct {
 	actions    map[string][]domain.CandidateAction
 	policies   map[string]domain.PolicyDecision
 	approvals  map[string][]domain.ApprovalRecord
+	executions map[string][]domain.ExecutionRecord
 	triageByID map[string]domain.TriageResult
 }
 
@@ -30,6 +31,7 @@ func NewMemoryStore() *MemoryStore {
 		actions:    make(map[string][]domain.CandidateAction),
 		policies:   make(map[string]domain.PolicyDecision),
 		approvals:  make(map[string][]domain.ApprovalRecord),
+		executions: make(map[string][]domain.ExecutionRecord),
 		triageByID: make(map[string]domain.TriageResult),
 	}
 }
@@ -268,6 +270,72 @@ func (s *MemoryStore) ListApprovalRecords(_ context.Context, incidentID string) 
 
 	sort.SliceStable(records, func(i, j int) bool {
 		return records[i].CreatedAt.Before(records[j].CreatedAt)
+	})
+
+	return records, nil
+}
+
+func (s *MemoryStore) SaveExecutionRecord(_ context.Context, record domain.ExecutionRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	incidentID := ""
+	for candidateIncidentID, actions := range s.actions {
+		for _, action := range actions {
+			if action.ID == record.CandidateActionID {
+				incidentID = candidateIncidentID
+				break
+			}
+		}
+		if incidentID != "" {
+			break
+		}
+	}
+
+	if incidentID == "" {
+		return ErrNotFound
+	}
+
+	records := s.executions[incidentID]
+	for idx, existing := range records {
+		if existing.ID == record.ID {
+			records[idx] = record
+			s.executions[incidentID] = records
+			return nil
+		}
+	}
+
+	s.executions[incidentID] = append(records, record)
+	return nil
+}
+
+func (s *MemoryStore) ListExecutionRecords(_ context.Context, incidentID string) ([]domain.ExecutionRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	records := append([]domain.ExecutionRecord(nil), s.executions[incidentID]...)
+	sort.SliceStable(records, func(i, j int) bool {
+		return records[i].StartedAt.Before(records[j].StartedAt)
+	})
+
+	return records, nil
+}
+
+func (s *MemoryStore) ListExecutionRecordsByAction(_ context.Context, actionID string) ([]domain.ExecutionRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var records []domain.ExecutionRecord
+	for _, incidentRecords := range s.executions {
+		for _, record := range incidentRecords {
+			if record.CandidateActionID == actionID {
+				records = append(records, record)
+			}
+		}
+	}
+
+	sort.SliceStable(records, func(i, j int) bool {
+		return records[i].StartedAt.Before(records[j].StartedAt)
 	})
 
 	return records, nil

@@ -24,6 +24,7 @@ type incidentDetailPageData struct {
 	Actions           []domain.CandidateAction
 	PolicyDecisions   []domain.PolicyDecision
 	ApprovalRecords   []domain.ApprovalRecord
+	ExecutionRecords  []domain.ExecutionRecord
 	KillSwitchEnabled bool
 	AuditTrail        []domain.AuditEvent
 }
@@ -61,6 +62,15 @@ var templateFuncs = template.FuncMap{
 			}
 		}
 		return nil
+	},
+	"executionsFor": func(actionID string, records []domain.ExecutionRecord) []domain.ExecutionRecord {
+		filtered := make([]domain.ExecutionRecord, 0)
+		for _, record := range records {
+			if record.CandidateActionID == actionID {
+				filtered = append(filtered, record)
+			}
+		}
+		return filtered
 	},
 }
 
@@ -243,7 +253,15 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
                 <button class="reject" type="submit">Reject</button>
               </form>
               {{else}}
-                <p>Tidak ada aksi approval manual.</p>
+                {{if and (or (eq .Status "approved") (eq .Status "allowed")) (not $.KillSwitchEnabled)}}
+                <form method="post" action="/actions/{{.ID}}/execute">
+                  <input type="text" name="approved_by" placeholder="operator name" />
+                  <textarea name="note" rows="2" placeholder="execution note"></textarea>
+                  <button class="approve" type="submit">Execute</button>
+                </form>
+                {{else}}
+                <p>Tidak ada aksi approval atau execution manual.</p>
+                {{end}}
               {{end}}
             </td>
           </tr>
@@ -274,6 +292,31 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
           {{end}}
         {{else}}
           <tr><td colspan="5">Belum ada approval record.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card" style="margin-top:1rem;">
+    <h2>Execution Records</h2>
+    <table>
+      <thead>
+        <tr><th>Action ID</th><th>Status</th><th>Executor</th><th>Initiated By</th><th>Started</th><th>Finished</th></tr>
+      </thead>
+      <tbody>
+        {{if .ExecutionRecords}}
+          {{range .ExecutionRecords}}
+          <tr>
+            <td>{{.CandidateActionID}}</td>
+            <td><span class="pill">{{.Status}}</span></td>
+            <td>{{.ExecutorType}}</td>
+            <td>{{.InitiatedBy}}</td>
+            <td>{{formatTime .StartedAt}}</td>
+            <td>{{formatTime .FinishedAt}}</td>
+          </tr>
+          {{end}}
+        {{else}}
+          <tr><td colspan="6">Belum ada execution record.</td></tr>
         {{end}}
       </tbody>
     </table>

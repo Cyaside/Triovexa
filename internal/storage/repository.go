@@ -32,4 +32,7 @@ type Repository interface {
 	ListPolicyDecisions(context.Context, string) ([]domain.PolicyDecision, error)
 	CreateApprovalRecord(context.Context, domain.ApprovalRecord) error
 	ListApprovalRecords(context.Context, string) ([]domain.ApprovalRecord, error)
+	SaveExecutionRecord(context.Context, domain.ExecutionRecord) error
+	ListExecutionRecords(context.Context, string) ([]domain.ExecutionRecord, error)
+	ListExecutionRecordsByAction(context.Context, string) ([]domain.ExecutionRecord, error)
 }

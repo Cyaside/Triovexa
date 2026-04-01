@@ -45,6 +45,8 @@ type ApprovalRecord struct {
 type ExecutionRecord struct {
 	ID                string
 	CandidateActionID string
+	IdempotencyKey    string
+	InitiatedBy       string
 	ExecutorType      string
 	Status            string
 	StartedAt         time.Time
