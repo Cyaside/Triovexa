@@ -14,4 +14,5 @@ Dokumentasi di folder ini adalah artefak implementasi yang mendukung Phase 00 da
 - menjelaskan arsitektur awal proyek
 - mendokumentasikan state machine incident
 - mendefinisikan action catalog dan policy awal
+- mendokumentasikan environment demo untuk simulasi incident
 - menyediakan knowledge base dummy untuk retrieval dan triage
