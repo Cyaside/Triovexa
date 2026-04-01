@@ -31,6 +31,8 @@ go run ./cmd/demo-service
 go run ./cmd/server
 ```
 
+Sebelum menjalankan server utama, pastikan `DATABASE_URL` sudah mengarah ke PostgreSQL yang aktif.
+
 ## Contoh Memicu Insiden
 
 ```powershell

@@ -15,4 +15,5 @@ Dokumentasi di folder ini adalah artefak implementasi yang mendukung Phase 00 da
 - mendokumentasikan state machine incident
 - mendefinisikan action catalog dan policy awal
 - mendokumentasikan environment demo untuk simulasi incident
+- mendokumentasikan baseline setup PostgreSQL untuk persistence
 - menyediakan knowledge base dummy untuk retrieval dan triage

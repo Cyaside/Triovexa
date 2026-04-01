@@ -70,3 +70,4 @@ Grafana Alert
 - action catalog awal
 - policy evaluator awal
 - example app configuration
+- baseline persistence layer berbasis PostgreSQL
