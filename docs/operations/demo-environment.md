@@ -67,7 +67,7 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - menyediakan metrics sederhana untuk observability
 - menyediakan kondisi yang bisa dipakai saat demo triage dan candidate action
 
-## Endpoint UI dan API Phase 2
+## Endpoint UI dan API Phase 3
 
 - `GET /ui/incidents`
 - `GET /ui/incidents/{id}`
@@ -76,6 +76,9 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - `GET /incidents/{id}`
 - `GET /incidents/{id}/triage`
 - `GET /incidents/{id}/actions`
+- `POST /actions/{id}/approve`
+- `POST /actions/{id}/reject`
+- `POST /admin/kill-switch`
 
 ## Environment Variables
 
@@ -102,3 +105,32 @@ Yang belum wajib sekarang, tetapi nanti perlu Anda isi saat kita sambungkan ke i
   Nama model Google yang akan dipakai untuk triage dan candidate action generation.
 
 Selama variable external integration di atas belum diisi, aplikasi tetap jalan dengan mode heuristik lokal yang kita pakai sekarang.
+
+## Contoh Approval dan Kill Switch
+
+Approve action dari API:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8080/actions/<ACTION_ID>/approve `
+  -ContentType "application/json" `
+  -Body '{"approved_by":"operator-a","note":"safe to proceed"}'
+```
+
+Reject action dari API:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8080/actions/<ACTION_ID>/reject `
+  -ContentType "application/json" `
+  -Body '{"approved_by":"operator-a","note":"needs manual investigation"}'
+```
+
+Aktifkan kill switch:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8080/admin/kill-switch `
+  -ContentType "application/json" `
+  -Body '{"enabled":true}'
+```
