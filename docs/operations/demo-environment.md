@@ -28,6 +28,7 @@ Service demo ini disiapkan untuk menghasilkan sinyal insiden yang bisa dipakai p
 
 ```powershell
 go run ./cmd/demo-service
+go run ./cmd/server
 ```
 
 ## Contoh Memicu Insiden
@@ -43,3 +44,12 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - menyediakan target untuk alert rule Grafana
 - menyediakan metrics sederhana untuk observability
 - menyediakan kondisi yang bisa dipakai saat demo triage dan candidate action
+
+## Endpoint UI dan API Phase 1
+
+- `GET /ui/incidents`
+- `GET /ui/incidents/{id}`
+- `POST /webhooks/grafana`
+- `GET /incidents`
+- `GET /incidents/{id}`
+- `GET /incidents/{id}/triage`
