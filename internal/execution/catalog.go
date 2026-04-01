@@ -1,6 +1,10 @@
 package execution
 
-import "github.com/Cyaside/Triovexa/internal/domain"
+import (
+	"time"
+
+	"github.com/Cyaside/Triovexa/internal/domain"
+)
 
 type ParameterDefinition struct {
 	Name        string
@@ -10,15 +14,18 @@ type ParameterDefinition struct {
 }
 
 type ActionDefinition struct {
-	Key                 string
-	Description         string
-	RiskLevel           domain.RiskLevel
-	ApprovalRequired    bool
-	Executable          bool
-	SupportsRollback    bool
-	AllowedEnvironments []string
-	AllowedTargets      []string
-	Parameters          []ParameterDefinition
+	Key                  string
+	Description          string
+	RiskLevel            domain.RiskLevel
+	ApprovalRequired     bool
+	Executable           bool
+	SupportsRollback     bool
+	RollbackActionKey    string
+	AllowedEnvironments  []string
+	AllowedTargets       []string
+	MaxExecutionAttempts int
+	ExecutionCooldown    time.Duration
+	Parameters           []ParameterDefinition
 }
 
 type Catalog map[string]ActionDefinition
@@ -38,6 +45,8 @@ func DefaultCatalog() Catalog {
 			AllowedTargets: []string{
 				"demo-worker",
 			},
+			MaxExecutionAttempts: 2,
+			ExecutionCooldown:    time.Minute,
 			Parameters: []ParameterDefinition{
 				{Name: "worker_id", Type: "string", Required: true, Description: "Identifier worker demo yang boleh direstart."},
 			},
@@ -55,6 +64,8 @@ func DefaultCatalog() Catalog {
 			AllowedTargets: []string{
 				"demo-job-runner",
 			},
+			MaxExecutionAttempts: 2,
+			ExecutionCooldown:    time.Minute,
 			Parameters: []ParameterDefinition{
 				{Name: "job_id", Type: "string", Required: true, Description: "Identifier job yang akan di-retry."},
 			},
@@ -72,6 +83,8 @@ func DefaultCatalog() Catalog {
 			AllowedTargets: []string{
 				"demo-cache",
 			},
+			MaxExecutionAttempts: 2,
+			ExecutionCooldown:    time.Minute,
 			Parameters: []ParameterDefinition{
 				{Name: "cache_key", Type: "string", Required: false, Description: "Opsional untuk refresh cache key tertentu."},
 			},
@@ -88,6 +101,8 @@ func DefaultCatalog() Catalog {
 			AllowedTargets: []string{
 				"demo-api",
 			},
+			MaxExecutionAttempts: 1,
+			ExecutionCooldown:    5 * time.Minute,
 		},
 		"scale_demo_replicas": {
 			Key:              "scale_demo_replicas",
@@ -104,20 +119,42 @@ func DefaultCatalog() Catalog {
 			Parameters: []ParameterDefinition{
 				{Name: "replicas", Type: "int", Required: true, Description: "Jumlah replica tujuan dalam batas aman."},
 			},
+			MaxExecutionAttempts: 1,
+			ExecutionCooldown:    10 * time.Minute,
 		},
 		"pause_demo_queue_consumer": {
 			Key:              "pause_demo_queue_consumer",
 			Description:      "Pause queue consumer demo untuk membatasi blast radius.",
 			RiskLevel:        domain.RiskLevelMedium,
 			ApprovalRequired: true,
-			Executable:       false,
+			Executable:       true,
 			AllowedEnvironments: []string{
+				"local",
 				"staging",
 			},
 			AllowedTargets: []string{
 				"demo-queue-consumer",
 			},
-			SupportsRollback: true,
+			SupportsRollback:     true,
+			RollbackActionKey:    "resume_demo_queue_consumer",
+			MaxExecutionAttempts: 1,
+			ExecutionCooldown:    5 * time.Minute,
+		},
+		"resume_demo_queue_consumer": {
+			Key:              "resume_demo_queue_consumer",
+			Description:      "Resume queue consumer demo sebagai rollback aman untuk consumer pause.",
+			RiskLevel:        domain.RiskLevelLow,
+			ApprovalRequired: false,
+			Executable:       true,
+			AllowedEnvironments: []string{
+				"local",
+				"staging",
+			},
+			AllowedTargets: []string{
+				"demo-queue-consumer",
+			},
+			MaxExecutionAttempts: 2,
+			ExecutionCooldown:    time.Minute,
 		},
 		"rollback_production_deployment": {
 			Key:              "rollback_production_deployment",

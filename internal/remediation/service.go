@@ -59,6 +59,14 @@ func (g *HeuristicGenerator) Generate(
 			}
 			actions = append(actions, g.validateAction(incident, retryAction))
 		}
+
+		if queueBacklog >= 120 {
+			pauseAction, err := g.newAction(incident, "pause_demo_queue_consumer", "demo-queue-consumer", map[string]any{}, []string{metricEvidence, logEvidence}, "Backlog sangat tinggi dan indikasi dependency lambat membuat pause queue consumer menjadi opsi medium-risk untuk membatasi blast radius sambil operator menyiapkan rollback jika hasilnya buruk.")
+			if err != nil {
+				return nil, err
+			}
+			actions = append(actions, g.validateAction(incident, pauseAction))
+		}
 	case "timeout_after_deploy":
 		action, err := g.newAction(incident, "refresh_demo_cache", "demo-cache", map[string]any{
 			"cache_key": "checkout-session",
@@ -185,6 +193,9 @@ func validateParameters(definition execution.ActionDefinition, parametersJSON st
 
 func approvalHint(definition execution.ActionDefinition) string {
 	if definition.ApprovalRequired {
+		if definition.SupportsRollback && definition.RollbackActionKey != "" {
+			return fmt.Sprintf("Action ini valid tetapi tetap membutuhkan approval operator sebelum dieksekusi. Rollback yang disiapkan: %s.", definition.RollbackActionKey)
+		}
 		return "Action ini valid tetapi tetap membutuhkan approval operator sebelum dieksekusi."
 	}
 

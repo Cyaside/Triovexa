@@ -7,14 +7,19 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
+	"github.com/Cyaside/Triovexa/internal/topology"
 )
 
 type Evaluator struct {
-	catalog execution.Catalog
+	catalog  execution.Catalog
+	topology topology.Registry
 }
 
 func NewEvaluator(catalog execution.Catalog) Evaluator {
-	return Evaluator{catalog: catalog}
+	return Evaluator{
+		catalog:  catalog,
+		topology: topology.DefaultRegistry(),
+	}
 }
 
 func (e Evaluator) Evaluate(action domain.CandidateAction, environment string, killSwitchEnabled bool) domain.PolicyDecision {
@@ -52,6 +57,34 @@ func (e Evaluator) Evaluate(action domain.CandidateAction, environment string, k
 		return decision
 	}
 
+	if definition.RiskLevel == domain.RiskLevelMedium {
+		targetMetadata, ok := e.topology.Get(action.TargetResource)
+		if !ok {
+			decision.Decision = domain.PolicyDecisionDeny
+			decision.Reason = fmt.Sprintf("medium-risk action %q requires dependency metadata for target %q", definition.Key, action.TargetResource)
+			decision.PolicyRuleRef = "dependency/metadata-required"
+			return decision
+		}
+		if len(targetMetadata.Dependencies) == 0 {
+			decision.Decision = domain.PolicyDecisionDeny
+			decision.Reason = fmt.Sprintf("medium-risk target %q is missing dependency map", action.TargetResource)
+			decision.PolicyRuleRef = "dependency/map-required"
+			return decision
+		}
+		if !definition.SupportsRollback || definition.RollbackActionKey == "" {
+			decision.Decision = domain.PolicyDecisionDeny
+			decision.Reason = fmt.Sprintf("medium-risk action %q must declare a rollback plan before execution is allowed", definition.Key)
+			decision.PolicyRuleRef = "safety/rollback-plan-required"
+			return decision
+		}
+		if _, ok := e.catalog.Get(definition.RollbackActionKey); !ok {
+			decision.Decision = domain.PolicyDecisionDeny
+			decision.Reason = fmt.Sprintf("rollback action %q is missing from catalog", definition.RollbackActionKey)
+			decision.PolicyRuleRef = "safety/rollback-action-missing"
+			return decision
+		}
+	}
+
 	switch definition.RiskLevel {
 	case domain.RiskLevelLow:
 		decision.Decision = domain.PolicyDecisionApprovalRequired
@@ -59,9 +92,24 @@ func (e Evaluator) Evaluate(action domain.CandidateAction, environment string, k
 		decision.ApprovalRequired = true
 		decision.PolicyRuleRef = "risk/low-requires-approval"
 	case domain.RiskLevelMedium:
-		decision.Decision = domain.PolicyDecisionDeny
-		decision.Reason = "medium-risk actions are intentionally blocked until later phases"
-		decision.PolicyRuleRef = "risk/medium-blocked-in-mvp"
+		if !definition.Executable {
+			decision.Decision = domain.PolicyDecisionDeny
+			decision.Reason = fmt.Sprintf("medium-risk action %q is cataloged but not enabled for execution yet", definition.Key)
+			decision.PolicyRuleRef = "risk/medium-disabled"
+			return decision
+		}
+
+		targetMetadata, _ := e.topology.Get(action.TargetResource)
+		decision.Decision = domain.PolicyDecisionApprovalRequired
+		decision.Reason = fmt.Sprintf(
+			"medium-risk action touches %s owned by %s with dependencies %v; operator approval is mandatory and rollback plan %q is required",
+			targetMetadata.Service,
+			targetMetadata.Owner,
+			targetMetadata.Dependencies,
+			definition.RollbackActionKey,
+		)
+		decision.ApprovalRequired = true
+		decision.PolicyRuleRef = "risk/medium-requires-approval"
 	case domain.RiskLevelHigh:
 		decision.Decision = domain.PolicyDecisionDeny
 		decision.Reason = "high-risk actions are blocked during the MVP and foundation phases"

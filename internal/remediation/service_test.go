@@ -10,7 +10,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/execution"
 )
 
-func TestHeuristicGeneratorWorkerStallProducesLowRiskActions(t *testing.T) {
+func TestHeuristicGeneratorWorkerStallProducesControlledRiskActions(t *testing.T) {
 	t.Parallel()
 
 	generator := NewHeuristicGenerator(execution.DefaultCatalog())
@@ -37,20 +37,32 @@ func TestHeuristicGeneratorWorkerStallProducesLowRiskActions(t *testing.T) {
 		t.Fatalf("generate candidate actions: %v", err)
 	}
 
-	if len(actions) != 2 {
-		t.Fatalf("candidate actions = %d, want %d", len(actions), 2)
+	if len(actions) != 3 {
+		t.Fatalf("candidate actions = %d, want %d", len(actions), 3)
 	}
 
+	var sawMediumRisk bool
 	for _, action := range actions {
 		if action.Status != domain.CandidateActionStatusProposed {
 			t.Fatalf("action %q status = %q, want %q", action.ActionType, action.Status, domain.CandidateActionStatusProposed)
 		}
-		if action.RiskLevel != domain.RiskLevelLow {
-			t.Fatalf("action %q risk = %q, want %q", action.ActionType, action.RiskLevel, domain.RiskLevelLow)
-		}
 		if len(action.EvidenceRefs) == 0 {
 			t.Fatalf("action %q should contain evidence refs", action.ActionType)
 		}
+		if action.ActionType == "pause_demo_queue_consumer" {
+			sawMediumRisk = true
+			if action.RiskLevel != domain.RiskLevelMedium {
+				t.Fatalf("pause_demo_queue_consumer risk = %q, want %q", action.RiskLevel, domain.RiskLevelMedium)
+			}
+			continue
+		}
+		if action.RiskLevel != domain.RiskLevelLow {
+			t.Fatalf("action %q risk = %q, want %q", action.ActionType, action.RiskLevel, domain.RiskLevelLow)
+		}
+	}
+
+	if !sawMediumRisk {
+		t.Fatalf("expected worker stall incident to include a controlled medium-risk candidate action")
 	}
 }
 

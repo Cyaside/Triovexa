@@ -43,15 +43,26 @@ func TestEvaluatorEvaluate(t *testing.T) {
 			wantRule:    "catalog/unknown-action",
 		},
 		{
-			name: "medium risk denied in mvp",
+			name: "medium risk enabled action still needs approval",
 			action: domain.CandidateAction{
 				ID:             "a-3",
+				ActionType:     "pause_demo_queue_consumer",
+				TargetResource: "demo-queue-consumer",
+			},
+			environment: "staging",
+			want:        domain.PolicyDecisionApprovalRequired,
+			wantRule:    "risk/medium-requires-approval",
+		},
+		{
+			name: "medium risk action without rollback plan stays denied",
+			action: domain.CandidateAction{
+				ID:             "a-3b",
 				ActionType:     "restart_demo_service",
 				TargetResource: "demo-api",
 			},
 			environment: "staging",
 			want:        domain.PolicyDecisionDeny,
-			wantRule:    "risk/medium-blocked-in-mvp",
+			wantRule:    "safety/rollback-plan-required",
 		},
 		{
 			name: "kill switch denies all action execution paths",
@@ -73,6 +84,17 @@ func TestEvaluatorEvaluate(t *testing.T) {
 				TargetResource: "random-runner",
 			},
 			environment: "local",
+			want:        domain.PolicyDecisionDeny,
+			wantRule:    "scope/target-allowlist",
+		},
+		{
+			name: "medium risk missing dependency metadata denied",
+			action: domain.CandidateAction{
+				ID:             "a-6",
+				ActionType:     "pause_demo_queue_consumer",
+				TargetResource: "unknown-consumer",
+			},
+			environment: "staging",
 			want:        domain.PolicyDecisionDeny,
 			wantRule:    "scope/target-allowlist",
 		},
