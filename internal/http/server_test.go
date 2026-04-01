@@ -104,6 +104,24 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	api := httptest.NewServer(server.Handler)
 	defer api.Close()
 
+	listResponse, err := http.Get(api.URL + "/ui/incidents")
+	if err != nil {
+		t.Fatalf("get incident workbench list: %v", err)
+	}
+	defer listResponse.Body.Close()
+
+	listBody, err := io.ReadAll(listResponse.Body)
+	if err != nil {
+		t.Fatalf("read list body: %v", err)
+	}
+
+	if !strings.Contains(string(listBody), "Demo Scenarios") {
+		t.Fatalf("list body does not contain demo scenario section")
+	}
+	if !strings.Contains(string(listBody), "Trigger Scenario") {
+		t.Fatalf("list body does not contain scenario trigger control")
+	}
+
 	payload := map[string]any{
 		"title": "checkout timeout after deploy",
 		"commonLabels": map[string]string{
@@ -356,6 +374,125 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 
 	if enabled, ok := serverInfo["kill_switch_enabled"].(bool); !ok || !enabled {
 		t.Fatalf("kill switch should be enabled in debug response")
+	}
+}
+
+func TestServerUIDemoScenarioTriggerRedirectsToIncidentDetail(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	docsRoot := filepath.Join(tempDir, "docs")
+	mustWriteFile(t, filepath.Join(docsRoot, "runbooks", "refresh-demo-cache.md"), "# Refresh demo cache\n\nRefresh cache after timeout spike.")
+	mustWriteFile(t, filepath.Join(docsRoot, "postmortems", "checkout-timeout-after-deploy.md"), "# Checkout timeout after deploy\n\nTimeout observed after deploy.")
+
+	var demoStateMu sync.Mutex
+	demoState := demo.Snapshot{
+		Mode:           demo.ModeHealthy,
+		ErrorRate:      0.01,
+		LatencyMs:      120,
+		QueueBacklog:   0,
+		WorkerHealthy:  true,
+		LastDeploy:     "v1.0.0",
+		LastUpdatedUTC: time.Now().UTC(),
+	}
+
+	demoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		demoStateMu.Lock()
+		defer demoStateMu.Unlock()
+
+		switch r.URL.Path {
+		case "/state":
+			_ = json.NewEncoder(w).Encode(demoState)
+		case "/simulate/timeout-after-deploy":
+			demoState.Mode = demo.ModeTimeoutAfterDeploy
+			demoState.ErrorRate = 0.27
+			demoState.LatencyMs = 1250
+			demoState.QueueBacklog = 46
+			demoState.WorkerHealthy = true
+			demoState.LastDeploy = "v1.1.0"
+			demoState.LastUpdatedUTC = time.Now().UTC()
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(demoState)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer demoServer.Close()
+
+	repository := storage.NewMemoryStore()
+	collector := observability.NewDemoCollector(demoServer.URL)
+	retriever := retrieval.NewFileRetriever(docsRoot)
+	catalog := execution.DefaultCatalog()
+	generator := triage.NewHeuristicGenerator()
+	actionGenerator := remediation.NewHeuristicGenerator(catalog)
+	killSwitch := approval.NewKillSwitch(false)
+	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
+	rollbackService := execution.NewRollbackService(repository, catalog, execution.NewDemoAdapter(demoServer.URL))
+	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(demoServer.URL), catalog, rollbackService)
+	executionService := execution.NewService(repository, catalog, execution.NewDemoAdapter(demoServer.URL), killSwitch, verificationService, 2*time.Second, 1, time.Minute)
+	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService)
+
+	server := NewServer(config.Config{
+		ServiceName:        "triovexa",
+		Environment:        "test",
+		HTTPPort:           "0",
+		DatabaseURL:        "postgres://test",
+		DocsRoot:           docsRoot,
+		DemoServiceBaseURL: demoServer.URL,
+		ReadTimeout:        5 * time.Second,
+		WriteTimeout:       5 * time.Second,
+		IdleTimeout:        5 * time.Second,
+		ShutdownTimeout:    5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, incidentService, policyService, executionService)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	client := &http.Client{
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	request, err := http.NewRequest(http.MethodPost, api.URL+"/ui/demo/scenarios/timeout-after-deploy", nil)
+	if err != nil {
+		t.Fatalf("create ui scenario request: %v", err)
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("post ui scenario: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusSeeOther {
+		t.Fatalf("ui scenario status = %d, want %d", response.StatusCode, http.StatusSeeOther)
+	}
+
+	location := response.Header.Get("Location")
+	if !strings.Contains(location, "/ui/incidents/") {
+		t.Fatalf("expected redirect to incident detail, got %q", location)
+	}
+	if !strings.Contains(location, "notice=") {
+		t.Fatalf("expected redirect to include notice query, got %q", location)
+	}
+
+	followResponse, err := http.Get(api.URL + location)
+	if err != nil {
+		t.Fatalf("follow redirect: %v", err)
+	}
+	defer followResponse.Body.Close()
+
+	body, err := io.ReadAll(followResponse.Body)
+	if err != nil {
+		t.Fatalf("read redirected ui body: %v", err)
+	}
+
+	if !strings.Contains(string(body), "checkout timeout after deploy") {
+		t.Fatalf("redirected ui body does not contain incident title")
+	}
+	if !strings.Contains(string(body), "Operator Step") {
+		t.Fatalf("redirected ui body does not contain operator guidance")
 	}
 }
 

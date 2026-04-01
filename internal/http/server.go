@@ -515,10 +515,80 @@ func NewServerWithTelemetry(
 			return
 		}
 
+		items, err := buildIncidentListItems(r.Context(), repository, incidents)
+		if err != nil {
+			http.Error(w, "failed to build incident workbench", http.StatusInternalServerError)
+			return
+		}
+
 		renderIncidentList(w, incidentListPageData{
-			Incidents:         incidents,
+			Items:             items,
 			KillSwitchEnabled: approvalService != nil && approvalService.KillSwitchState().Enabled,
+			Stats:             buildIncidentDashboardStats(incidents),
+			DemoScenarios:     demoScenarioViews(),
+			Notice:            strings.TrimSpace(r.URL.Query().Get("notice")),
+			Error:             strings.TrimSpace(r.URL.Query().Get("error")),
 		})
+	})
+
+	mux.HandleFunc("/ui/demo/scenarios/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if incidentService == nil {
+			http.Error(w, "incident workflow is not configured", http.StatusNotImplemented)
+			return
+		}
+
+		scenarioKey := strings.TrimPrefix(r.URL.Path, "/ui/demo/scenarios/")
+		incidentRecord, err := triggerDemoScenario(r.Context(), cfg.DemoServiceBaseURL, incidentService, scenarioKey)
+		if err != nil {
+			logger.Error("failed to trigger demo scenario", slog.String("scenario", scenarioKey), slog.String("error", err.Error()))
+			target := appendUIMessage("/ui/incidents", "error", "Gagal menjalankan demo scenario. Periksa log server untuk detail.")
+			if errors.Is(err, errDemoScenarioNotFound) {
+				target = appendUIMessage("/ui/incidents", "error", "Demo scenario tidak dikenal.")
+			}
+			http.Redirect(w, r, target, http.StatusSeeOther)
+			return
+		}
+
+		target := appendUIMessage(
+			"/ui/incidents/"+incidentRecord.ID,
+			"notice",
+			"Demo scenario berhasil dijalankan. Incident baru dan hasil heuristiknya sudah siap ditinjau.",
+		)
+		http.Redirect(w, r, target, http.StatusSeeOther)
+	})
+
+	mux.HandleFunc("/ui/admin/kill-switch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if approvalService == nil {
+			http.Error(w, "approval workflow is not configured", http.StatusNotImplemented)
+			return
+		}
+
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form payload", http.StatusBadRequest)
+			return
+		}
+
+		enabled, err := parseKillSwitchRequest(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		state := approvalService.SetKillSwitch(enabled)
+		target := sanitizeUIRedirectTarget(r.FormValue("redirect"), "/ui/incidents")
+		message := "Kill switch dinonaktifkan. Approval dan execution manual kembali bisa dipakai."
+		if state.Enabled {
+			message = "Kill switch diaktifkan. Flow triage tetap berjalan, tetapi action baru akan diblok."
+		}
+		http.Redirect(w, r, appendUIMessage(target, "notice", message), http.StatusSeeOther)
 	})
 
 	mux.HandleFunc("/ui/incidents/", func(w http.ResponseWriter, r *http.Request) {
@@ -619,6 +689,9 @@ func NewServerWithTelemetry(
 			RollbackRecords:     rollbackRecords,
 			KillSwitchEnabled:   approvalService != nil && approvalService.KillSwitchState().Enabled,
 			AuditTrail:          auditEvents,
+			Notice:              strings.TrimSpace(r.URL.Query().Get("notice")),
+			Error:               strings.TrimSpace(r.URL.Query().Get("error")),
+			NextOperatorStep:    describeNextOperatorStep(record, approvalService != nil && approvalService.KillSwitchState().Enabled),
 		})
 	})
 
@@ -806,6 +879,10 @@ func routeLabel(path string) string {
 		return "/admin/kill-switch"
 	case path == "/ui/incidents":
 		return "/ui/incidents"
+	case path == "/ui/admin/kill-switch":
+		return "/ui/admin/kill-switch"
+	case strings.HasPrefix(path, "/ui/demo/scenarios/"):
+		return "/ui/demo/scenarios/{scenario}"
 	case strings.HasPrefix(path, "/ui/incidents/"):
 		return "/ui/incidents/{id}"
 	default:

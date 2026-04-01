@@ -12,8 +12,37 @@ import (
 )
 
 type incidentListPageData struct {
-	Incidents         []domain.Incident
+	Items             []incidentListItem
 	KillSwitchEnabled bool
+	Stats             incidentDashboardStats
+	DemoScenarios     []demoScenarioView
+	Notice            string
+	Error             string
+}
+
+type incidentListItem struct {
+	Incident                 domain.Incident
+	CandidateActionCount     int
+	PrimaryAction            *domain.CandidateAction
+	TriageSummary            string
+	LatestVerificationStatus string
+}
+
+type incidentDashboardStats struct {
+	Total            int
+	AwaitingApproval int
+	InFlight         int
+	Resolved         int
+	RolledBack       int
+	Escalated        int
+}
+
+type demoScenarioView struct {
+	Key            string
+	Name           string
+	Summary        string
+	HeuristicFocus string
+	ExpectedAction string
 }
 
 type incidentDetailPageData struct {
@@ -29,6 +58,9 @@ type incidentDetailPageData struct {
 	RollbackRecords     []domain.RollbackRecord
 	KillSwitchEnabled   bool
 	AuditTrail          []domain.AuditEvent
+	Notice              string
+	Error               string
+	NextOperatorStep    string
 }
 
 var templateFuncs = template.FuncMap{
@@ -101,53 +133,205 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
   <meta charset="utf-8">
   <title>Triovexa Incident List</title>
   <style>
-    body { font-family: Segoe UI, sans-serif; margin: 2rem; background: #f7f9fc; color: #132238; }
-    h1 { margin-bottom: 0.5rem; }
-    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; }
+    :root {
+      --ink: #132238;
+      --muted: #5b6b7d;
+      --paper: #ffffff;
+      --mist: #eef3f8;
+      --line: #d8e1ec;
+      --accent: #0f62fe;
+      --accent-soft: #dbe8ff;
+      --success: #0f9d58;
+      --success-soft: #dff5e9;
+      --warning: #8a5a00;
+      --warning-soft: #fff1d6;
+      --danger: #b3261e;
+      --danger-soft: #fde7e5;
+      --shadow: 0 18px 50px rgba(19, 34, 56, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body { font-family: Segoe UI, sans-serif; margin: 0; background:
+      radial-gradient(circle at top left, rgba(15,98,254,0.10), transparent 32%),
+      linear-gradient(180deg, #f5f8fc 0%, #eef2f7 100%);
+      color: var(--ink);
+    }
+    a { color: var(--accent); text-decoration: none; }
+    .shell { width: min(1320px, calc(100% - 2rem)); margin: 0 auto; padding: 2rem 0 3rem; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr); gap: 1rem; margin-bottom: 1rem; }
+    .hero-card, .panel, .stat-card { background: rgba(255,255,255,0.92); border: 1px solid rgba(216,225,236,0.95); border-radius: 20px; box-shadow: var(--shadow); }
+    .hero-card { padding: 1.4rem; }
+    .eyebrow { font-size: 0.82rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0 0 0.65rem 0; }
+    h1 { margin: 0 0 0.7rem 0; font-size: 2.3rem; line-height: 1.05; }
+    h2 { margin: 0 0 0.85rem 0; font-size: 1.2rem; }
+    h3 { margin: 0 0 0.4rem 0; font-size: 1rem; }
+    p { margin: 0.2rem 0 0.7rem 0; }
+    .muted { color: var(--muted); }
+    .hero-links { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 1rem; }
+    .hero-links a { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.55rem 0.85rem; border-radius: 999px; background: var(--mist); color: var(--ink); }
+    .banner { margin: 0 0 1rem 0; padding: 0.9rem 1rem; border-radius: 14px; border: 1px solid; }
+    .banner.warning { background: var(--warning-soft); color: var(--warning); border-color: #f2d395; }
+    .banner.success { background: var(--success-soft); color: var(--success); border-color: #b7e4c8; }
+    .banner.error { background: var(--danger-soft); color: var(--danger); border-color: #f1b5b1; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.85rem; margin-bottom: 1rem; }
+    .stat-card { padding: 1rem; }
+    .stat-label { color: var(--muted); font-size: 0.9rem; }
+    .stat-value { font-size: 1.9rem; font-weight: 700; margin-top: 0.35rem; }
+    .workbench-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.8fr); gap: 1rem; margin-bottom: 1rem; }
+    .panel { padding: 1.15rem; }
+    .scenario-grid { display: grid; gap: 0.85rem; }
+    .scenario-card { display: grid; gap: 0.65rem; padding: 1rem; border-radius: 16px; background: linear-gradient(180deg, #fff, #f8fbff); border: 1px solid var(--line); }
+    .scenario-meta { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+    .chip { display: inline-flex; align-items: center; padding: 0.24rem 0.6rem; border-radius: 999px; background: var(--mist); color: var(--ink); font-size: 0.85rem; }
+    form { margin: 0; }
+    input, textarea, button { font: inherit; }
+    button { padding: 0.62rem 0.9rem; border: none; border-radius: 12px; cursor: pointer; }
+    .primary-button { background: var(--accent); color: #fff; }
+    .secondary-button { background: #1f3b57; color: #fff; }
+    table { width: 100%; border-collapse: collapse; background: transparent; }
     th, td { padding: 0.85rem; border-bottom: 1px solid #e6edf5; text-align: left; vertical-align: top; }
     th { background: #132238; color: #fff; font-weight: 600; }
-    a { color: #0f62fe; text-decoration: none; }
-    .badge { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px; background: #e6edf5; }
-    .muted { color: #5b6b7d; }
-    .banner { margin: 0 0 1rem 0; padding: 0.85rem 1rem; border-radius: 12px; background: #fff1d6; color: #8a5a00; border: 1px solid #f2d395; }
+    .table-wrap { overflow-x: auto; border-radius: 16px; border: 1px solid var(--line); background: var(--paper); }
+    .row-title { display: grid; gap: 0.3rem; }
+    .tight { margin: 0; }
+    .control-form { display: grid; gap: 0.6rem; margin-top: 0.8rem; }
+    @media (max-width: 980px) {
+      .hero, .workbench-grid { grid-template-columns: 1fr; }
+      .shell { width: min(100% - 1rem, 1320px); }
+    }
   </style>
 </head>
 <body>
-  <h1>Incident List</h1>
-  <p class="muted">Operator view untuk Phase 6 medium-risk remediation and rollback workflow.</p>
-  {{if .KillSwitchEnabled}}
-  <p class="banner">Kill switch sedang aktif. Evaluasi dan triage tetap berjalan, tetapi action baru akan diblok oleh policy.</p>
+  <div class="shell">
+  <section class="hero">
+    <div class="hero-card">
+      <p class="eyebrow">Triovexa Workbench</p>
+      <h1>Heuristic Incident Workbench</h1>
+      <p class="muted">UI sederhana untuk memicu demo scenario, membaca triage heuristik, lalu mengikuti approval, execution, verification, dan rollback dari satu tempat.</p>
+      <div class="hero-links">
+        <a href="/debug/tools">Diagnostics</a>
+        <a href="/debug/policies">Policy Catalog</a>
+        <a href="/metrics">Metrics</a>
+      </div>
+    </div>
+    <div class="hero-card">
+      <p class="eyebrow">Operator Snapshot</p>
+      <h2 class="tight">{{if .KillSwitchEnabled}}Kill Switch Active{{else}}Heuristic Flow Ready{{end}}</h2>
+      <p class="muted">Gunakan workbench ini untuk melihat apakah rekomendasi heuristik selaras dengan intended flow sebelum kita sambungkan ke provider AI dan observability sungguhan.</p>
+      <p><span class="chip">Total incident {{.Stats.Total}}</span> <span class="chip">Awaiting approval {{.Stats.AwaitingApproval}}</span></p>
+    </div>
+  </section>
+  {{if .Notice}}
+  <p class="banner success">{{.Notice}}</p>
   {{end}}
-  <table>
-    <thead>
-      <tr>
-        <th>Title</th>
-        <th>Service</th>
-        <th>Environment</th>
-        <th>Severity</th>
-        <th>State</th>
-        <th>Created</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{if .Incidents}}
-        {{range .Incidents}}
-        <tr>
-          <td><a href="/ui/incidents/{{.ID}}">{{.Title}}</a></td>
-          <td>{{.ServiceName}}</td>
-          <td>{{.Environment}}</td>
-          <td><span class="badge">{{.Severity}}</span></td>
-          <td>{{.State}}</td>
-          <td>{{formatTime .CreatedAt}}</td>
-        </tr>
+  {{if .Error}}
+  <p class="banner error">{{.Error}}</p>
+  {{end}}
+  {{if .KillSwitchEnabled}}
+  <p class="banner warning">Kill switch sedang aktif. Evaluasi dan triage tetap berjalan, tetapi action baru akan diblok oleh policy.</p>
+  {{end}}
+  <section class="stats-grid">
+    <article class="stat-card"><div class="stat-label">Total Incident</div><div class="stat-value">{{.Stats.Total}}</div></article>
+    <article class="stat-card"><div class="stat-label">Awaiting Approval</div><div class="stat-value">{{.Stats.AwaitingApproval}}</div></article>
+    <article class="stat-card"><div class="stat-label">In Flight</div><div class="stat-value">{{.Stats.InFlight}}</div></article>
+    <article class="stat-card"><div class="stat-label">Resolved</div><div class="stat-value">{{.Stats.Resolved}}</div></article>
+    <article class="stat-card"><div class="stat-label">Rolled Back</div><div class="stat-value">{{.Stats.RolledBack}}</div></article>
+    <article class="stat-card"><div class="stat-label">Escalated</div><div class="stat-value">{{.Stats.Escalated}}</div></article>
+  </section>
+
+  <section class="workbench-grid">
+    <article class="panel">
+      <h2>Demo Scenarios</h2>
+      <p class="muted">Trigger skenario demo langsung dari browser untuk melihat bagaimana heuristik membaca evidence dan mengusulkan candidate action.</p>
+      <div class="scenario-grid">
+        {{range .DemoScenarios}}
+        <form class="scenario-card" method="post" action="/ui/demo/scenarios/{{.Key}}">
+          <div>
+            <h3>{{.Name}}</h3>
+            <p class="muted">{{.Summary}}</p>
+          </div>
+          <div class="scenario-meta">
+            <span class="chip">Heuristic focus: {{.HeuristicFocus}}</span>
+            <span class="chip">Expected action: {{.ExpectedAction}}</span>
+          </div>
+          <button class="primary-button" type="submit">Trigger Scenario</button>
+        </form>
         {{end}}
-      {{else}}
+      </div>
+    </article>
+
+    <article class="panel">
+      <h2>Operator Controls</h2>
+      <p class="muted">Control panel sederhana untuk menguji safety guardrails saat heuristik berjalan.</p>
+      <form class="control-form" method="post" action="/ui/admin/kill-switch">
+        <input type="hidden" name="redirect" value="/ui/incidents" />
+        <input type="hidden" name="enabled" value="{{if .KillSwitchEnabled}}false{{else}}true{{end}}" />
+        <button class="secondary-button" type="submit">{{if .KillSwitchEnabled}}Disable Kill Switch{{else}}Enable Kill Switch{{end}}</button>
+      </form>
+      <p class="muted">Current state: {{if .KillSwitchEnabled}}enabled{{else}}disabled{{end}}</p>
+      <p class="muted">Saat kill switch aktif, incident intake dan triage tetap masuk, tetapi approval atau execution baru akan diblok.</p>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Incident Workbench</h2>
+    <div class="table-wrap">
+    <table>
+      <thead>
         <tr>
-          <td colspan="6">Belum ada incident yang masuk.</td>
+          <th>Incident</th>
+          <th>Heuristic Snapshot</th>
+          <th>Primary Action</th>
+          <th>Latest Outcome</th>
+          <th>Updated</th>
         </tr>
-      {{end}}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {{if .Items}}
+          {{range .Items}}
+          <tr>
+            <td>
+              <div class="row-title">
+                <a href="/ui/incidents/{{.Incident.ID}}"><strong>{{.Incident.Title}}</strong></a>
+                <span class="muted">{{.Incident.ServiceName}} | {{.Incident.Environment}} | severity {{.Incident.Severity}}</span>
+                <span class="chip">{{.Incident.State}}</span>
+              </div>
+            </td>
+            <td>
+              {{if .TriageSummary}}
+                <p>{{.TriageSummary}}</p>
+              {{else}}
+                <p class="muted">Triage belum tersedia.</p>
+              {{end}}
+              <p class="muted">Candidate actions: {{.CandidateActionCount}}</p>
+            </td>
+            <td>
+              {{with .PrimaryAction}}
+                <strong>{{.ActionType}}</strong>
+                <p class="muted">risk {{.RiskLevel}} -> status {{.Status}}</p>
+              {{else}}
+                <span class="muted">Belum ada candidate action.</span>
+              {{end}}
+            </td>
+            <td>
+              {{if .LatestVerificationStatus}}
+                <span class="chip">{{.LatestVerificationStatus}}</span>
+              {{else}}
+                <span class="muted">Belum ada verification</span>
+              {{end}}
+            </td>
+            <td>{{formatTime .Incident.UpdatedAt}}</td>
+          </tr>
+          {{end}}
+        {{else}}
+          <tr>
+            <td colspan="5">Belum ada incident yang masuk. Gunakan Demo Scenarios di atas untuk mulai mengetes heuristik.</td>
+          </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  </div>
 </body>
 </html>
 `))
@@ -183,9 +367,19 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
   <p><a href="/ui/incidents">Back to incident list</a></p>
   <h1>{{.Incident.Title}}</h1>
   <p class="muted">{{.Incident.ServiceName}} | {{.Incident.Environment}} | severity {{.Incident.Severity}} | state {{.Incident.State}}</p>
+  {{if .Notice}}
+  <p class="banner">{{.Notice}}</p>
+  {{end}}
+  {{if .Error}}
+  <p class="banner" style="background:#fde7e5;color:#b3261e;border-color:#f1b5b1;">{{.Error}}</p>
+  {{end}}
   {{if .KillSwitchEnabled}}
   <p class="banner">Kill switch sedang aktif. Action baru akan ditolak oleh policy evaluator sampai dinonaktifkan kembali.</p>
   {{end}}
+  <section class="card" style="margin-bottom:1rem;">
+    <h2>Operator Step</h2>
+    <p>{{.NextOperatorStep}}</p>
+  </section>
 
   <div class="grid">
     <section class="card">
