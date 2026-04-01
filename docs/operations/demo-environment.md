@@ -60,6 +60,16 @@ Jika skrip memberi error bahwa Docker daemon tidak reachable, nyalakan Docker De
 
 ## Contoh Memicu Insiden
 
+Cara paling cepat:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario timeout-after-deploy
+powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario worker-stall
+powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario error-rate-spike
+```
+
+Cara manual:
+
 ```powershell
 Invoke-WebRequest -Method Post http://localhost:8090/simulate/error-rate-spike
 Invoke-WebRequest -Method Post http://localhost:8090/simulate/worker-stall
@@ -76,6 +86,8 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 
 - `GET /ui/incidents`
 - `GET /ui/incidents/{id}`
+- `GET /metrics`
+- `GET /debug/policies`
 - `POST /webhooks/grafana`
 - `GET /incidents`
 - `GET /incidents/{id}`
