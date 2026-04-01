@@ -68,7 +68,7 @@ func NewServer(
 			Environment:         cfg.Environment,
 			KillSwitchEnabled:   killSwitchState.Enabled,
 			KillSwitchUpdatedAt: killSwitchState.UpdatedAt.Format(time.RFC3339),
-			Phase:               "phase-05-verification-escalation",
+			Phase:               "phase-06-rollback-medium-risk-actions",
 			AvailableEndpoints: []string{
 				"GET /health",
 				"GET /debug/tools",
@@ -78,6 +78,7 @@ func NewServer(
 				"GET /incidents/{id}/triage",
 				"GET /incidents/{id}/actions",
 				"GET /actions/{id}/verification",
+				"GET /actions/{id}/rollbacks",
 				"POST /actions/{id}/approve",
 				"POST /actions/{id}/reject",
 				"POST /actions/{id}/execute",
@@ -177,6 +178,30 @@ func NewServer(
 				"action_id":            actionID,
 				"verification_results": results,
 				"latest":               latest,
+			})
+			return
+		case r.Method == http.MethodGet && strings.HasSuffix(actionPath, "/rollbacks"):
+			actionID := strings.TrimSuffix(actionPath, "/rollbacks")
+			if _, err := repository.GetCandidateAction(r.Context(), actionID); err != nil {
+				if errors.Is(err, storage.ErrNotFound) {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "candidate action not found"})
+					return
+				}
+				logger.Error("failed to load candidate action before rollback lookup", slog.String("error", err.Error()))
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load candidate action"})
+				return
+			}
+
+			results, err := repository.ListRollbackRecordsByAction(r.Context(), actionID)
+			if err != nil {
+				logger.Error("failed to list rollback records", slog.String("error", err.Error()))
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get rollback records"})
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"action_id":        actionID,
+				"rollback_records": results,
 			})
 			return
 		case r.Method != http.MethodPost:
@@ -396,6 +421,13 @@ func NewServer(
 			return
 		}
 
+		rollbackRecords, err := repository.ListRollbackRecords(r.Context(), incidentID)
+		if err != nil {
+			logger.Error("failed to list rollback records", slog.String("error", err.Error()))
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get rollback records"})
+			return
+		}
+
 		var triageResult *domain.TriageResult
 		result, err := repository.GetTriageResult(r.Context(), incidentID)
 		if err == nil {
@@ -416,6 +448,7 @@ func NewServer(
 			"approval_records":     approvalRecords,
 			"execution_records":    executionRecords,
 			"verification_results": verificationResults,
+			"rollback_records":     rollbackRecords,
 			"audit_events":         auditEvents,
 		})
 	})
@@ -502,6 +535,12 @@ func NewServer(
 			return
 		}
 
+		rollbackRecords, err := repository.ListRollbackRecords(r.Context(), incidentID)
+		if err != nil {
+			http.Error(w, "failed to load rollback records", http.StatusInternalServerError)
+			return
+		}
+
 		auditEvents, err := repository.ListAuditEvents(r.Context(), incidentID)
 		if err != nil {
 			http.Error(w, "failed to load audit trail", http.StatusInternalServerError)
@@ -527,6 +566,7 @@ func NewServer(
 			ApprovalRecords:     approvalRecords,
 			ExecutionRecords:    executionRecords,
 			VerificationResults: verificationResults,
+			RollbackRecords:     rollbackRecords,
 			KillSwitchEnabled:   approvalService != nil && approvalService.KillSwitchState().Enabled,
 			AuditTrail:          auditEvents,
 		})

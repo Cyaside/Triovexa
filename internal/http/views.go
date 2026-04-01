@@ -26,6 +26,7 @@ type incidentDetailPageData struct {
 	ApprovalRecords     []domain.ApprovalRecord
 	ExecutionRecords    []domain.ExecutionRecord
 	VerificationResults []domain.VerificationResult
+	RollbackRecords     []domain.RollbackRecord
 	KillSwitchEnabled   bool
 	AuditTrail          []domain.AuditEvent
 }
@@ -82,6 +83,15 @@ var templateFuncs = template.FuncMap{
 		}
 		return nil
 	},
+	"rollbacksFor": func(actionID string, records []domain.RollbackRecord) []domain.RollbackRecord {
+		filtered := make([]domain.RollbackRecord, 0)
+		for _, record := range records {
+			if record.CandidateActionID == actionID {
+				filtered = append(filtered, record)
+			}
+		}
+		return filtered
+	},
 }
 
 var incidentListTemplate = template.Must(template.New("incident-list").Funcs(templateFuncs).Parse(`
@@ -104,7 +114,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
 </head>
 <body>
   <h1>Incident List</h1>
-  <p class="muted">Operator view untuk Phase 5 verification and escalation.</p>
+  <p class="muted">Operator view untuk Phase 6 medium-risk remediation and rollback workflow.</p>
   {{if .KillSwitchEnabled}}
   <p class="banner">Kill switch sedang aktif. Evaluasi dan triage tetap berjalan, tetapi action baru akan diblok oleh policy.</p>
   {{end}}
@@ -273,6 +283,12 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
                 <p>Tidak ada aksi approval atau execution manual.</p>
                 {{end}}
               {{end}}
+              {{with rollbacksFor .ID $.RollbackRecords}}
+                <p><strong>Rollback History</strong></p>
+                {{range .}}
+                <p><span class="pill">{{.Status}}</span> via {{.RollbackActionKey}} oleh {{.TriggeredBy}}</p>
+                {{end}}
+              {{end}}
             </td>
           </tr>
           {{end}}
@@ -354,6 +370,35 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
           {{end}}
         {{else}}
           <tr><td colspan="5">Belum ada verification result.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card" style="margin-top:1rem;">
+    <h2>Rollback Records</h2>
+    <table>
+      <thead>
+        <tr><th>Action ID</th><th>Rollback Action</th><th>Status</th><th>Triggered By</th><th>Started</th><th>Finished</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        {{if .RollbackRecords}}
+          {{range .RollbackRecords}}
+          <tr>
+            <td>{{.CandidateActionID}}</td>
+            <td>{{.RollbackActionKey}}</td>
+            <td><span class="pill">{{.Status}}</span></td>
+            <td>{{.TriggeredBy}}</td>
+            <td>{{formatTime .StartedAt}}</td>
+            <td>{{formatTime .FinishedAt}}</td>
+            <td>
+              <p>{{.Note}}</p>
+              <pre>{{formatJSON .ResultJSON}}</pre>
+            </td>
+          </tr>
+          {{end}}
+        {{else}}
+          <tr><td colspan="7">Belum ada rollback record.</td></tr>
         {{end}}
       </tbody>
     </table>

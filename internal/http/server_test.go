@@ -356,6 +356,242 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	}
 }
 
+func TestServerEndToEndMediumRiskRollback(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	docsRoot := filepath.Join(tempDir, "docs")
+	mustWriteFile(t, filepath.Join(docsRoot, "runbooks", "pause-demo-queue-consumer.md"), "# Pause demo queue consumer\n\nPause consumer while rollback plan is ready.")
+	mustWriteFile(t, filepath.Join(docsRoot, "postmortems", "worker-stall.md"), "# Worker stall\n\nQueue consumers can be paused if backlog becomes dangerous.")
+
+	var demoStateMu sync.Mutex
+	demoState := demo.Snapshot{
+		Mode:           demo.ModeWorkerStall,
+		ErrorRate:      0.12,
+		LatencyMs:      430,
+		QueueBacklog:   128,
+		ConsumerPaused: false,
+		WorkerHealthy:  false,
+		LastDeploy:     "v1.2.4",
+		LastUpdatedUTC: time.Now().UTC(),
+	}
+
+	demoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		demoStateMu.Lock()
+		defer demoStateMu.Unlock()
+
+		switch r.URL.Path {
+		case "/state":
+			_ = json.NewEncoder(w).Encode(demoState)
+		case "/actions/pause-queue-consumer":
+			demoState.Mode = demo.ModeWorkerStall
+			demoState.ErrorRate = 0.19
+			demoState.LatencyMs = 710
+			demoState.QueueBacklog = 160
+			demoState.ConsumerPaused = true
+			demoState.WorkerHealthy = false
+			demoState.LastUpdatedUTC = time.Now().UTC()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"action":  "pause_demo_queue_consumer",
+				"applied": true,
+			})
+		case "/actions/resume-queue-consumer":
+			demoState.Mode = demo.ModeHealthy
+			demoState.ErrorRate = 0.02
+			demoState.LatencyMs = 180
+			demoState.QueueBacklog = 10
+			demoState.ConsumerPaused = false
+			demoState.WorkerHealthy = true
+			demoState.LastUpdatedUTC = time.Now().UTC()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"action":  "resume_demo_queue_consumer",
+				"applied": true,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer demoServer.Close()
+
+	repository := storage.NewMemoryStore()
+
+	collector := observability.NewDemoCollector(demoServer.URL)
+	retriever := retrieval.NewFileRetriever(docsRoot)
+	catalog := execution.DefaultCatalog()
+	generator := triage.NewHeuristicGenerator()
+	actionGenerator := remediation.NewHeuristicGenerator(catalog)
+	killSwitch := approval.NewKillSwitch(false)
+	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
+	rollbackService := execution.NewRollbackService(repository, catalog, execution.NewDemoAdapter(demoServer.URL))
+	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(demoServer.URL), catalog, rollbackService)
+	executionService := execution.NewService(repository, catalog, execution.NewDemoAdapter(demoServer.URL), killSwitch, verificationService, 2*time.Second, 1, time.Minute)
+	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService)
+
+	server := NewServer(config.Config{
+		ServiceName:        "triovexa",
+		Environment:        "test",
+		HTTPPort:           "0",
+		DatabaseURL:        "postgres://test",
+		DocsRoot:           docsRoot,
+		DemoServiceBaseURL: demoServer.URL,
+		ReadTimeout:        5 * time.Second,
+		WriteTimeout:       5 * time.Second,
+		IdleTimeout:        5 * time.Second,
+		ShutdownTimeout:    5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, incidentService, policyService, executionService)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	payload := map[string]any{
+		"title": "worker stall on checkout consumer",
+		"commonLabels": map[string]string{
+			"service":     "checkout-service",
+			"environment": "staging",
+			"severity":    "critical",
+		},
+		"alerts": []map[string]any{
+			{
+				"status":      "firing",
+				"fingerprint": "alert-002",
+				"startsAt":    time.Now().UTC().Format(time.RFC3339),
+				"labels": map[string]string{
+					"service":     "checkout-service",
+					"environment": "staging",
+					"severity":    "critical",
+				},
+				"annotations": map[string]string{
+					"summary": "checkout worker stalled",
+				},
+			},
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal webhook payload: %v", err)
+	}
+
+	webhookResponse, err := http.Post(api.URL+"/webhooks/grafana", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post grafana webhook: %v", err)
+	}
+	defer webhookResponse.Body.Close()
+
+	var webhookPayload map[string]any
+	if err := json.NewDecoder(webhookResponse.Body).Decode(&webhookPayload); err != nil {
+		t.Fatalf("decode webhook response: %v", err)
+	}
+
+	incidentID, ok := webhookPayload["incident_id"].(string)
+	if !ok || incidentID == "" {
+		t.Fatalf("incident id missing from webhook response")
+	}
+
+	actionsResponse, err := http.Get(api.URL + "/incidents/" + incidentID + "/actions")
+	if err != nil {
+		t.Fatalf("get candidate actions: %v", err)
+	}
+	defer actionsResponse.Body.Close()
+
+	var actionsPayload struct {
+		Actions []map[string]any `json:"actions"`
+	}
+	if err := json.NewDecoder(actionsResponse.Body).Decode(&actionsPayload); err != nil {
+		t.Fatalf("decode actions response: %v", err)
+	}
+
+	var mediumRiskActionID string
+	for _, action := range actionsPayload.Actions {
+		if actionType, _ := action["ActionType"].(string); actionType == "pause_demo_queue_consumer" {
+			mediumRiskActionID, _ = action["ID"].(string)
+			break
+		}
+	}
+	if mediumRiskActionID == "" {
+		t.Fatalf("expected medium-risk action pause_demo_queue_consumer to be present")
+	}
+
+	approveBody, err := json.Marshal(map[string]string{
+		"approved_by": "operator-b",
+		"note":        "pause consumer with rollback ready",
+	})
+	if err != nil {
+		t.Fatalf("marshal approve payload: %v", err)
+	}
+
+	approveRequest, err := http.NewRequest(http.MethodPost, api.URL+"/actions/"+mediumRiskActionID+"/approve", bytes.NewReader(approveBody))
+	if err != nil {
+		t.Fatalf("create approve request: %v", err)
+	}
+	approveRequest.Header.Set("Content-Type", "application/json")
+
+	approveResponse, err := http.DefaultClient.Do(approveRequest)
+	if err != nil {
+		t.Fatalf("approve action: %v", err)
+	}
+	defer approveResponse.Body.Close()
+
+	executeBody, err := json.Marshal(map[string]string{
+		"initiated_by": "operator-b",
+		"note":         "execute medium-risk action",
+	})
+	if err != nil {
+		t.Fatalf("marshal execute payload: %v", err)
+	}
+
+	executeRequest, err := http.NewRequest(http.MethodPost, api.URL+"/actions/"+mediumRiskActionID+"/execute", bytes.NewReader(executeBody))
+	if err != nil {
+		t.Fatalf("create execute request: %v", err)
+	}
+	executeRequest.Header.Set("Content-Type", "application/json")
+
+	executeResponse, err := http.DefaultClient.Do(executeRequest)
+	if err != nil {
+		t.Fatalf("execute action: %v", err)
+	}
+	defer executeResponse.Body.Close()
+
+	if executeResponse.StatusCode != http.StatusOK {
+		t.Fatalf("execute status = %d, want %d", executeResponse.StatusCode, http.StatusOK)
+	}
+
+	incidentResponse, err := http.Get(api.URL + "/incidents/" + incidentID)
+	if err != nil {
+		t.Fatalf("get incident detail: %v", err)
+	}
+	defer incidentResponse.Body.Close()
+
+	var incidentPayload map[string]any
+	if err := json.NewDecoder(incidentResponse.Body).Decode(&incidentPayload); err != nil {
+		t.Fatalf("decode incident detail: %v", err)
+	}
+
+	incidentValue, ok := incidentPayload["incident"].(map[string]any)
+	if !ok {
+		t.Fatalf("incident payload missing from detail response")
+	}
+	if state, ok := incidentValue["State"].(string); !ok || state != "rolled_back" {
+		t.Fatalf("incident state = %v, want %q", incidentValue["State"], "rolled_back")
+	}
+
+	rollbackResponse, err := http.Get(api.URL + "/actions/" + mediumRiskActionID + "/rollbacks")
+	if err != nil {
+		t.Fatalf("get rollback records: %v", err)
+	}
+	defer rollbackResponse.Body.Close()
+
+	var rollbackPayload map[string]any
+	if err := json.NewDecoder(rollbackResponse.Body).Decode(&rollbackPayload); err != nil {
+		t.Fatalf("decode rollback response: %v", err)
+	}
+
+	rollbackRecords, ok := rollbackPayload["rollback_records"].([]any)
+	if !ok || len(rollbackRecords) != 1 {
+		t.Fatalf("rollback records = %#v, want 1 record", rollbackPayload["rollback_records"])
+	}
+}
+
 func mustWriteFile(t *testing.T, path string, content string) {
 	t.Helper()
 
