@@ -139,7 +139,7 @@ Execute action low-risk yang sudah approved:
 Invoke-RestMethod -Method Post `
   -Uri http://localhost:8080/actions/<ACTION_ID>/execute `
   -ContentType "application/json" `
-  -Body '{"approved_by":"operator-a","note":"execute approved action"}'
+  -Body '{"initiated_by":"operator-a","note":"execute approved action"}'
 ```
 
 Aktifkan kill switch:

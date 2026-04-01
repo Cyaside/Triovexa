@@ -240,8 +240,8 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	}
 
 	executeBody, err := json.Marshal(map[string]string{
-		"approved_by": "operator-a",
-		"note":        "execute low-risk action",
+		"initiated_by": "operator-a",
+		"note":         "execute low-risk action",
 	})
 	if err != nil {
 		t.Fatalf("marshal execute payload: %v", err)

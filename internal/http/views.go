@@ -94,7 +94,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
 </head>
 <body>
   <h1>Incident List</h1>
-  <p class="muted">Operator view untuk Phase 3 policy and approval workflow.</p>
+  <p class="muted">Operator view untuk Phase 4 low-risk execution MVP.</p>
   {{if .KillSwitchEnabled}}
   <p class="banner">Kill switch sedang aktif. Evaluasi dan triage tetap berjalan, tetapi action baru akan diblok oleh policy.</p>
   {{end}}
@@ -255,7 +255,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
               {{else}}
                 {{if and (or (eq .Status "approved") (eq .Status "allowed")) (not $.KillSwitchEnabled)}}
                 <form method="post" action="/actions/{{.ID}}/execute">
-                  <input type="text" name="approved_by" placeholder="operator name" />
+                  <input type="text" name="initiated_by" placeholder="operator name" />
                   <textarea name="note" rows="2" placeholder="execution note"></textarea>
                   <button class="approve" type="submit">Execute</button>
                 </form>

@@ -215,7 +215,7 @@ func NewServer(
 				return
 			}
 
-			initiatedBy, _, wantsHTML, err := parseApprovalRequest(r)
+			initiatedBy, _, wantsHTML, err := parseExecutionRequest(r)
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
@@ -565,4 +565,45 @@ func parseKillSwitchRequest(r *http.Request) (bool, error) {
 	}
 
 	return payload.Enabled, nil
+}
+
+func parseExecutionRequest(r *http.Request) (initiatedBy string, note string, wantsHTML bool, err error) {
+	contentType := r.Header.Get("Content-Type")
+	wantsHTML = strings.Contains(contentType, "application/x-www-form-urlencoded")
+
+	if wantsHTML {
+		if err := r.ParseForm(); err != nil {
+			return "", "", wantsHTML, errors.New("invalid execution form payload")
+		}
+		initiatedBy = strings.TrimSpace(r.FormValue("initiated_by"))
+		if initiatedBy == "" {
+			initiatedBy = strings.TrimSpace(r.FormValue("approved_by"))
+		}
+		note = strings.TrimSpace(r.FormValue("note"))
+	} else {
+		var payload struct {
+			InitiatedBy string `json:"initiated_by"`
+			ApprovedBy  string `json:"approved_by"`
+			Note        string `json:"note"`
+		}
+		if r.ContentLength != 0 {
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				return "", "", wantsHTML, errors.New("invalid execution payload")
+			}
+		}
+		initiatedBy = strings.TrimSpace(payload.InitiatedBy)
+		if initiatedBy == "" {
+			initiatedBy = strings.TrimSpace(payload.ApprovedBy)
+		}
+		note = strings.TrimSpace(payload.Note)
+	}
+
+	if initiatedBy == "" {
+		initiatedBy = strings.TrimSpace(r.Header.Get("X-Operator-Name"))
+	}
+	if initiatedBy == "" {
+		return "", "", wantsHTML, errors.New("initiated_by is required")
+	}
+
+	return initiatedBy, note, wantsHTML, nil
 }
