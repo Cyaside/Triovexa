@@ -70,7 +70,7 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - menyediakan metrics sederhana untuk observability
 - menyediakan kondisi yang bisa dipakai saat demo triage dan candidate action
 
-## Endpoint UI dan API Phase 4
+## Endpoint UI dan API Phase 5
 
 - `GET /ui/incidents`
 - `GET /ui/incidents/{id}`
@@ -79,6 +79,7 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - `GET /incidents/{id}`
 - `GET /incidents/{id}/triage`
 - `GET /incidents/{id}/actions`
+- `GET /actions/{id}/verification`
 - `POST /actions/{id}/approve`
 - `POST /actions/{id}/reject`
 - `POST /actions/{id}/execute`
@@ -142,6 +143,13 @@ Invoke-RestMethod -Method Post `
   -Body '{"initiated_by":"operator-a","note":"execute approved action"}'
 ```
 
+Lihat hasil verification untuk action tersebut:
+
+```powershell
+Invoke-RestMethod -Method Get `
+  -Uri http://localhost:8080/actions/<ACTION_ID>/verification
+```
+
 Aktifkan kill switch:
 
 ```powershell
@@ -150,3 +158,20 @@ Invoke-RestMethod -Method Post `
   -ContentType "application/json" `
   -Body '{"enabled":true}'
 ```
+
+## Closed-Loop Verification Yang Sudah Aktif
+
+Setelah `POST /actions/{id}/execute` berhasil, server utama sekarang otomatis akan:
+
+- mengambil snapshot kondisi layanan sesudah action
+- membandingkan sinyal sebelum dan sesudah action
+- menyimpan `verification_result`
+- memindahkan incident ke `resolved` jika sinyal membaik kuat
+- memindahkan incident ke `escalated` jika hasil gagal atau tidak meyakinkan
+
+Rule awal yang dipakai tetap sederhana dan mudah diaudit:
+
+- alert dianggap clear jika mode demo kembali `healthy`
+- health check dianggap normal jika `worker_healthy=true`
+- improvement dihitung dari `error_rate`, `latency_ms`, dan `queue_backlog`
+- mixed signal tidak akan auto-resolve, tetapi akan di-escalate

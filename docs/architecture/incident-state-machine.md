@@ -27,6 +27,7 @@ State machine ini menjadi sumber aturan lifecycle incident agar alur sistem teta
 - `executing_action -> verifying_action`
 - `verifying_action -> resolved`
 - `verifying_action -> failed_remediation`
+- `verifying_action -> escalated`
 - `failed_remediation -> rolled_back`
 - `failed_remediation -> escalated`
 - `resolved -> closed`
