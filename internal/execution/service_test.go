@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,6 +190,91 @@ func TestServiceExecuteActionAllowsApprovedMediumRisk(t *testing.T) {
 
 	if record.Status != ExecutionStatusSucceeded {
 		t.Fatalf("execution status = %q, want %q", record.Status, ExecutionStatusSucceeded)
+	}
+}
+
+func TestServiceExecuteActionRevalidatesScopeBeforeExecution(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name            string
+		environment     string
+		targetResource  string
+		wantErrorSubstr string
+	}{
+		{
+			name:            "environment no longer allowed",
+			environment:     "production",
+			targetResource:  "demo-worker",
+			wantErrorSubstr: `environment "production"`,
+		},
+		{
+			name:            "target no longer allowed",
+			environment:     "staging",
+			targetResource:  "unknown-target",
+			wantErrorSubstr: `target "unknown-target"`,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			repository := storage.NewMemoryStore()
+			incidentRecord := domain.Incident{
+				ID:          uuid.NewString(),
+				Environment: tc.environment,
+				State:       domain.IncidentStateApproved,
+				CreatedAt:   time.Now().UTC(),
+				UpdatedAt:   time.Now().UTC(),
+			}
+			if err := repository.CreateIncident(context.Background(), incidentRecord); err != nil {
+				t.Fatalf("create incident: %v", err)
+			}
+
+			action := domain.CandidateAction{
+				ID:             uuid.NewString(),
+				IncidentID:     incidentRecord.ID,
+				ActionType:     "restart_demo_worker",
+				TargetResource: tc.targetResource,
+				ParametersJSON: `{"worker_id":"worker-primary"}`,
+				RiskLevel:      domain.RiskLevelLow,
+				Rationale:      "revalidate execution scope",
+				Status:         domain.CandidateActionStatusApproved,
+				CreatedAt:      time.Now().UTC(),
+			}
+			if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
+				t.Fatalf("save candidate action: %v", err)
+			}
+
+			adapter := &fakeAdapter{
+				exec: func(ctx context.Context, action domain.CandidateAction, request AdapterRequest) (AdapterResult, error) {
+					t.Fatalf("adapter should not execute when scope validation fails")
+					return AdapterResult{}, nil
+				},
+			}
+
+			service := NewService(repository, DefaultCatalog(), adapter, staticKillSwitch{}, nil, 2*time.Second, 0, time.Minute)
+			_, err := service.ExecuteAction(context.Background(), action.ID, "operator-a")
+			if err == nil {
+				t.Fatalf("expected scope validation error")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrorSubstr) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantErrorSubstr)
+			}
+			if adapter.calls != 0 {
+				t.Fatalf("adapter calls = %d, want 0", adapter.calls)
+			}
+
+			storedAction, err := repository.GetCandidateAction(context.Background(), action.ID)
+			if err != nil {
+				t.Fatalf("get candidate action: %v", err)
+			}
+			if storedAction.Status != domain.CandidateActionStatusApproved {
+				t.Fatalf("action status = %q, want %q", storedAction.Status, domain.CandidateActionStatusApproved)
+			}
+		})
 	}
 }
 

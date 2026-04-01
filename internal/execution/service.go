@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -173,6 +174,15 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 	incidentRecord, err := s.repository.GetIncident(ctx, action.IncidentID)
 	if err != nil {
 		return domain.ExecutionRecord{}, fmt.Errorf("get incident for execution: %w", err)
+	}
+	if err := validateExecutionScope(action, incidentRecord, definition); err != nil {
+		if auditErr := s.audit(ctx, action.IncidentID, "execution_scope_validation_failed", "completed", map[string]any{
+			"candidate_action_id": action.ID,
+			"error":               err.Error(),
+		}); auditErr != nil {
+			return domain.ExecutionRecord{}, fmt.Errorf("audit execution scope validation failure: %w", auditErr)
+		}
+		return domain.ExecutionRecord{}, err
 	}
 	incidentRecord, err = s.transitionIncidentState(ctx, incidentRecord, domain.IncidentStateExecutingAction)
 	if err != nil {
@@ -367,4 +377,14 @@ func marshalExecutionPayload(payload map[string]any) string {
 		return "{}"
 	}
 	return string(body)
+}
+
+func validateExecutionScope(action domain.CandidateAction, incidentRecord domain.Incident, definition ActionDefinition) error {
+	if len(definition.AllowedEnvironments) > 0 && !slices.Contains(definition.AllowedEnvironments, incidentRecord.Environment) {
+		return fmt.Errorf("action %q is not allowed in environment %q", definition.Key, incidentRecord.Environment)
+	}
+	if len(definition.AllowedTargets) > 0 && !slices.Contains(definition.AllowedTargets, action.TargetResource) {
+		return fmt.Errorf("target %q is not allowed for action %q", action.TargetResource, definition.Key)
+	}
+	return nil
 }
