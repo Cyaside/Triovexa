@@ -123,8 +123,8 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 	if !definition.Executable {
 		return domain.ExecutionRecord{}, errors.New("candidate action is not executable in the current phase")
 	}
-	if definition.RiskLevel != domain.RiskLevelLow {
-		return domain.ExecutionRecord{}, errors.New("only low-risk actions can be executed in the current phase")
+	if definition.RiskLevel == domain.RiskLevelHigh {
+		return domain.ExecutionRecord{}, errors.New("high-risk actions cannot be executed in the current phase")
 	}
 
 	idempotencyKey := "execute:" + action.ID
@@ -132,7 +132,11 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 	if err != nil {
 		return domain.ExecutionRecord{}, fmt.Errorf("list execution records: %w", err)
 	}
-	if duplicate := findDuplicateExecution(existing, idempotencyKey, s.cooldown, s.now()); duplicate != nil {
+	executionCooldown := s.cooldown
+	if definition.ExecutionCooldown > 0 {
+		executionCooldown = definition.ExecutionCooldown
+	}
+	if duplicate := findDuplicateExecution(existing, idempotencyKey, executionCooldown, s.now()); duplicate != nil {
 		if auditErr := s.audit(ctx, action.IncidentID, "duplicate_execution_prevented", "completed", map[string]any{
 			"candidate_action_id": action.ID,
 			"execution_record_id": duplicate.ID,
@@ -141,9 +145,21 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 		}
 		return *duplicate, errors.New("duplicate execution prevented by idempotency guard")
 	}
+	if definition.MaxExecutionAttempts > 0 && countExecutionAttempts(existing) >= definition.MaxExecutionAttempts {
+		if auditErr := s.audit(ctx, action.IncidentID, "execution_attempt_limit_reached", "completed", map[string]any{
+			"candidate_action_id": action.ID,
+			"max_attempts":        definition.MaxExecutionAttempts,
+		}); auditErr != nil {
+			return domain.ExecutionRecord{}, fmt.Errorf("audit execution attempt limit: %w", auditErr)
+		}
+		return domain.ExecutionRecord{}, errors.New("execution attempt limit reached for candidate action")
+	}
 
 	if action.Status != domain.CandidateActionStatusApproved && action.Status != domain.CandidateActionStatusAllowed {
 		return domain.ExecutionRecord{}, errors.New("candidate action must be approved or allowed before execution")
+	}
+	if definition.RiskLevel == domain.RiskLevelMedium && action.Status != domain.CandidateActionStatusApproved {
+		return domain.ExecutionRecord{}, errors.New("medium-risk action must be explicitly approved before execution")
 	}
 	if s.killSwitch != nil && s.killSwitch.Enabled() {
 		if auditErr := s.audit(ctx, action.IncidentID, "execution_blocked_by_kill_switch", "completed", map[string]any{
@@ -325,6 +341,14 @@ func findDuplicateExecution(records []domain.ExecutionRecord, idempotencyKey str
 		}
 	}
 	return nil
+}
+
+func countExecutionAttempts(records []domain.ExecutionRecord) int {
+	var attempts int
+	for range records {
+		attempts++
+	}
+	return attempts
 }
 
 func mapExecutionErrorToStatus(err error) string {

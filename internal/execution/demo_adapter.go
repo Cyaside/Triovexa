@@ -86,6 +86,10 @@ func demoEndpointForAction(action domain.CandidateAction) (string, map[string]an
 		return "/actions/retry-job", parameters, nil
 	case "refresh_demo_cache":
 		return "/actions/refresh-cache", parameters, nil
+	case "pause_demo_queue_consumer":
+		return "/actions/pause-queue-consumer", parameters, nil
+	case "resume_demo_queue_consumer":
+		return "/actions/resume-queue-consumer", parameters, nil
 	default:
 		return "", nil, fmt.Errorf("unsupported demo action %q", action.ActionType)
 	}

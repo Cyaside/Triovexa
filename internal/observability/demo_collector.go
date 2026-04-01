@@ -47,11 +47,13 @@ func (c *DemoCollector) Collect(ctx context.Context, incident domain.Incident) (
 
 	observedAt := time.Now().UTC()
 	return []domain.EvidenceItem{
-		newEvidenceItem(incident.ID, "metric", "demo-service", fmt.Sprintf("error_rate=%.2f latency_ms=%d queue_backlog=%d", snapshot.ErrorRate, snapshot.LatencyMs, snapshot.QueueBacklog), observedAt, map[string]any{
-			"mode":          snapshot.Mode,
-			"error_rate":    snapshot.ErrorRate,
-			"latency_ms":    snapshot.LatencyMs,
-			"queue_backlog": snapshot.QueueBacklog,
+		newEvidenceItem(incident.ID, "metric", "demo-service", fmt.Sprintf("error_rate=%.2f latency_ms=%d queue_backlog=%d replica_count=%d consumer_paused=%t", snapshot.ErrorRate, snapshot.LatencyMs, snapshot.QueueBacklog, snapshot.ReplicaCount, snapshot.ConsumerPaused), observedAt, map[string]any{
+			"mode":            snapshot.Mode,
+			"error_rate":      snapshot.ErrorRate,
+			"latency_ms":      snapshot.LatencyMs,
+			"queue_backlog":   snapshot.QueueBacklog,
+			"replica_count":   snapshot.ReplicaCount,
+			"consumer_paused": snapshot.ConsumerPaused,
 		}),
 		newEvidenceItem(incident.ID, "log", "demo-service", synthesizeLogLine(snapshot), observedAt, map[string]any{
 			"mode":          snapshot.Mode,

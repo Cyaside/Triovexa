@@ -39,4 +39,7 @@ type Repository interface {
 	GetVerificationResult(context.Context, string) (domain.VerificationResult, error)
 	ListVerificationResults(context.Context, string) ([]domain.VerificationResult, error)
 	ListVerificationResultsByAction(context.Context, string) ([]domain.VerificationResult, error)
+	SaveRollbackRecord(context.Context, domain.RollbackRecord) error
+	ListRollbackRecords(context.Context, string) ([]domain.RollbackRecord, error)
+	ListRollbackRecordsByAction(context.Context, string) ([]domain.RollbackRecord, error)
 }

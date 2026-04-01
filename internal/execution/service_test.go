@@ -145,6 +145,53 @@ func TestServiceExecuteActionBlocksKillSwitchAndDuplicates(t *testing.T) {
 	}
 }
 
+func TestServiceExecuteActionAllowsApprovedMediumRisk(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	incidentRecord := domain.Incident{
+		ID:          "incident-medium-1",
+		Environment: "staging",
+		State:       domain.IncidentStateApproved,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	if err := repository.CreateIncident(context.Background(), incidentRecord); err != nil {
+		t.Fatalf("create incident: %v", err)
+	}
+
+	action := domain.CandidateAction{
+		ID:             uuid.NewString(),
+		IncidentID:     incidentRecord.ID,
+		ActionType:     "pause_demo_queue_consumer",
+		TargetResource: "demo-queue-consumer",
+		ParametersJSON: `{}`,
+		RiskLevel:      domain.RiskLevelMedium,
+		Rationale:      "pause consumer to limit blast radius",
+		EvidenceRefs:   []string{},
+		Status:         domain.CandidateActionStatusApproved,
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
+		t.Fatalf("save candidate action: %v", err)
+	}
+
+	service := NewService(repository, DefaultCatalog(), &fakeAdapter{
+		exec: func(ctx context.Context, action domain.CandidateAction, request AdapterRequest) (AdapterResult, error) {
+			return AdapterResult{ExecutorType: "fake-adapter", Payload: map[string]any{"applied": true}}, nil
+		},
+	}, staticKillSwitch{}, nil, 2*time.Second, 0, time.Minute)
+
+	record, err := service.ExecuteAction(context.Background(), action.ID, "operator-a")
+	if err != nil {
+		t.Fatalf("execute medium-risk action: %v", err)
+	}
+
+	if record.Status != ExecutionStatusSucceeded {
+		t.Fatalf("execution status = %q, want %q", record.Status, ExecutionStatusSucceeded)
+	}
+}
+
 func seedApprovedExecutionFixture(t *testing.T, repository storage.Repository) (domain.Incident, domain.CandidateAction) {
 	t.Helper()
 

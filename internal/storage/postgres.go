@@ -144,6 +144,17 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			notes TEXT NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS rollback_records (
+			id TEXT PRIMARY KEY,
+			candidate_action_id TEXT NOT NULL REFERENCES candidate_actions(id) ON DELETE CASCADE,
+			rollback_action_key TEXT NOT NULL,
+			triggered_by TEXT NOT NULL,
+			status TEXT NOT NULL,
+			started_at TIMESTAMPTZ NOT NULL,
+			finished_at TIMESTAMPTZ NOT NULL,
+			result_json JSONB NOT NULL,
+			note TEXT NOT NULL
+		);`,
 	}
 
 	for _, statement := range statements {
@@ -998,4 +1009,99 @@ func (s *PostgresStore) ListVerificationResultsByAction(ctx context.Context, act
 	}
 
 	return results, rows.Err()
+}
+
+func (s *PostgresStore) SaveRollbackRecord(ctx context.Context, record domain.RollbackRecord) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO rollback_records (id, candidate_action_id, rollback_action_key, triggered_by, status, started_at, finished_at, result_json, note)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+		ON CONFLICT(id) DO UPDATE SET
+			rollback_action_key = excluded.rollback_action_key,
+			triggered_by = excluded.triggered_by,
+			status = excluded.status,
+			started_at = excluded.started_at,
+			finished_at = excluded.finished_at,
+			result_json = excluded.result_json,
+			note = excluded.note
+	`,
+		record.ID,
+		record.CandidateActionID,
+		record.RollbackActionKey,
+		record.TriggeredBy,
+		record.Status,
+		record.StartedAt.UTC(),
+		record.FinishedAt.UTC(),
+		record.ResultJSON,
+		record.Note,
+	)
+	return err
+}
+
+func (s *PostgresStore) ListRollbackRecords(ctx context.Context, incidentID string) ([]domain.RollbackRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT rr.id, rr.candidate_action_id, rr.rollback_action_key, rr.triggered_by, rr.status, rr.started_at, rr.finished_at, rr.result_json, rr.note
+		FROM rollback_records rr
+		INNER JOIN candidate_actions ca ON ca.id = rr.candidate_action_id
+		WHERE ca.incident_id = $1
+		ORDER BY rr.started_at ASC
+	`, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []domain.RollbackRecord
+	for rows.Next() {
+		var record domain.RollbackRecord
+		if err := rows.Scan(
+			&record.ID,
+			&record.CandidateActionID,
+			&record.RollbackActionKey,
+			&record.TriggeredBy,
+			&record.Status,
+			&record.StartedAt,
+			&record.FinishedAt,
+			&record.ResultJSON,
+			&record.Note,
+		); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+
+	return records, rows.Err()
+}
+
+func (s *PostgresStore) ListRollbackRecordsByAction(ctx context.Context, actionID string) ([]domain.RollbackRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, candidate_action_id, rollback_action_key, triggered_by, status, started_at, finished_at, result_json, note
+		FROM rollback_records
+		WHERE candidate_action_id = $1
+		ORDER BY started_at ASC
+	`, actionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []domain.RollbackRecord
+	for rows.Next() {
+		var record domain.RollbackRecord
+		if err := rows.Scan(
+			&record.ID,
+			&record.CandidateActionID,
+			&record.RollbackActionKey,
+			&record.TriggeredBy,
+			&record.Status,
+			&record.StartedAt,
+			&record.FinishedAt,
+			&record.ResultJSON,
+			&record.Note,
+		); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+
+	return records, rows.Err()
 }

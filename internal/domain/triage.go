@@ -63,6 +63,18 @@ type VerificationResult struct {
 	CreatedAt         time.Time
 }
 
+type RollbackRecord struct {
+	ID                string
+	CandidateActionID string
+	RollbackActionKey string
+	TriggeredBy       string
+	Status            string
+	StartedAt         time.Time
+	FinishedAt        time.Time
+	ResultJSON        string
+	Note              string
+}
+
 type AuditEvent struct {
 	ID          string
 	IncidentID  string

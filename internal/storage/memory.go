@@ -20,6 +20,7 @@ type MemoryStore struct {
 	approvals  map[string][]domain.ApprovalRecord
 	executions map[string][]domain.ExecutionRecord
 	verify     map[string][]domain.VerificationResult
+	rollbacks  map[string][]domain.RollbackRecord
 	triageByID map[string]domain.TriageResult
 }
 
@@ -34,6 +35,7 @@ func NewMemoryStore() *MemoryStore {
 		approvals:  make(map[string][]domain.ApprovalRecord),
 		executions: make(map[string][]domain.ExecutionRecord),
 		verify:     make(map[string][]domain.VerificationResult),
+		rollbacks:  make(map[string][]domain.RollbackRecord),
 		triageByID: make(map[string]domain.TriageResult),
 	}
 }
@@ -448,4 +450,70 @@ func (s *MemoryStore) ListVerificationResultsByAction(_ context.Context, actionI
 	})
 
 	return results, nil
+}
+
+func (s *MemoryStore) SaveRollbackRecord(_ context.Context, record domain.RollbackRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	incidentID := ""
+	for candidateIncidentID, actions := range s.actions {
+		for _, action := range actions {
+			if action.ID == record.CandidateActionID {
+				incidentID = candidateIncidentID
+				break
+			}
+		}
+		if incidentID != "" {
+			break
+		}
+	}
+
+	if incidentID == "" {
+		return ErrNotFound
+	}
+
+	records := s.rollbacks[incidentID]
+	for idx, existing := range records {
+		if existing.ID == record.ID {
+			records[idx] = record
+			s.rollbacks[incidentID] = records
+			return nil
+		}
+	}
+
+	s.rollbacks[incidentID] = append(records, record)
+	return nil
+}
+
+func (s *MemoryStore) ListRollbackRecords(_ context.Context, incidentID string) ([]domain.RollbackRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	records := append([]domain.RollbackRecord(nil), s.rollbacks[incidentID]...)
+	sort.SliceStable(records, func(i, j int) bool {
+		return records[i].StartedAt.Before(records[j].StartedAt)
+	})
+
+	return records, nil
+}
+
+func (s *MemoryStore) ListRollbackRecordsByAction(_ context.Context, actionID string) ([]domain.RollbackRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var records []domain.RollbackRecord
+	for _, incidentRecords := range s.rollbacks {
+		for _, record := range incidentRecords {
+			if record.CandidateActionID == actionID {
+				records = append(records, record)
+			}
+		}
+	}
+
+	sort.SliceStable(records, func(i, j int) bool {
+		return records[i].StartedAt.Before(records[j].StartedAt)
+	})
+
+	return records, nil
 }

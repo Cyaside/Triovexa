@@ -28,6 +28,8 @@ type State struct {
 	ErrorRate      float64
 	LatencyMs      int
 	QueueBacklog   int
+	ReplicaCount   int
+	ConsumerPaused bool
 	WorkerHealthy  bool
 	LastDeploy     string
 	LastUpdatedUTC time.Time
@@ -38,6 +40,8 @@ type Snapshot struct {
 	ErrorRate      float64   `json:"error_rate"`
 	LatencyMs      int       `json:"latency_ms"`
 	QueueBacklog   int       `json:"queue_backlog"`
+	ReplicaCount   int       `json:"replica_count"`
+	ConsumerPaused bool      `json:"consumer_paused"`
 	WorkerHealthy  bool      `json:"worker_healthy"`
 	LastDeploy     string    `json:"last_deploy"`
 	LastUpdatedUTC time.Time `json:"last_updated_utc"`
@@ -49,6 +53,8 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 		ErrorRate:      0.01,
 		LatencyMs:      120,
 		QueueBacklog:   0,
+		ReplicaCount:   2,
+		ConsumerPaused: false,
 		WorkerHealthy:  true,
 		LastDeploy:     "v1.0.0",
 		LastUpdatedUTC: time.Now().UTC(),
@@ -64,13 +70,15 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 		}
 
 		writeJSON(w, statusCode, map[string]any{
-			"status":         mapHealthStatus(snapshot),
-			"mode":           snapshot.Mode,
-			"error_rate":     snapshot.ErrorRate,
-			"latency_ms":     snapshot.LatencyMs,
-			"queue_backlog":  snapshot.QueueBacklog,
-			"worker_healthy": snapshot.WorkerHealthy,
-			"last_deploy":    snapshot.LastDeploy,
+			"status":          mapHealthStatus(snapshot),
+			"mode":            snapshot.Mode,
+			"error_rate":      snapshot.ErrorRate,
+			"latency_ms":      snapshot.LatencyMs,
+			"queue_backlog":   snapshot.QueueBacklog,
+			"replica_count":   snapshot.ReplicaCount,
+			"consumer_paused": snapshot.ConsumerPaused,
+			"worker_healthy":  snapshot.WorkerHealthy,
+			"last_deploy":     snapshot.LastDeploy,
 		})
 	})
 
@@ -85,6 +93,8 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 		_, _ = fmt.Fprintf(w, "triovexa_demo_error_rate %.2f\n", snapshot.ErrorRate)
 		_, _ = fmt.Fprintf(w, "triovexa_demo_latency_ms %d\n", snapshot.LatencyMs)
 		_, _ = fmt.Fprintf(w, "triovexa_demo_queue_backlog %d\n", snapshot.QueueBacklog)
+		_, _ = fmt.Fprintf(w, "triovexa_demo_replica_count %d\n", snapshot.ReplicaCount)
+		_, _ = fmt.Fprintf(w, "triovexa_demo_consumer_paused %d\n", boolToFloat(snapshot.ConsumerPaused))
 		_, _ = fmt.Fprintf(w, "triovexa_demo_worker_healthy %d\n", boolToFloat(snapshot.WorkerHealthy))
 		_, _ = fmt.Fprintf(w, "triovexa_demo_mode{mode=%q} 1\n", snapshot.Mode)
 	})
@@ -95,6 +105,8 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			ErrorRate:      0.38,
 			LatencyMs:      850,
 			QueueBacklog:   12,
+			ReplicaCount:   2,
+			ConsumerPaused: false,
 			WorkerHealthy:  true,
 			LastDeploy:     "v1.0.1",
 			LastUpdatedUTC: time.Now().UTC(),
@@ -109,6 +121,8 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			ErrorRate:      0.12,
 			LatencyMs:      430,
 			QueueBacklog:   128,
+			ReplicaCount:   2,
+			ConsumerPaused: false,
 			WorkerHealthy:  false,
 			LastDeploy:     "v1.0.1",
 			LastUpdatedUTC: time.Now().UTC(),
@@ -123,6 +137,8 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			ErrorRate:      0.27,
 			LatencyMs:      1250,
 			QueueBacklog:   46,
+			ReplicaCount:   2,
+			ConsumerPaused: false,
 			WorkerHealthy:  true,
 			LastDeploy:     "v1.1.0",
 			LastUpdatedUTC: time.Now().UTC(),
@@ -137,6 +153,8 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			ErrorRate:      0.01,
 			LatencyMs:      120,
 			QueueBacklog:   0,
+			ReplicaCount:   state.snapshot().ReplicaCount,
+			ConsumerPaused: false,
 			WorkerHealthy:  true,
 			LastDeploy:     state.snapshot().LastDeploy,
 			LastUpdatedUTC: time.Now().UTC(),
@@ -164,6 +182,8 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			ErrorRate:      0.04,
 			LatencyMs:      190,
 			QueueBacklog:   24,
+			ReplicaCount:   state.snapshot().ReplicaCount,
+			ConsumerPaused: false,
 			WorkerHealthy:  true,
 			LastDeploy:     state.snapshot().LastDeploy,
 			LastUpdatedUTC: time.Now().UTC(),
@@ -196,6 +216,8 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			ErrorRate:      0.03,
 			LatencyMs:      170,
 			QueueBacklog:   8,
+			ReplicaCount:   state.snapshot().ReplicaCount,
+			ConsumerPaused: false,
 			WorkerHealthy:  true,
 			LastDeploy:     state.snapshot().LastDeploy,
 			LastUpdatedUTC: time.Now().UTC(),
@@ -228,6 +250,8 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			ErrorRate:      0.02,
 			LatencyMs:      150,
 			QueueBacklog:   4,
+			ReplicaCount:   state.snapshot().ReplicaCount,
+			ConsumerPaused: false,
 			WorkerHealthy:  true,
 			LastDeploy:     state.snapshot().LastDeploy,
 			LastUpdatedUTC: time.Now().UTC(),
@@ -238,6 +262,56 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			"cache_key": payload.CacheKey,
 			"applied":   true,
 			"snapshot":  state.snapshot(),
+		})
+	})
+
+	mux.HandleFunc("/actions/pause-queue-consumer", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		state.apply(Snapshot{
+			Mode:           ModeWorkerStall,
+			ErrorRate:      0.18,
+			LatencyMs:      690,
+			QueueBacklog:   160,
+			ReplicaCount:   state.snapshot().ReplicaCount,
+			ConsumerPaused: true,
+			WorkerHealthy:  false,
+			LastDeploy:     state.snapshot().LastDeploy,
+			LastUpdatedUTC: time.Now().UTC(),
+		})
+		logger.Warn("demo action executed", slog.String("action", "pause_demo_queue_consumer"))
+		writeJSON(w, http.StatusOK, map[string]any{
+			"action":   "pause_demo_queue_consumer",
+			"applied":  true,
+			"snapshot": state.snapshot(),
+		})
+	})
+
+	mux.HandleFunc("/actions/resume-queue-consumer", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		state.apply(Snapshot{
+			Mode:           ModeHealthy,
+			ErrorRate:      0.02,
+			LatencyMs:      180,
+			QueueBacklog:   10,
+			ReplicaCount:   state.snapshot().ReplicaCount,
+			ConsumerPaused: false,
+			WorkerHealthy:  true,
+			LastDeploy:     state.snapshot().LastDeploy,
+			LastUpdatedUTC: time.Now().UTC(),
+		})
+		logger.Info("demo action executed", slog.String("action", "resume_demo_queue_consumer"))
+		writeJSON(w, http.StatusOK, map[string]any{
+			"action":   "resume_demo_queue_consumer",
+			"applied":  true,
+			"snapshot": state.snapshot(),
 		})
 	})
 
@@ -256,6 +330,8 @@ func (s *State) apply(next Snapshot) {
 	s.ErrorRate = next.ErrorRate
 	s.LatencyMs = next.LatencyMs
 	s.QueueBacklog = next.QueueBacklog
+	s.ReplicaCount = next.ReplicaCount
+	s.ConsumerPaused = next.ConsumerPaused
 	s.WorkerHealthy = next.WorkerHealthy
 	s.LastDeploy = next.LastDeploy
 	s.LastUpdatedUTC = next.LastUpdatedUTC
@@ -270,6 +346,8 @@ func (s *State) snapshot() Snapshot {
 		ErrorRate:      s.ErrorRate,
 		LatencyMs:      s.LatencyMs,
 		QueueBacklog:   s.QueueBacklog,
+		ReplicaCount:   s.ReplicaCount,
+		ConsumerPaused: s.ConsumerPaused,
 		WorkerHealthy:  s.WorkerHealthy,
 		LastDeploy:     s.LastDeploy,
 		LastUpdatedUTC: s.LastUpdatedUTC,

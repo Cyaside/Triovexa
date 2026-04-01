@@ -22,6 +22,7 @@ const (
 	CandidateActionStatusExecuting        CandidateActionStatus = "executing"
 	CandidateActionStatusSucceeded        CandidateActionStatus = "succeeded"
 	CandidateActionStatusFailed           CandidateActionStatus = "failed"
+	CandidateActionStatusRolledBack       CandidateActionStatus = "rolled_back"
 )
 
 type CandidateAction struct {
