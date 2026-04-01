@@ -67,7 +67,7 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - menyediakan metrics sederhana untuk observability
 - menyediakan kondisi yang bisa dipakai saat demo triage dan candidate action
 
-## Endpoint UI dan API Phase 1
+## Endpoint UI dan API Phase 2
 
 - `GET /ui/incidents`
 - `GET /ui/incidents/{id}`
@@ -75,3 +75,30 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - `GET /incidents`
 - `GET /incidents/{id}`
 - `GET /incidents/{id}/triage`
+- `GET /incidents/{id}/actions`
+
+## Environment Variables
+
+Yang aktif dipakai saat ini:
+
+- `DATABASE_URL`
+- `DOCS_ROOT`
+- `DEMO_SERVICE_BASE_URL`
+- `HTTP_PORT`
+- `LOG_LEVEL`
+- `KILL_SWITCH_ENABLED`
+
+Yang belum wajib sekarang, tetapi nanti perlu Anda isi saat kita sambungkan ke integrasi eksternal sungguhan:
+
+- `GRAFANA_BASE_URL`
+  Dipakai jika kita ingin mengambil konteks tambahan dari Grafana API, bukan hanya menerima webhook.
+- `GRAFANA_API_TOKEN`
+  Token akses untuk query dashboard, alert detail, atau API pendukung Grafana.
+- `GRAFANA_WEBHOOK_SECRET`
+  Secret untuk verifikasi request webhook Grafana agar intake lebih aman.
+- `GOOGLE_API_KEY`
+  Kredensial untuk provider model Google saat heuristik lokal diganti dengan model sungguhan.
+- `GOOGLE_MODEL`
+  Nama model Google yang akan dipakai untuk triage dan candidate action generation.
+
+Selama variable external integration di atas belum diisi, aplikasi tetap jalan dengan mode heuristik lokal yang kita pakai sekarang.
