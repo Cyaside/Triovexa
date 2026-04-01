@@ -22,6 +22,7 @@ const (
 type Incident struct {
 	ID              string
 	ExternalAlertID string
+	AlertSource     string
 	Title           string
 	ServiceName     string
 	Environment     string

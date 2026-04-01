@@ -11,6 +11,8 @@ import (
 
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
 	apphttp "github.com/Cyaside/Triovexa/internal/http"
+	"github.com/Cyaside/Triovexa/internal/incident"
+	"github.com/Cyaside/Triovexa/internal/storage"
 )
 
 func main() {
@@ -20,12 +22,25 @@ func main() {
 		Level: cfg.LogLevel,
 	}))
 
-	server := apphttp.NewServer(cfg, logger)
+	repository, err := storage.NewSQLiteStore(cfg.DatabasePath)
+	if err != nil {
+		logger.Error("failed to initialize storage", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer func() {
+		if err := repository.Close(); err != nil {
+			logger.Error("failed to close storage", slog.String("error", err.Error()))
+		}
+	}()
+
+	incidentService := incident.NewService(repository)
+	server := apphttp.NewServer(cfg, logger, repository, incidentService)
 
 	logger.Info("starting server",
 		slog.String("addr", server.Addr),
 		slog.String("environment", cfg.Environment),
 		slog.Bool("kill_switch_enabled", cfg.KillSwitchEnabled),
+		slog.String("database_path", cfg.DatabasePath),
 	)
 
 	errCh := make(chan error, 1)
