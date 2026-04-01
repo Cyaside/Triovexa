@@ -1,0 +1,27 @@
+# Planning docs kept local only
+guide/
+prd.md
+
+# Build outputs
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Runtime artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Environment files
+.env
+.env.*
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
