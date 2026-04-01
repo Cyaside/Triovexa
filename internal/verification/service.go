@@ -15,6 +15,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
 const (
@@ -72,7 +73,8 @@ type Service struct {
 	rollbacker interface {
 		RollbackAction(context.Context, domain.CandidateAction, string, string) (domain.RollbackRecord, error)
 	}
-	now func() time.Time
+	metrics *telemetry.Recorder
+	now     func() time.Time
 }
 
 func NewService(
@@ -94,8 +96,19 @@ func NewService(
 	}
 }
 
+func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
+	s.metrics = recorder
+	return s
+}
+
 func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAction, record domain.ExecutionRecord) (domain.VerificationResult, error) {
 	startedAt := s.now()
+	status := StatusInconclusive
+	defer func() {
+		if s.metrics != nil {
+			s.metrics.ObserveVerification(status, s.now().Sub(startedAt))
+		}
+	}()
 	if err := s.audit(ctx, action.IncidentID, "verification_started", "started", map[string]any{
 		"candidate_action_id": action.ID,
 		"execution_record_id": record.ID,

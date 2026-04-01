@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
 type ServerInfo struct {
@@ -35,7 +37,23 @@ func NewServer(
 	approvalService *approval.Service,
 	executionService *execution.Service,
 ) *http.Server {
+	return NewServerWithTelemetry(cfg, logger, repository, incidentService, approvalService, executionService, nil)
+}
+
+func NewServerWithTelemetry(
+	cfg config.Config,
+	logger *slog.Logger,
+	repository storage.Repository,
+	incidentService *incident.Service,
+	approvalService *approval.Service,
+	executionService *execution.Service,
+	recorder *telemetry.Recorder,
+) *http.Server {
 	mux := http.NewServeMux()
+	serverMetrics := recorder
+	if serverMetrics == nil {
+		serverMetrics = telemetry.NewRecorder()
+	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -54,6 +72,8 @@ func NewServer(
 		})
 	})
 
+	mux.Handle("/metrics", serverMetrics)
+
 	mux.HandleFunc("/debug/tools", func(w http.ResponseWriter, r *http.Request) {
 		killSwitchState := approval.KillSwitchState{
 			Enabled:   cfg.KillSwitchEnabled,
@@ -68,10 +88,12 @@ func NewServer(
 			Environment:         cfg.Environment,
 			KillSwitchEnabled:   killSwitchState.Enabled,
 			KillSwitchUpdatedAt: killSwitchState.UpdatedAt.Format(time.RFC3339),
-			Phase:               "phase-06-rollback-medium-risk-actions",
+			Phase:               "phase-07-hardening-portfolio-release",
 			AvailableEndpoints: []string{
 				"GET /health",
+				"GET /metrics",
 				"GET /debug/tools",
+				"GET /debug/policies",
 				"POST /webhooks/grafana",
 				"GET /incidents",
 				"GET /incidents/{id}",
@@ -87,6 +109,22 @@ func NewServer(
 				"GET /ui/incidents/{id}",
 			},
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		})
+	})
+
+	mux.HandleFunc("/debug/policies", func(w http.ResponseWriter, r *http.Request) {
+		killSwitchState := approval.KillSwitchState{
+			Enabled:   cfg.KillSwitchEnabled,
+			UpdatedAt: time.Now().UTC(),
+		}
+		if approvalService != nil {
+			killSwitchState = approvalService.KillSwitchState()
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"phase":               "phase-07-hardening-portfolio-release",
+			"kill_switch_enabled": killSwitchState.Enabled,
+			"catalog":             catalogView(execution.DefaultCatalog()),
 		})
 	})
 
@@ -586,23 +624,50 @@ func NewServer(
 
 	return &http.Server{
 		Addr:         cfg.HTTPAddress(),
-		Handler:      withLogging(logger, mux),
+		Handler:      withLogging(logger, serverMetrics, mux),
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
 	}
 }
 
-func withLogging(logger *slog.Logger, next http.Handler) http.Handler {
+func withLogging(logger *slog.Logger, recorder *telemetry.Recorder, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startedAt := time.Now()
-		next.ServeHTTP(w, r)
+		responseWriter := &statusCapturingResponseWriter{
+			ResponseWriter: w,
+			statusCode:     http.StatusOK,
+		}
+		next.ServeHTTP(responseWriter, r)
+		route := routeLabel(r.URL.Path)
+		if recorder != nil {
+			recorder.ObserveHTTPRequest(r.Method, route, responseWriter.statusCode, time.Since(startedAt))
+		}
 		logger.Info("http request completed",
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
+			slog.String("route", route),
+			slog.Int("status", responseWriter.statusCode),
 			slog.Duration("duration", time.Since(startedAt)),
 		)
 	})
+}
+
+type statusCapturingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *statusCapturingResponseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *statusCapturingResponseWriter) Write(body []byte) (int, error) {
+	if w.statusCode == 0 {
+		w.statusCode = http.StatusOK
+	}
+	return w.ResponseWriter.Write(body)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -703,4 +768,76 @@ func parseExecutionRequest(r *http.Request) (initiatedBy string, note string, wa
 	}
 
 	return initiatedBy, note, wantsHTML, nil
+}
+
+func routeLabel(path string) string {
+	switch {
+	case path == "/":
+		return "/"
+	case path == "/health":
+		return "/health"
+	case path == "/metrics":
+		return "/metrics"
+	case path == "/debug/tools":
+		return "/debug/tools"
+	case path == "/debug/policies":
+		return "/debug/policies"
+	case path == "/webhooks/grafana":
+		return "/webhooks/grafana"
+	case path == "/incidents":
+		return "/incidents"
+	case strings.HasPrefix(path, "/incidents/") && strings.HasSuffix(path, "/triage"):
+		return "/incidents/{id}/triage"
+	case strings.HasPrefix(path, "/incidents/") && strings.HasSuffix(path, "/actions"):
+		return "/incidents/{id}/actions"
+	case strings.HasPrefix(path, "/incidents/"):
+		return "/incidents/{id}"
+	case strings.HasPrefix(path, "/actions/") && strings.HasSuffix(path, "/verification"):
+		return "/actions/{id}/verification"
+	case strings.HasPrefix(path, "/actions/") && strings.HasSuffix(path, "/rollbacks"):
+		return "/actions/{id}/rollbacks"
+	case strings.HasPrefix(path, "/actions/") && strings.HasSuffix(path, "/approve"):
+		return "/actions/{id}/approve"
+	case strings.HasPrefix(path, "/actions/") && strings.HasSuffix(path, "/reject"):
+		return "/actions/{id}/reject"
+	case strings.HasPrefix(path, "/actions/") && strings.HasSuffix(path, "/execute"):
+		return "/actions/{id}/execute"
+	case path == "/admin/kill-switch":
+		return "/admin/kill-switch"
+	case path == "/ui/incidents":
+		return "/ui/incidents"
+	case strings.HasPrefix(path, "/ui/incidents/"):
+		return "/ui/incidents/{id}"
+	default:
+		return path
+	}
+}
+
+func catalogView(catalog execution.Catalog) []map[string]any {
+	keys := make([]string, 0, len(catalog))
+	for key := range catalog {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	views := make([]map[string]any, 0, len(keys))
+	for _, key := range keys {
+		definition := catalog[key]
+		views = append(views, map[string]any{
+			"key":                    definition.Key,
+			"description":            definition.Description,
+			"risk_level":             definition.RiskLevel,
+			"approval_required":      definition.ApprovalRequired,
+			"executable":             definition.Executable,
+			"supports_rollback":      definition.SupportsRollback,
+			"rollback_action_key":    definition.RollbackActionKey,
+			"allowed_environments":   definition.AllowedEnvironments,
+			"allowed_targets":        definition.AllowedTargets,
+			"max_execution_attempts": definition.MaxExecutionAttempts,
+			"execution_cooldown":     definition.ExecutionCooldown.String(),
+			"parameters":             definition.Parameters,
+		})
+	}
+
+	return views
 }

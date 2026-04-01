@@ -14,6 +14,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/policy"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
 type KillSwitchState struct {
@@ -66,6 +67,7 @@ type Service struct {
 	repository storage.Repository
 	evaluator  policy.Evaluator
 	killSwitch *KillSwitch
+	metrics    *telemetry.Recorder
 	now        func() time.Time
 }
 
@@ -82,6 +84,14 @@ func NewService(repository storage.Repository, evaluator policy.Evaluator, killS
 			return time.Now().UTC()
 		},
 	}
+}
+
+func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
+	s.metrics = recorder
+	if s.metrics != nil {
+		s.metrics.RecordKillSwitchState(s.killSwitch.Enabled())
+	}
+	return s
 }
 
 func (s *Service) EvaluateActions(ctx context.Context, incidentRecord domain.Incident, actions []domain.CandidateAction) (domain.Incident, error) {
@@ -105,6 +115,9 @@ func (s *Service) EvaluateActions(ctx context.Context, incidentRecord domain.Inc
 		decision := s.evaluator.Evaluate(action, incidentRecord.Environment, s.killSwitch.Enabled())
 		decision.ID = uuid.NewString()
 		decisions = append(decisions, decision)
+		if s.metrics != nil {
+			s.metrics.IncPolicyDecision(string(decision.Decision))
+		}
 
 		nextStatus := statusFromDecision(decision)
 		if err := s.repository.UpdateCandidateActionStatus(ctx, action.ID, nextStatus); err != nil {
@@ -261,7 +274,11 @@ func (s *Service) RejectAction(ctx context.Context, actionID string, approvedBy 
 }
 
 func (s *Service) SetKillSwitch(enabled bool) KillSwitchState {
-	return s.killSwitch.Set(enabled)
+	state := s.killSwitch.Set(enabled)
+	if s.metrics != nil {
+		s.metrics.RecordKillSwitchState(state.Enabled)
+	}
+	return state
 }
 
 func (s *Service) KillSwitchState() KillSwitchState {

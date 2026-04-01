@@ -11,6 +11,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/alerting"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
 type Service struct {
@@ -20,11 +21,17 @@ type Service struct {
 	generator  TriageGenerator
 	actions    ActionGenerator
 	workflow   PolicyWorkflow
+	metrics    *telemetry.Recorder
 	now        func() time.Time
 }
 
 type ContextCollector interface {
 	Collect(context.Context, domain.Incident) ([]domain.EvidenceItem, error)
+}
+
+func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
+	s.metrics = recorder
+	return s
 }
 
 type KnowledgeRetriever interface {
@@ -87,6 +94,9 @@ func (s *Service) IngestGrafanaWebhook(ctx context.Context, payload alerting.Gra
 	if err := s.repository.CreateIncident(ctx, incident); err != nil {
 		return domain.Incident{}, fmt.Errorf("create incident: %w", err)
 	}
+	if s.metrics != nil {
+		s.metrics.IncIncidentIngested()
+	}
 
 	details, err := json.Marshal(map[string]any{
 		"alert_source":      normalized.AlertSource,
@@ -139,6 +149,9 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 	collectedAt := s.now()
 	evidence, collectErr := s.collector.Collect(ctx, incident)
 	if collectErr != nil {
+		if s.metrics != nil {
+			s.metrics.ObserveTriageStage("context_collection", "partial_failure", s.now().Sub(collectedAt))
+		}
 		if auditErr := s.audit(ctx, incident.ID, "context_collection", "partial_failure", map[string]any{
 			"error": collectErr.Error(),
 		}, collectedAt, s.now()); auditErr != nil {
@@ -146,6 +159,9 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 		}
 		evidence = nil
 	} else {
+		if s.metrics != nil {
+			s.metrics.ObserveTriageStage("context_collection", "completed", s.now().Sub(collectedAt))
+		}
 		if err := s.repository.SaveEvidenceItems(ctx, evidence); err != nil {
 			return domain.Incident{}, fmt.Errorf("save evidence items: %w", err)
 		}
@@ -159,6 +175,9 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 	retrievedAt := s.now()
 	documents, retrievalErr := s.retriever.Retrieve(ctx, incident, evidence)
 	if retrievalErr != nil {
+		if s.metrics != nil {
+			s.metrics.ObserveTriageStage("knowledge_retrieval", "partial_failure", s.now().Sub(retrievedAt))
+		}
 		if err := s.audit(ctx, incident.ID, "knowledge_retrieval", "partial_failure", map[string]any{
 			"error": retrievalErr.Error(),
 		}, retrievedAt, s.now()); err != nil {
@@ -166,6 +185,9 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 		}
 		documents = nil
 	} else {
+		if s.metrics != nil {
+			s.metrics.ObserveTriageStage("knowledge_retrieval", "completed", s.now().Sub(retrievedAt))
+		}
 		if err := s.repository.SaveDocumentReferences(ctx, documents); err != nil {
 			return domain.Incident{}, fmt.Errorf("save document references: %w", err)
 		}
@@ -179,12 +201,18 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 	triagedAt := s.now()
 	result, err := s.generator.Generate(ctx, incident, evidence, documents)
 	if err != nil {
+		if s.metrics != nil {
+			s.metrics.ObserveTriageStage("triage_generation", "failed", s.now().Sub(triagedAt))
+		}
 		if auditErr := s.audit(ctx, incident.ID, "triage_generation", "failed", map[string]any{
 			"error": err.Error(),
 		}, triagedAt, s.now()); auditErr != nil {
 			return domain.Incident{}, fmt.Errorf("audit triage generation failure: %w", auditErr)
 		}
 		return domain.Incident{}, fmt.Errorf("generate triage result: %w", err)
+	}
+	if s.metrics != nil {
+		s.metrics.ObserveTriageStage("triage_generation", "completed", s.now().Sub(triagedAt))
 	}
 
 	if err := s.repository.SaveTriageResult(ctx, result); err != nil {
@@ -211,12 +239,18 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 
 	actions, err := s.actions.Generate(ctx, incident, result, evidence, documents)
 	if err != nil {
+		if s.metrics != nil {
+			s.metrics.ObserveTriageStage("action_generation", "failed", s.now().Sub(startedAt))
+		}
 		if auditErr := s.audit(ctx, incident.ID, "action_generation", "failed", map[string]any{
 			"error": err.Error(),
 		}, startedAt, s.now()); auditErr != nil {
 			return domain.Incident{}, fmt.Errorf("audit action generation failure: %w", auditErr)
 		}
 		return domain.Incident{}, fmt.Errorf("generate candidate actions: %w", err)
+	}
+	if s.metrics != nil {
+		s.metrics.ObserveTriageStage("action_generation", "completed", s.now().Sub(startedAt))
 	}
 
 	if len(actions) > 0 {

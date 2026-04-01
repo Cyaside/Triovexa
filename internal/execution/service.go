@@ -13,6 +13,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
 const (
@@ -63,6 +64,7 @@ type Service struct {
 	adapter    Adapter
 	killSwitch KillSwitchReader
 	verifier   VerificationWorkflow
+	metrics    *telemetry.Recorder
 	timeout    time.Duration
 	retries    int
 	cooldown   time.Duration
@@ -102,6 +104,11 @@ func NewService(
 			return time.Now().UTC()
 		},
 	}
+}
+
+func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
+	s.metrics = recorder
+	return s
 }
 
 func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedBy string) (domain.ExecutionRecord, error) {
@@ -230,9 +237,13 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 	})
 	record.ExecutorType = result.ExecutorType
 	record.FinishedAt = s.now()
+	executionDuration := record.FinishedAt.Sub(record.StartedAt)
 
 	if executionErr != nil {
 		record.Status = mapExecutionErrorToStatus(executionErr)
+		if s.metrics != nil {
+			s.metrics.ObserveExecution(record.Status, executionDuration)
+		}
 		record.ResultJSON = marshalExecutionPayload(map[string]any{
 			"error": executionErr.Error(),
 		})
@@ -257,6 +268,9 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 	}
 
 	record.Status = ExecutionStatusSucceeded
+	if s.metrics != nil {
+		s.metrics.ObserveExecution(record.Status, executionDuration)
+	}
 	record.ResultJSON = marshalExecutionPayload(result.Payload)
 	if err := s.repository.SaveExecutionRecord(ctx, record); err != nil {
 		return domain.ExecutionRecord{}, fmt.Errorf("update execution record: %w", err)

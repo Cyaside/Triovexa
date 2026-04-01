@@ -19,6 +19,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/remediation"
 	"github.com/Cyaside/Triovexa/internal/retrieval"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/telemetry"
 	"github.com/Cyaside/Triovexa/internal/triage"
 	"github.com/Cyaside/Triovexa/internal/verification"
 )
@@ -44,12 +45,14 @@ func main() {
 	collector := observability.NewDemoCollector(cfg.DemoServiceBaseURL)
 	retriever := retrieval.NewFileRetriever(cfg.DocsRoot)
 	catalog := execution.DefaultCatalog()
+	recorder := telemetry.NewRecorder()
 	generator := triage.NewHeuristicGenerator()
 	actionGenerator := remediation.NewHeuristicGenerator(catalog)
 	killSwitch := approval.NewKillSwitch(cfg.KillSwitchEnabled)
-	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
+	recorder.RecordKillSwitchState(cfg.KillSwitchEnabled)
+	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch).WithTelemetry(recorder)
 	rollbackService := execution.NewRollbackService(repository, catalog, execution.NewDemoAdapter(cfg.DemoServiceBaseURL))
-	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL), catalog, rollbackService)
+	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL), catalog, rollbackService).WithTelemetry(recorder)
 	executionService := execution.NewService(
 		repository,
 		catalog,
@@ -59,9 +62,9 @@ func main() {
 		cfg.ActionExecutionTimeout,
 		cfg.ActionExecutionRetries,
 		cfg.ActionExecutionCooldown,
-	)
-	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService)
-	server := apphttp.NewServer(cfg, logger, repository, incidentService, policyService, executionService)
+	).WithTelemetry(recorder)
+	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService).WithTelemetry(recorder)
+	server := apphttp.NewServerWithTelemetry(cfg, logger, repository, incidentService, policyService, executionService, recorder)
 
 	logger.Info("starting server",
 		slog.String("addr", server.Addr),
