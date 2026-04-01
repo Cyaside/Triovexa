@@ -16,6 +16,9 @@ Service demo ini disiapkan untuk menghasilkan sinyal insiden yang bisa dipakai p
 - `POST /simulate/worker-stall`
 - `POST /simulate/timeout-after-deploy`
 - `POST /simulate/reset`
+- `POST /actions/restart-worker`
+- `POST /actions/retry-job`
+- `POST /actions/refresh-cache`
 
 ## Mode Insiden
 
@@ -67,7 +70,7 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - menyediakan metrics sederhana untuk observability
 - menyediakan kondisi yang bisa dipakai saat demo triage dan candidate action
 
-## Endpoint UI dan API Phase 3
+## Endpoint UI dan API Phase 4
 
 - `GET /ui/incidents`
 - `GET /ui/incidents/{id}`
@@ -78,6 +81,7 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - `GET /incidents/{id}/actions`
 - `POST /actions/{id}/approve`
 - `POST /actions/{id}/reject`
+- `POST /actions/{id}/execute`
 - `POST /admin/kill-switch`
 
 ## Environment Variables
@@ -90,6 +94,9 @@ Yang aktif dipakai saat ini:
 - `HTTP_PORT`
 - `LOG_LEVEL`
 - `KILL_SWITCH_ENABLED`
+- `ACTION_EXECUTION_TIMEOUT`
+- `ACTION_EXECUTION_COOLDOWN`
+- `ACTION_EXECUTION_RETRIES`
 
 Yang belum wajib sekarang, tetapi nanti perlu Anda isi saat kita sambungkan ke integrasi eksternal sungguhan:
 
@@ -106,7 +113,7 @@ Yang belum wajib sekarang, tetapi nanti perlu Anda isi saat kita sambungkan ke i
 
 Selama variable external integration di atas belum diisi, aplikasi tetap jalan dengan mode heuristik lokal yang kita pakai sekarang.
 
-## Contoh Approval dan Kill Switch
+## Contoh Approval, Execution, dan Kill Switch
 
 Approve action dari API:
 
@@ -124,6 +131,15 @@ Invoke-RestMethod -Method Post `
   -Uri http://localhost:8080/actions/<ACTION_ID>/reject `
   -ContentType "application/json" `
   -Body '{"approved_by":"operator-a","note":"needs manual investigation"}'
+```
+
+Execute action low-risk yang sudah approved:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8080/actions/<ACTION_ID>/execute `
+  -ContentType "application/json" `
+  -Body '{"approved_by":"operator-a","note":"execute approved action"}'
 ```
 
 Aktifkan kill switch:
