@@ -54,7 +54,7 @@ func NewServer(
 			Name:              cfg.ServiceName,
 			Environment:       cfg.Environment,
 			KillSwitchEnabled: cfg.KillSwitchEnabled,
-			Phase:             "phase-01-read-only-triage",
+			Phase:             "phase-02-candidate-action-generation",
 			AvailableEndpoints: []string{
 				"GET /health",
 				"GET /debug/tools",
@@ -62,6 +62,7 @@ func NewServer(
 				"GET /incidents",
 				"GET /incidents/{id}",
 				"GET /incidents/{id}/triage",
+				"GET /incidents/{id}/actions",
 				"GET /ui/incidents",
 				"GET /ui/incidents/{id}",
 			},
@@ -142,6 +143,19 @@ func NewServer(
 			return
 		}
 
+		if strings.HasSuffix(incidentID, "/actions") {
+			incidentID = strings.TrimSuffix(incidentID, "/actions")
+			actions, err := repository.ListCandidateActions(r.Context(), incidentID)
+			if err != nil {
+				logger.Error("failed to list candidate actions", slog.String("error", err.Error()))
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get candidate actions"})
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{"actions": actions})
+			return
+		}
+
 		record, err := repository.GetIncident(r.Context(), incidentID)
 		if err != nil {
 			if errors.Is(err, storage.ErrNotFound) {
@@ -175,6 +189,13 @@ func NewServer(
 			return
 		}
 
+		actions, err := repository.ListCandidateActions(r.Context(), incidentID)
+		if err != nil {
+			logger.Error("failed to list candidate actions", slog.String("error", err.Error()))
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get candidate actions"})
+			return
+		}
+
 		var triageResult *domain.TriageResult
 		result, err := repository.GetTriageResult(r.Context(), incidentID)
 		if err == nil {
@@ -186,11 +207,12 @@ func NewServer(
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
-			"incident":     record,
-			"triage":       triageResult,
-			"evidence":     evidence,
-			"documents":    documents,
-			"audit_events": auditEvents,
+			"incident":          record,
+			"triage":            triageResult,
+			"evidence":          evidence,
+			"documents":         documents,
+			"candidate_actions": actions,
+			"audit_events":      auditEvents,
 		})
 	})
 
@@ -243,6 +265,12 @@ func NewServer(
 			return
 		}
 
+		actions, err := repository.ListCandidateActions(r.Context(), incidentID)
+		if err != nil {
+			http.Error(w, "failed to load candidate actions", http.StatusInternalServerError)
+			return
+		}
+
 		auditEvents, err := repository.ListAuditEvents(r.Context(), incidentID)
 		if err != nil {
 			http.Error(w, "failed to load audit trail", http.StatusInternalServerError)
@@ -263,6 +291,7 @@ func NewServer(
 			Triage:     triageResult,
 			Evidence:   evidence,
 			Documents:  documents,
+			Actions:    actions,
 			AuditTrail: auditEvents,
 		})
 	})

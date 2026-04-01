@@ -95,6 +95,19 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			confidence_notes TEXT NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS candidate_actions (
+			id TEXT PRIMARY KEY,
+			incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+			action_type TEXT NOT NULL,
+			target_resource TEXT NOT NULL,
+			parameters_json JSONB NOT NULL,
+			risk_level TEXT NOT NULL,
+			rationale TEXT NOT NULL,
+			evidence_refs_json JSONB NOT NULL,
+			approval_hint TEXT NOT NULL,
+			status TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL
+		);`,
 	}
 
 	for _, statement := range statements {
@@ -428,4 +441,106 @@ func (s *PostgresStore) GetTriageResult(ctx context.Context, incidentID string) 
 		return domain.TriageResult{}, err
 	}
 	return result, nil
+}
+
+func (s *PostgresStore) SaveCandidateActions(ctx context.Context, actions []domain.CandidateAction) error {
+	if len(actions) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	for _, action := range actions {
+		evidenceRefsJSON, marshalErr := json.Marshal(action.EvidenceRefs)
+		if marshalErr != nil {
+			err = marshalErr
+			return err
+		}
+
+		if _, err = tx.ExecContext(ctx, `
+			INSERT INTO candidate_actions (
+				id, incident_id, action_type, target_resource, parameters_json, risk_level, rationale, evidence_refs_json, approval_hint, status, created_at
+			) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9, $10, $11)
+			ON CONFLICT(id) DO UPDATE SET
+				action_type = excluded.action_type,
+				target_resource = excluded.target_resource,
+				parameters_json = excluded.parameters_json,
+				risk_level = excluded.risk_level,
+				rationale = excluded.rationale,
+				evidence_refs_json = excluded.evidence_refs_json,
+				approval_hint = excluded.approval_hint,
+				status = excluded.status,
+				created_at = excluded.created_at
+		`,
+			action.ID,
+			action.IncidentID,
+			action.ActionType,
+			action.TargetResource,
+			action.ParametersJSON,
+			string(action.RiskLevel),
+			action.Rationale,
+			string(evidenceRefsJSON),
+			action.ApprovalHint,
+			string(action.Status),
+			action.CreatedAt.UTC(),
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *PostgresStore) ListCandidateActions(ctx context.Context, incidentID string) ([]domain.CandidateAction, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, incident_id, action_type, target_resource, parameters_json, risk_level, rationale, evidence_refs_json, approval_hint, status, created_at
+		FROM candidate_actions
+		WHERE incident_id = $1
+		ORDER BY created_at ASC
+	`, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var actions []domain.CandidateAction
+	for rows.Next() {
+		var action domain.CandidateAction
+		var riskLevel string
+		var evidenceRefsJSON string
+		var status string
+		if err := rows.Scan(
+			&action.ID,
+			&action.IncidentID,
+			&action.ActionType,
+			&action.TargetResource,
+			&action.ParametersJSON,
+			&riskLevel,
+			&action.Rationale,
+			&evidenceRefsJSON,
+			&action.ApprovalHint,
+			&status,
+			&action.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		action.RiskLevel = domain.RiskLevel(riskLevel)
+		action.Status = domain.CandidateActionStatus(status)
+		if err := json.Unmarshal([]byte(evidenceRefsJSON), &action.EvidenceRefs); err != nil {
+			return nil, err
+		}
+
+		actions = append(actions, action)
+	}
+
+	return actions, rows.Err()
 }

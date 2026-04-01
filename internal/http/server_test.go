@@ -15,8 +15,10 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/demo"
+	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/observability"
+	"github.com/Cyaside/Triovexa/internal/remediation"
 	"github.com/Cyaside/Triovexa/internal/retrieval"
 	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/triage"
@@ -53,7 +55,8 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	collector := observability.NewDemoCollector(demoServer.URL)
 	retriever := retrieval.NewFileRetriever(docsRoot)
 	generator := triage.NewHeuristicGenerator()
-	incidentService := incident.NewService(repository, collector, retriever, generator)
+	actionGenerator := remediation.NewHeuristicGenerator(execution.DefaultCatalog())
+	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator)
 
 	server := NewServer(config.Config{
 		ServiceName:        "triovexa",
@@ -120,6 +123,11 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 		t.Fatalf("incident id missing from webhook response")
 	}
 
+	state, ok := webhookPayload["state"].(string)
+	if !ok || state != "action_proposed" {
+		t.Fatalf("webhook state = %v, want %q", webhookPayload["state"], "action_proposed")
+	}
+
 	triageResponse, err := http.Get(api.URL + "/incidents/" + incidentID + "/triage")
 	if err != nil {
 		t.Fatalf("get triage response: %v", err)
@@ -128,6 +136,31 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 
 	if triageResponse.StatusCode != http.StatusOK {
 		t.Fatalf("triage status = %d, want %d", triageResponse.StatusCode, http.StatusOK)
+	}
+
+	actionsResponse, err := http.Get(api.URL + "/incidents/" + incidentID + "/actions")
+	if err != nil {
+		t.Fatalf("get candidate actions: %v", err)
+	}
+	defer actionsResponse.Body.Close()
+
+	if actionsResponse.StatusCode != http.StatusOK {
+		t.Fatalf("actions status = %d, want %d", actionsResponse.StatusCode, http.StatusOK)
+	}
+
+	var actionsPayload struct {
+		Actions []map[string]any `json:"actions"`
+	}
+	if err := json.NewDecoder(actionsResponse.Body).Decode(&actionsPayload); err != nil {
+		t.Fatalf("decode actions response: %v", err)
+	}
+
+	if len(actionsPayload.Actions) == 0 {
+		t.Fatalf("expected at least one candidate action")
+	}
+
+	if actionType, ok := actionsPayload.Actions[0]["ActionType"].(string); !ok || actionType == "" {
+		t.Fatalf("candidate action type missing from response")
 	}
 
 	uiResponse, err := http.Get(api.URL + "/ui/incidents/" + incidentID)
@@ -143,6 +176,10 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 
 	if !strings.Contains(string(uiBody), "checkout timeout after deploy") {
 		t.Fatalf("ui body does not contain incident title")
+	}
+
+	if !strings.Contains(string(uiBody), "Candidate Actions") {
+		t.Fatalf("ui body does not contain candidate actions section")
 	}
 }
 

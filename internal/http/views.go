@@ -1,8 +1,11 @@
 package http
 
 import (
+	"bytes"
+	"encoding/json"
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Cyaside/Triovexa/internal/domain"
@@ -17,6 +20,7 @@ type incidentDetailPageData struct {
 	Triage     *domain.TriageResult
 	Evidence   []domain.EvidenceItem
 	Documents  []domain.DocumentReference
+	Actions    []domain.CandidateAction
 	AuditTrail []domain.AuditEvent
 }
 
@@ -26,6 +30,24 @@ var templateFuncs = template.FuncMap{
 			return "-"
 		}
 		return value.Format(time.RFC3339)
+	},
+	"formatJSON": func(raw string) string {
+		if strings.TrimSpace(raw) == "" {
+			return "{}"
+		}
+
+		var formatted bytes.Buffer
+		if err := json.Indent(&formatted, []byte(raw), "", "  "); err != nil {
+			return raw
+		}
+
+		return formatted.String()
+	},
+	"joinStrings": func(values []string) string {
+		if len(values) == 0 {
+			return "-"
+		}
+		return strings.Join(values, ", ")
 	},
 }
 
@@ -48,7 +70,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
 </head>
 <body>
   <h1>Incident List</h1>
-  <p class="muted">Operator view untuk Phase 1 read-only triage.</p>
+  <p class="muted">Operator view untuk Phase 2 candidate action generation.</p>
   <table>
     <thead>
       <tr>
@@ -100,12 +122,13 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 0.65rem; border-bottom: 1px solid #e6edf5; text-align: left; vertical-align: top; }
     th { background: #132238; color: #fff; }
+    pre { margin: 0.75rem 0 0 0; padding: 0.75rem; background: #f3f6fb; border-radius: 10px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
   <p><a href="/ui/incidents">Back to incident list</a></p>
   <h1>{{.Incident.Title}}</h1>
-  <p class="muted">{{.Incident.ServiceName}} · {{.Incident.Environment}} · severity {{.Incident.Severity}} · state {{.Incident.State}}</p>
+  <p class="muted">{{.Incident.ServiceName}} | {{.Incident.Environment}} | severity {{.Incident.Severity}} | state {{.Incident.State}}</p>
 
   <div class="grid">
     <section class="card">
@@ -150,6 +173,35 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
       {{end}}
     </section>
   </div>
+
+  <section class="card" style="margin-top:1rem;">
+    <h2>Candidate Actions</h2>
+    <table>
+      <thead>
+        <tr><th>Action</th><th>Target</th><th>Risk</th><th>Status</th><th>Approval</th><th>Evidence Refs</th></tr>
+      </thead>
+      <tbody>
+        {{if .Actions}}
+          {{range .Actions}}
+          <tr>
+            <td>
+              <strong>{{.ActionType}}</strong>
+              <p>{{.Rationale}}</p>
+              <pre>{{formatJSON .ParametersJSON}}</pre>
+            </td>
+            <td>{{.TargetResource}}</td>
+            <td><span class="pill">{{.RiskLevel}}</span></td>
+            <td><span class="pill">{{.Status}}</span></td>
+            <td>{{.ApprovalHint}}</td>
+            <td>{{joinStrings .EvidenceRefs}}</td>
+          </tr>
+          {{end}}
+        {{else}}
+          <tr><td colspan="6">Belum ada candidate action.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
 
   <section class="card" style="margin-top:1rem;">
     <h2>Evidence</h2>

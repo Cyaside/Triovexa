@@ -14,6 +14,7 @@ type CandidateActionStatus string
 
 const (
 	CandidateActionStatusProposed         CandidateActionStatus = "proposed"
+	CandidateActionStatusInvalid          CandidateActionStatus = "invalid"
 	CandidateActionStatusAllowed          CandidateActionStatus = "allowed"
 	CandidateActionStatusAwaitingApproval CandidateActionStatus = "awaiting_approval"
 	CandidateActionStatusDenied           CandidateActionStatus = "denied"
@@ -31,6 +32,8 @@ type CandidateAction struct {
 	ParametersJSON string
 	RiskLevel      RiskLevel
 	Rationale      string
+	EvidenceRefs   []string
+	ApprovalHint   string
 	Status         CandidateActionStatus
 	CreatedAt      time.Time
 }

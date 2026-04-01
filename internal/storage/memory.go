@@ -15,6 +15,7 @@ type MemoryStore struct {
 	audit      map[string][]domain.AuditEvent
 	evidence   map[string][]domain.EvidenceItem
 	documents  map[string][]domain.DocumentReference
+	actions    map[string][]domain.CandidateAction
 	triageByID map[string]domain.TriageResult
 }
 
@@ -24,6 +25,7 @@ func NewMemoryStore() *MemoryStore {
 		audit:      make(map[string][]domain.AuditEvent),
 		evidence:   make(map[string][]domain.EvidenceItem),
 		documents:  make(map[string][]domain.DocumentReference),
+		actions:    make(map[string][]domain.CandidateAction),
 		triageByID: make(map[string]domain.TriageResult),
 	}
 }
@@ -140,4 +142,32 @@ func (s *MemoryStore) GetTriageResult(_ context.Context, incidentID string) (dom
 		return domain.TriageResult{}, ErrNotFound
 	}
 	return result, nil
+}
+
+func (s *MemoryStore) SaveCandidateActions(_ context.Context, actions []domain.CandidateAction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	grouped := make(map[string][]domain.CandidateAction)
+	for _, action := range actions {
+		grouped[action.IncidentID] = append(grouped[action.IncidentID], action)
+	}
+
+	for incidentID, incidentActions := range grouped {
+		s.actions[incidentID] = append([]domain.CandidateAction(nil), incidentActions...)
+	}
+
+	return nil
+}
+
+func (s *MemoryStore) ListCandidateActions(_ context.Context, incidentID string) ([]domain.CandidateAction, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	actions := append([]domain.CandidateAction(nil), s.actions[incidentID]...)
+	sort.SliceStable(actions, func(i, j int) bool {
+		return actions[i].CreatedAt.Before(actions[j].CreatedAt)
+	})
+
+	return actions, nil
 }

@@ -23,4 +23,6 @@ type Repository interface {
 	ListDocumentReferences(context.Context, string) ([]domain.DocumentReference, error)
 	SaveTriageResult(context.Context, domain.TriageResult) error
 	GetTriageResult(context.Context, string) (domain.TriageResult, error)
+	SaveCandidateActions(context.Context, []domain.CandidateAction) error
+	ListCandidateActions(context.Context, string) ([]domain.CandidateAction, error)
 }
