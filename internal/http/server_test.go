@@ -496,6 +496,43 @@ func TestServerUIDemoScenarioTriggerRedirectsToIncidentDetail(t *testing.T) {
 	}
 }
 
+func TestServerUIServesWorkbenchStylesheet(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer(config.Config{
+		ServiceName:     "triovexa",
+		Environment:     "test",
+		HTTPPort:        "0",
+		DatabaseURL:     "postgres://test",
+		ReadTimeout:     5 * time.Second,
+		WriteTimeout:    5 * time.Second,
+		IdleTimeout:     5 * time.Second,
+		ShutdownTimeout: 5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), storage.NewMemoryStore(), nil, nil, nil)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	response, err := http.Get(api.URL + "/ui/assets/workbench.css")
+	if err != nil {
+		t.Fatalf("get workbench stylesheet: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("stylesheet status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read stylesheet body: %v", err)
+	}
+
+	if !strings.Contains(string(body), ".shell") {
+		t.Fatalf("stylesheet body does not contain expected shell class")
+	}
+}
+
 func TestServerEndToEndMediumRiskRollback(t *testing.T) {
 	t.Parallel()
 

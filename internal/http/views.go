@@ -184,75 +184,10 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
 <head>
   <meta charset="utf-8">
   <title>Triovexa Incident List</title>
-  <style>
-    :root {
-      --ink: #132238;
-      --muted: #5b6b7d;
-      --paper: #ffffff;
-      --mist: #eef3f8;
-      --line: #d8e1ec;
-      --accent: #0f62fe;
-      --accent-soft: #dbe8ff;
-      --success: #0f9d58;
-      --success-soft: #dff5e9;
-      --warning: #8a5a00;
-      --warning-soft: #fff1d6;
-      --danger: #b3261e;
-      --danger-soft: #fde7e5;
-      --shadow: 0 18px 50px rgba(19, 34, 56, 0.08);
-    }
-    * { box-sizing: border-box; }
-    body { font-family: Segoe UI, sans-serif; margin: 0; background:
-      radial-gradient(circle at top left, rgba(15,98,254,0.10), transparent 32%),
-      linear-gradient(180deg, #f5f8fc 0%, #eef2f7 100%);
-      color: var(--ink);
-    }
-    a { color: var(--accent); text-decoration: none; }
-    .shell { width: min(1320px, calc(100% - 2rem)); margin: 0 auto; padding: 2rem 0 3rem; }
-    .hero { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr); gap: 1rem; margin-bottom: 1rem; }
-    .hero-card, .panel, .stat-card { background: rgba(255,255,255,0.92); border: 1px solid rgba(216,225,236,0.95); border-radius: 20px; box-shadow: var(--shadow); }
-    .hero-card { padding: 1.4rem; }
-    .eyebrow { font-size: 0.82rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0 0 0.65rem 0; }
-    h1 { margin: 0 0 0.7rem 0; font-size: 2.3rem; line-height: 1.05; }
-    h2 { margin: 0 0 0.85rem 0; font-size: 1.2rem; }
-    h3 { margin: 0 0 0.4rem 0; font-size: 1rem; }
-    p { margin: 0.2rem 0 0.7rem 0; }
-    .muted { color: var(--muted); }
-    .hero-links { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 1rem; }
-    .hero-links a { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.55rem 0.85rem; border-radius: 999px; background: var(--mist); color: var(--ink); }
-    .banner { margin: 0 0 1rem 0; padding: 0.9rem 1rem; border-radius: 14px; border: 1px solid; }
-    .banner.warning { background: var(--warning-soft); color: var(--warning); border-color: #f2d395; }
-    .banner.success { background: var(--success-soft); color: var(--success); border-color: #b7e4c8; }
-    .banner.error { background: var(--danger-soft); color: var(--danger); border-color: #f1b5b1; }
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.85rem; margin-bottom: 1rem; }
-    .stat-card { padding: 1rem; }
-    .stat-label { color: var(--muted); font-size: 0.9rem; }
-    .stat-value { font-size: 1.9rem; font-weight: 700; margin-top: 0.35rem; }
-    .workbench-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.8fr); gap: 1rem; margin-bottom: 1rem; }
-    .panel { padding: 1.15rem; }
-    .scenario-grid { display: grid; gap: 0.85rem; }
-    .scenario-card { display: grid; gap: 0.65rem; padding: 1rem; border-radius: 16px; background: linear-gradient(180deg, #fff, #f8fbff); border: 1px solid var(--line); }
-    .scenario-meta { display: flex; flex-wrap: wrap; gap: 0.45rem; }
-    .chip { display: inline-flex; align-items: center; padding: 0.24rem 0.6rem; border-radius: 999px; background: var(--mist); color: var(--ink); font-size: 0.85rem; }
-    form { margin: 0; }
-    input, textarea, button { font: inherit; }
-    button { padding: 0.62rem 0.9rem; border: none; border-radius: 12px; cursor: pointer; }
-    .primary-button { background: var(--accent); color: #fff; }
-    .secondary-button { background: #1f3b57; color: #fff; }
-    table { width: 100%; border-collapse: collapse; background: transparent; }
-    th, td { padding: 0.85rem; border-bottom: 1px solid #e6edf5; text-align: left; vertical-align: top; }
-    th { background: #132238; color: #fff; font-weight: 600; }
-    .table-wrap { overflow-x: auto; border-radius: 16px; border: 1px solid var(--line); background: var(--paper); }
-    .row-title { display: grid; gap: 0.3rem; }
-    .tight { margin: 0; }
-    .control-form { display: grid; gap: 0.6rem; margin-top: 0.8rem; }
-    @media (max-width: 980px) {
-      .hero, .workbench-grid { grid-template-columns: 1fr; }
-      .shell { width: min(100% - 1rem, 1320px); }
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/ui/assets/workbench.css">
 </head>
-<body>
+<body class="page-list">
   <div class="shell">
   <section class="hero">
     <div class="hero-card">
@@ -394,66 +329,10 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
 <head>
   <meta charset="utf-8">
   <title>Triovexa Incident Detail</title>
-  <style>
-    :root {
-      --ink: #132238;
-      --muted: #5b6b7d;
-      --paper: #ffffff;
-      --mist: #eef3f8;
-      --line: #d8e1ec;
-      --accent: #0f62fe;
-      --success: #0f9d58;
-      --success-soft: #dff5e9;
-      --warning: #8a5a00;
-      --warning-soft: #fff1d6;
-      --danger: #b3261e;
-      --danger-soft: #fde7e5;
-      --shadow: 0 18px 50px rgba(19,34,56,0.08);
-    }
-    * { box-sizing: border-box; }
-    body { font-family: Segoe UI, sans-serif; margin: 0; background:
-      radial-gradient(circle at top right, rgba(15,98,254,0.08), transparent 28%),
-      linear-gradient(180deg, #f5f8fc 0%, #eef2f7 100%);
-      color: var(--ink);
-    }
-    .shell { width: min(1320px, calc(100% - 2rem)); margin: 0 auto; padding: 2rem 0 3rem; }
-    a { color: #0f62fe; text-decoration: none; }
-    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-    .card { background: rgba(255,255,255,0.94); border: 1px solid rgba(216,225,236,0.95); border-radius: 18px; padding: 1rem 1.15rem; box-shadow: var(--shadow); }
-    .muted { color: #5b6b7d; }
-    .pill { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px; background: #e6edf5; margin-right: 0.35rem; }
-    .banner { margin: 0 0 1rem 0; padding: 0.85rem 1rem; border-radius: 12px; background: var(--warning-soft); color: var(--warning); border: 1px solid #f2d395; }
-    ul { padding-left: 1.2rem; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 0.65rem; border-bottom: 1px solid #e6edf5; text-align: left; vertical-align: top; }
-    th { background: #132238; color: #fff; }
-    pre { margin: 0.75rem 0 0 0; padding: 0.75rem; background: #f3f6fb; border-radius: 10px; white-space: pre-wrap; }
-    form { margin-top: 0.75rem; display: grid; gap: 0.5rem; }
-    input, textarea, button { font: inherit; }
-    input, textarea { width: 100%; padding: 0.55rem; border: 1px solid #d5dde8; border-radius: 8px; }
-    button { padding: 0.55rem 0.75rem; border: none; border-radius: 8px; cursor: pointer; }
-    .approve { background: #0f9d58; color: #fff; }
-    .reject { background: #c5221f; color: #fff; }
-    .hero { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(290px, 0.8fr); gap: 1rem; margin-bottom: 1rem; }
-    .hero h1 { margin: 0 0 0.5rem 0; font-size: 2.25rem; line-height: 1.05; }
-    .hero-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-    .action-grid { display: grid; gap: 1rem; }
-    .action-card { border: 1px solid var(--line); border-radius: 18px; padding: 1rem; background: linear-gradient(180deg, #fff, #f8fbff); }
-    .action-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.6rem; }
-    .action-columns { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 0.9rem; }
-    .action-block { padding: 0.9rem; background: rgba(238,243,248,0.72); border-radius: 14px; }
-    .action-block h3 { margin: 0 0 0.45rem 0; font-size: 0.98rem; }
-    details.card { padding: 0; overflow: hidden; }
-    details.card summary { cursor: pointer; list-style: none; padding: 1rem 1.15rem; font-weight: 600; }
-    details.card summary::-webkit-details-marker { display: none; }
-    details.card .details-body { padding: 0 1.15rem 1.1rem; }
-    @media (max-width: 980px) {
-      .hero { grid-template-columns: 1fr; }
-      .shell { width: min(100% - 1rem, 1320px); }
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/ui/assets/workbench.css">
 </head>
-<body>
+<body class="page-detail">
   <div class="shell">
   <p><a href="/ui/incidents">Back to incident list</a></p>
   <section class="hero">

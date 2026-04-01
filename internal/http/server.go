@@ -73,6 +73,7 @@ func NewServerWithTelemetry(
 	})
 
 	mux.Handle("/metrics", serverMetrics)
+	mux.Handle("/ui/assets/", uiAssetHandler)
 
 	mux.HandleFunc("/debug/tools", func(w http.ResponseWriter, r *http.Request) {
 		killSwitchState := approval.KillSwitchState{
@@ -105,6 +106,7 @@ func NewServerWithTelemetry(
 				"POST /actions/{id}/reject",
 				"POST /actions/{id}/execute",
 				"POST /admin/kill-switch",
+				"GET /ui/assets/workbench.css",
 				"GET /ui/incidents",
 				"GET /ui/incidents/{id}",
 			},
@@ -879,6 +881,8 @@ func routeLabel(path string) string {
 		return "/admin/kill-switch"
 	case path == "/ui/incidents":
 		return "/ui/incidents"
+	case path == "/ui/assets/workbench.css":
+		return "/ui/assets/workbench.css"
 	case path == "/ui/admin/kill-switch":
 		return "/ui/admin/kill-switch"
 	case strings.HasPrefix(path, "/ui/demo/scenarios/"):
