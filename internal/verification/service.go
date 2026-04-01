@@ -101,12 +101,18 @@ func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
 	return s
 }
 
-func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAction, record domain.ExecutionRecord) (domain.VerificationResult, error) {
+func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAction, record domain.ExecutionRecord) (result domain.VerificationResult, err error) {
 	startedAt := s.now()
-	status := StatusInconclusive
+	verificationStatus := ""
 	defer func() {
 		if s.metrics != nil {
-			s.metrics.ObserveVerification(status, s.now().Sub(startedAt))
+			outcome := verificationStatus
+			if err != nil {
+				outcome = "error"
+			}
+			if outcome != "" {
+				s.metrics.ObserveVerification(outcome, s.now().Sub(startedAt))
+			}
 		}
 	}()
 	if err := s.audit(ctx, action.IncidentID, "verification_started", "started", map[string]any{
@@ -120,6 +126,7 @@ func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAc
 	if err != nil {
 		return domain.VerificationResult{}, err
 	}
+	verificationStatus = status
 
 	incidentRecord, err := s.repository.GetIncident(ctx, action.IncidentID)
 	if err != nil {
@@ -137,7 +144,7 @@ func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAc
 		return domain.VerificationResult{}, fmt.Errorf("marshal verification evidence: %w", err)
 	}
 
-	result := domain.VerificationResult{
+	result = domain.VerificationResult{
 		ID:                uuid.NewString(),
 		ExecutionRecordID: record.ID,
 		Status:            status,

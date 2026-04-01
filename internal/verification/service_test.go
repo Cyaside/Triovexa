@@ -3,6 +3,8 @@ package verification
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
 type stubFetcher struct {
@@ -263,6 +266,41 @@ func TestServiceVerifyExecutionFailedTriggersRollbackWhenAvailable(t *testing.T)
 	}
 }
 
+func TestServiceVerifyExecutionTelemetryMarksErrorsExplicitly(t *testing.T) {
+	t.Parallel()
+
+	baseRepository := storage.NewMemoryStore()
+	_, action, executionRecord := seedVerificationFixture(t, baseRepository)
+	recorder := telemetry.NewRecorder()
+
+	service := NewService(auditFailingVerificationRepository{Repository: baseRepository}, stubFetcher{
+		snapshot: demo.Snapshot{
+			Mode:           demo.ModeHealthy,
+			ErrorRate:      0.02,
+			LatencyMs:      180,
+			QueueBacklog:   5,
+			WorkerHealthy:  true,
+			LastDeploy:     "v1.2.3",
+			LastUpdatedUTC: time.Now().UTC(),
+		},
+	}, execution.DefaultCatalog(), nil).WithTelemetry(recorder)
+
+	if _, err := service.VerifyExecution(context.Background(), action, executionRecord); err == nil {
+		t.Fatalf("expected verification error")
+	}
+
+	response := httptest.NewRecorder()
+	recorder.ServeHTTP(response, httptest.NewRequest("GET", "/metrics", nil))
+	body := response.Body.String()
+
+	if !strings.Contains(body, `triovexa_verification_outcomes_total{status="error"} 1`) {
+		t.Fatalf("metrics should count verification errors explicitly, got:\n%s", body)
+	}
+	if strings.Contains(body, `triovexa_verification_outcomes_total{status="inconclusive"} 1`) {
+		t.Fatalf("metrics should not misclassify verification errors as inconclusive, got:\n%s", body)
+	}
+}
+
 func seedVerificationFixture(t *testing.T, repository storage.Repository) (domain.Incident, domain.CandidateAction, domain.ExecutionRecord) {
 	t.Helper()
 
@@ -362,4 +400,12 @@ func (f *fakeRollbackAdapter) Execute(ctx context.Context, action domain.Candida
 			"applied": true,
 		},
 	}, nil
+}
+
+type auditFailingVerificationRepository struct {
+	storage.Repository
+}
+
+func (r auditFailingVerificationRepository) AddAuditEvent(context.Context, domain.AuditEvent) error {
+	return errors.New("audit store unavailable")
 }
