@@ -301,6 +301,47 @@ func TestServiceVerifyExecutionTelemetryMarksErrorsExplicitly(t *testing.T) {
 	}
 }
 
+func TestServiceVerifyExecutionPreservesBaselineSnapshotFields(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	_, action, executionRecord := seedVerificationFixture(t, repository)
+
+	service := NewService(repository, stubFetcher{snapshot: demo.Snapshot{
+		Mode:           demo.ModeHealthy,
+		ErrorRate:      0.02,
+		LatencyMs:      180,
+		QueueBacklog:   5,
+		ReplicaCount:   2,
+		ConsumerPaused: false,
+		WorkerHealthy:  true,
+		LastDeploy:     "v1.2.3",
+		LastUpdatedUTC: time.Now().UTC(),
+	}}, execution.DefaultCatalog(), nil)
+
+	result, err := service.VerifyExecution(context.Background(), action, executionRecord)
+	if err != nil {
+		t.Fatalf("verify execution: %v", err)
+	}
+
+	var evidence map[string]any
+	if err := json.Unmarshal([]byte(result.EvidenceJSON), &evidence); err != nil {
+		t.Fatalf("unmarshal verification evidence: %v", err)
+	}
+
+	before, ok := evidence["before"].(map[string]any)
+	if !ok {
+		t.Fatalf("verification evidence before snapshot missing or invalid: %#v", evidence["before"])
+	}
+
+	if got, want := int(before["replica_count"].(float64)), 2; got != want {
+		t.Fatalf("before replica_count = %d, want %d", got, want)
+	}
+	if got, want := before["consumer_paused"].(bool), false; got != want {
+		t.Fatalf("before consumer_paused = %t, want %t", got, want)
+	}
+}
+
 func seedVerificationFixture(t *testing.T, repository storage.Repository) (domain.Incident, domain.CandidateAction, domain.ExecutionRecord) {
 	t.Helper()
 
@@ -333,10 +374,12 @@ func seedVerificationFixture(t *testing.T, repository storage.Repository) (domai
 	}
 
 	evidenceMetadata, err := json.Marshal(map[string]any{
-		"mode":          string(demo.ModeTimeoutAfterDeploy),
-		"error_rate":    0.27,
-		"latency_ms":    1200,
-		"queue_backlog": 46,
+		"mode":            string(demo.ModeTimeoutAfterDeploy),
+		"error_rate":      0.27,
+		"latency_ms":      1200,
+		"queue_backlog":   46,
+		"replica_count":   2,
+		"consumer_paused": false,
 	})
 	if err != nil {
 		t.Fatalf("marshal evidence metadata: %v", err)

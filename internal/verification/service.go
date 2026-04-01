@@ -451,6 +451,12 @@ func deriveBaselineSnapshot(evidence []domain.EvidenceItem) (demo.Snapshot, erro
 			snapshot.QueueBacklog = queueBacklog
 			foundMetric = true
 		}
+		if replicaCount, ok := toInt(metadata["replica_count"]); ok {
+			snapshot.ReplicaCount = replicaCount
+		}
+		if consumerPaused, ok := metadata["consumer_paused"].(bool); ok {
+			snapshot.ConsumerPaused = consumerPaused
+		}
 		if workerHealthy, ok := metadata["workerHealthy"].(bool); ok {
 			snapshot.WorkerHealthy = workerHealthy
 			foundHealth = true
