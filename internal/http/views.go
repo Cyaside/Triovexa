@@ -88,6 +88,12 @@ var templateFuncs = template.FuncMap{
 		}
 		return strings.Join(values, ", ")
 	},
+	"replaceUnderscores": func(value string) string {
+		if strings.TrimSpace(value) == "" {
+			return "-"
+		}
+		return strings.ReplaceAll(value, "_", " ")
+	},
 	"policyFor": func(actionID string, decisions []domain.PolicyDecision) *domain.PolicyDecision {
 		for _, decision := range decisions {
 			if decision.CandidateActionID == actionID {
@@ -115,6 +121,39 @@ var templateFuncs = template.FuncMap{
 		}
 		return nil
 	},
+	"latestExecutionForAction": func(actionID string, records []domain.ExecutionRecord) *domain.ExecutionRecord {
+		var latest *domain.ExecutionRecord
+		for _, record := range records {
+			if record.CandidateActionID != actionID {
+				continue
+			}
+			copy := record
+			if latest == nil || copy.StartedAt.After(latest.StartedAt) {
+				latest = &copy
+			}
+		}
+		return latest
+	},
+	"latestVerificationForAction": func(actionID string, verificationResults []domain.VerificationResult, executionRecords []domain.ExecutionRecord) *domain.VerificationResult {
+		executionIDs := make(map[string]struct{})
+		for _, record := range executionRecords {
+			if record.CandidateActionID == actionID {
+				executionIDs[record.ID] = struct{}{}
+			}
+		}
+
+		var latest *domain.VerificationResult
+		for _, result := range verificationResults {
+			if _, ok := executionIDs[result.ExecutionRecordID]; !ok {
+				continue
+			}
+			copy := result
+			if latest == nil || copy.CreatedAt.After(latest.CreatedAt) {
+				latest = &copy
+			}
+		}
+		return latest
+	},
 	"rollbacksFor": func(actionID string, records []domain.RollbackRecord) []domain.RollbackRecord {
 		filtered := make([]domain.RollbackRecord, 0)
 		for _, record := range records {
@@ -123,6 +162,19 @@ var templateFuncs = template.FuncMap{
 			}
 		}
 		return filtered
+	},
+	"latestRollbackForAction": func(actionID string, records []domain.RollbackRecord) *domain.RollbackRecord {
+		var latest *domain.RollbackRecord
+		for _, record := range records {
+			if record.CandidateActionID != actionID {
+				continue
+			}
+			copy := record
+			if latest == nil || copy.StartedAt.After(latest.StartedAt) {
+				latest = &copy
+			}
+		}
+		return latest
 	},
 }
 
@@ -343,13 +395,34 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
   <meta charset="utf-8">
   <title>Triovexa Incident Detail</title>
   <style>
-    body { font-family: Segoe UI, sans-serif; margin: 2rem; background: #f7f9fc; color: #132238; }
+    :root {
+      --ink: #132238;
+      --muted: #5b6b7d;
+      --paper: #ffffff;
+      --mist: #eef3f8;
+      --line: #d8e1ec;
+      --accent: #0f62fe;
+      --success: #0f9d58;
+      --success-soft: #dff5e9;
+      --warning: #8a5a00;
+      --warning-soft: #fff1d6;
+      --danger: #b3261e;
+      --danger-soft: #fde7e5;
+      --shadow: 0 18px 50px rgba(19,34,56,0.08);
+    }
+    * { box-sizing: border-box; }
+    body { font-family: Segoe UI, sans-serif; margin: 0; background:
+      radial-gradient(circle at top right, rgba(15,98,254,0.08), transparent 28%),
+      linear-gradient(180deg, #f5f8fc 0%, #eef2f7 100%);
+      color: var(--ink);
+    }
+    .shell { width: min(1320px, calc(100% - 2rem)); margin: 0 auto; padding: 2rem 0 3rem; }
     a { color: #0f62fe; text-decoration: none; }
     .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-    .card { background: #fff; border-radius: 14px; padding: 1rem 1.15rem; box-shadow: 0 10px 35px rgba(19,34,56,0.08); }
+    .card { background: rgba(255,255,255,0.94); border: 1px solid rgba(216,225,236,0.95); border-radius: 18px; padding: 1rem 1.15rem; box-shadow: var(--shadow); }
     .muted { color: #5b6b7d; }
     .pill { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px; background: #e6edf5; margin-right: 0.35rem; }
-    .banner { margin: 0 0 1rem 0; padding: 0.85rem 1rem; border-radius: 12px; background: #fff1d6; color: #8a5a00; border: 1px solid #f2d395; }
+    .banner { margin: 0 0 1rem 0; padding: 0.85rem 1rem; border-radius: 12px; background: var(--warning-soft); color: var(--warning); border: 1px solid #f2d395; }
     ul { padding-left: 1.2rem; }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 0.65rem; border-bottom: 1px solid #e6edf5; text-align: left; vertical-align: top; }
@@ -361,12 +434,44 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
     button { padding: 0.55rem 0.75rem; border: none; border-radius: 8px; cursor: pointer; }
     .approve { background: #0f9d58; color: #fff; }
     .reject { background: #c5221f; color: #fff; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(290px, 0.8fr); gap: 1rem; margin-bottom: 1rem; }
+    .hero h1 { margin: 0 0 0.5rem 0; font-size: 2.25rem; line-height: 1.05; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .action-grid { display: grid; gap: 1rem; }
+    .action-card { border: 1px solid var(--line); border-radius: 18px; padding: 1rem; background: linear-gradient(180deg, #fff, #f8fbff); }
+    .action-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.6rem; }
+    .action-columns { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 0.9rem; }
+    .action-block { padding: 0.9rem; background: rgba(238,243,248,0.72); border-radius: 14px; }
+    .action-block h3 { margin: 0 0 0.45rem 0; font-size: 0.98rem; }
+    details.card { padding: 0; overflow: hidden; }
+    details.card summary { cursor: pointer; list-style: none; padding: 1rem 1.15rem; font-weight: 600; }
+    details.card summary::-webkit-details-marker { display: none; }
+    details.card .details-body { padding: 0 1.15rem 1.1rem; }
+    @media (max-width: 980px) {
+      .hero { grid-template-columns: 1fr; }
+      .shell { width: min(100% - 1rem, 1320px); }
+    }
   </style>
 </head>
 <body>
+  <div class="shell">
   <p><a href="/ui/incidents">Back to incident list</a></p>
-  <h1>{{.Incident.Title}}</h1>
-  <p class="muted">{{.Incident.ServiceName}} | {{.Incident.Environment}} | severity {{.Incident.Severity}} | state {{.Incident.State}}</p>
+  <section class="hero">
+    <article class="card">
+      <h1>{{.Incident.Title}}</h1>
+      <p class="muted">{{.Incident.ServiceName}} | {{.Incident.Environment}} | severity {{.Incident.Severity}} | state {{.Incident.State}}</p>
+      <div class="hero-actions">
+        <span class="pill">{{.Incident.State}}</span>
+        <span class="pill">{{.Incident.Environment}}</span>
+        <span class="pill">{{.Incident.Severity}}</span>
+      </div>
+    </article>
+    <article class="card">
+      <h2>Operator Step</h2>
+      <p>{{.NextOperatorStep}}</p>
+      <p class="muted">Gunakan action lane di bawah untuk menilai apakah hasil heuristik ini cukup aman untuk dieksekusi atau justru perlu dihentikan dan dieskalasi.</p>
+    </article>
+  </section>
   {{if .Notice}}
   <p class="banner">{{.Notice}}</p>
   {{end}}
@@ -376,10 +481,6 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
   {{if .KillSwitchEnabled}}
   <p class="banner">Kill switch sedang aktif. Action baru akan ditolak oleh policy evaluator sampai dinonaktifkan kembali.</p>
   {{end}}
-  <section class="card" style="margin-bottom:1rem;">
-    <h2>Operator Step</h2>
-    <p>{{.NextOperatorStep}}</p>
-  </section>
 
   <div class="grid">
     <section class="card">
@@ -426,35 +527,44 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
   </div>
 
   <section class="card" style="margin-top:1rem;">
-    <h2>Candidate Actions</h2>
-    <table>
-      <thead>
-        <tr><th>Action</th><th>Target</th><th>Risk</th><th>Status</th><th>Policy Decision</th><th>Approval</th><th>Evidence Refs</th><th>Controls</th></tr>
-      </thead>
-      <tbody>
-        {{if .Actions}}
-          {{range .Actions}}
-          <tr>
-            <td>
-              <strong>{{.ActionType}}</strong>
-              <p>{{.Rationale}}</p>
-              <pre>{{formatJSON .ParametersJSON}}</pre>
-            </td>
-            <td>{{.TargetResource}}</td>
-            <td><span class="pill">{{.RiskLevel}}</span></td>
-            <td><span class="pill">{{.Status}}</span></td>
-            <td>
+    <h2>Action Lane</h2>
+    <p class="muted">Setiap card di bawah merangkum hasil heuristik, policy decision, operator control, dan outcome terakhir untuk satu candidate action.</p>
+    <div class="action-grid">
+      {{if .Actions}}
+        {{range .Actions}}
+        <article class="action-card">
+          <div class="action-header">
+            <div>
+              <h3>{{replaceUnderscores .ActionType}}</h3>
+              <p class="muted">{{.TargetResource}}</p>
+            </div>
+            <div>
+              <span class="pill">{{.RiskLevel}}</span>
+              <span class="pill">{{.Status}}</span>
+            </div>
+          </div>
+          <p>{{.Rationale}}</p>
+          <div class="action-columns">
+            <section class="action-block">
+              <h3>Policy</h3>
               {{with policyFor .ID $.PolicyDecisions}}
-                <strong>{{.Decision}}</strong>
+                <p><strong>{{.Decision}}</strong></p>
                 <p>{{.Reason}}</p>
-                <p><code>{{.PolicyRuleRef}}</code></p>
+                <p class="muted"><code>{{.PolicyRuleRef}}</code></p>
               {{else}}
-                <p>Belum ada policy decision.</p>
+                <p class="muted">Belum ada policy decision.</p>
               {{end}}
-            </td>
-            <td>{{.ApprovalHint}}</td>
-            <td>{{joinStrings .EvidenceRefs}}</td>
-            <td>
+              <p><strong>Approval Hint:</strong> {{.ApprovalHint}}</p>
+              <p><strong>Evidence Refs:</strong> {{joinStrings .EvidenceRefs}}</p>
+            </section>
+
+            <section class="action-block">
+              <h3>Parameters</h3>
+              <pre>{{formatJSON .ParametersJSON}}</pre>
+            </section>
+
+            <section class="action-block">
+              <h3>Operator Controls</h3>
               {{if eq .Status "awaiting_approval"}}
               <form method="post" action="/actions/{{.ID}}/approve">
                 <input type="text" name="approved_by" placeholder="operator name" />
@@ -474,26 +584,42 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
                   <button class="approve" type="submit">Execute</button>
                 </form>
                 {{else}}
-                <p>Tidak ada aksi approval atau execution manual.</p>
+                <p class="muted">Tidak ada aksi approval atau execution manual untuk status saat ini.</p>
                 {{end}}
               {{end}}
-              {{with rollbacksFor .ID $.RollbackRecords}}
-                <p><strong>Rollback History</strong></p>
-                {{range .}}
-                <p><span class="pill">{{.Status}}</span> via {{.RollbackActionKey}} oleh {{.TriggeredBy}}</p>
-                {{end}}
+            </section>
+
+            <section class="action-block">
+              <h3>Latest Outcome</h3>
+              {{with latestExecutionForAction .ID $.ExecutionRecords}}
+                <p><strong>Execution:</strong> <span class="pill">{{.Status}}</span></p>
+                <p class="muted">Started {{formatTime .StartedAt}} by {{.InitiatedBy}}</p>
+              {{else}}
+                <p class="muted">Belum ada execution record.</p>
               {{end}}
-            </td>
-          </tr>
-          {{end}}
-        {{else}}
-          <tr><td colspan="8">Belum ada candidate action.</td></tr>
+              {{with latestVerificationForAction .ID $.VerificationResults $.ExecutionRecords}}
+                <p><strong>Verification:</strong> <span class="pill">{{.Status}}</span></p>
+                <p>{{.Notes}}</p>
+              {{else}}
+                <p class="muted">Belum ada verification result.</p>
+              {{end}}
+              {{with latestRollbackForAction .ID $.RollbackRecords}}
+                <p><strong>Rollback:</strong> <span class="pill">{{.Status}}</span> via {{replaceUnderscores .RollbackActionKey}}</p>
+                <p class="muted">Triggered by {{.TriggeredBy}}</p>
+              {{end}}
+            </section>
+          </div>
+        </article>
         {{end}}
-      </tbody>
-    </table>
+      {{else}}
+        <p>Belum ada candidate action.</p>
+      {{end}}
+    </div>
   </section>
 
-  <section class="card" style="margin-top:1rem;">
+  <details class="card" open style="margin-top:1rem;">
+    <summary>Approval Records</summary>
+    <div class="details-body">
     <h2>Approval Records</h2>
     <table>
       <thead>
@@ -515,9 +641,12 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
         {{end}}
       </tbody>
     </table>
-  </section>
+    </div>
+  </details>
 
-  <section class="card" style="margin-top:1rem;">
+  <details class="card" open style="margin-top:1rem;">
+    <summary>Execution Records</summary>
+    <div class="details-body">
     <h2>Execution Records</h2>
     <table>
       <thead>
@@ -540,9 +669,12 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
         {{end}}
       </tbody>
     </table>
-  </section>
+    </div>
+  </details>
 
-  <section class="card" style="margin-top:1rem;">
+  <details class="card" style="margin-top:1rem;">
+    <summary>Verification Results</summary>
+    <div class="details-body">
     <h2>Verification Results</h2>
     <table>
       <thead>
@@ -567,9 +699,12 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
         {{end}}
       </tbody>
     </table>
-  </section>
+    </div>
+  </details>
 
-  <section class="card" style="margin-top:1rem;">
+  <details class="card" style="margin-top:1rem;">
+    <summary>Rollback Records</summary>
+    <div class="details-body">
     <h2>Rollback Records</h2>
     <table>
       <thead>
@@ -596,9 +731,12 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
         {{end}}
       </tbody>
     </table>
-  </section>
+    </div>
+  </details>
 
-  <section class="card" style="margin-top:1rem;">
+  <details class="card" open style="margin-top:1rem;">
+    <summary>Evidence</summary>
+    <div class="details-body">
     <h2>Evidence</h2>
     <table>
       <thead>
@@ -619,9 +757,12 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
         {{end}}
       </tbody>
     </table>
-  </section>
+    </div>
+  </details>
 
-  <section class="card" style="margin-top:1rem;">
+  <details class="card" style="margin-top:1rem;">
+    <summary>Relevant Docs</summary>
+    <div class="details-body">
     <h2>Relevant Docs</h2>
     <table>
       <thead>
@@ -642,9 +783,12 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
         {{end}}
       </tbody>
     </table>
-  </section>
+    </div>
+  </details>
 
-  <section class="card" style="margin-top:1rem;">
+  <details class="card" style="margin-top:1rem;">
+    <summary>Audit Trail</summary>
+    <div class="details-body">
     <h2>Audit Trail</h2>
     <table>
       <thead>
@@ -665,7 +809,9 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
         {{end}}
       </tbody>
     </table>
-  </section>
+    </div>
+  </details>
+  </div>
 </body>
 </html>
 `))

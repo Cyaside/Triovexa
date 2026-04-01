@@ -230,8 +230,8 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 		t.Fatalf("ui body does not contain incident title")
 	}
 
-	if !strings.Contains(string(uiBody), "Candidate Actions") {
-		t.Fatalf("ui body does not contain candidate actions section")
+	if !strings.Contains(string(uiBody), "Action Lane") {
+		t.Fatalf("ui body does not contain action lane section")
 	}
 
 	actionID, ok := actionsPayload.Actions[0]["ID"].(string)
