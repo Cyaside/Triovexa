@@ -3,6 +3,7 @@ package verification
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -253,6 +254,12 @@ func TestServiceVerifyExecutionFailedTriggersRollbackWhenAvailable(t *testing.T)
 	}
 	if len(rollbackRecords) != 1 || rollbackRecords[0].Status != execution.RollbackStatusSucceeded {
 		t.Fatalf("rollback records = %#v, want one succeeded rollback", rollbackRecords)
+	}
+	if strings.Contains(result.EvidenceJSON, `"escalation_recommended":true`) {
+		t.Fatalf("verification evidence should not keep recommending escalation after successful rollback: %s", result.EvidenceJSON)
+	}
+	if !strings.Contains(result.Notes, "automatic rollback succeeded") {
+		t.Fatalf("verification notes should mention successful automatic rollback, got %q", result.Notes)
 	}
 }
 

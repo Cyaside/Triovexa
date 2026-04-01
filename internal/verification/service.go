@@ -180,6 +180,18 @@ func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAc
 
 				rollbackRecord, rollbackErr := s.rollbacker.RollbackAction(ctx, action, "system:auto-rollback", "automatic rollback triggered after failed verification")
 				if rollbackErr != nil {
+					if err := s.updateVerificationResult(ctx, &result, map[string]any{
+						"before":                 before,
+						"after":                  after,
+						"checks":                 checks,
+						"draft_status_update":    fmt.Sprintf("Incident %q still requires escalation because verification failed and rollback %q also failed.", incidentRecord.Title, definition.RollbackActionKey),
+						"escalation_recommended": true,
+						"rollback_attempted":     true,
+						"rollback_succeeded":     false,
+						"rollback_action_key":    definition.RollbackActionKey,
+					}, "verification failed and automatic rollback also failed; incident requires escalation"); err != nil {
+						return domain.VerificationResult{}, err
+					}
 					if err := s.audit(ctx, action.IncidentID, "rollback_failed", "completed", map[string]any{
 						"candidate_action_id": action.ID,
 						"execution_record_id": record.ID,
@@ -190,6 +202,19 @@ func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAc
 						return domain.VerificationResult{}, fmt.Errorf("audit rollback failure: %w", err)
 					}
 				} else {
+					if err := s.updateVerificationResult(ctx, &result, map[string]any{
+						"before":                 before,
+						"after":                  after,
+						"checks":                 checks,
+						"draft_status_update":    fmt.Sprintf("Incident %q was safely rolled back after action %s degraded the service.", incidentRecord.Title, action.ActionType),
+						"escalation_recommended": false,
+						"rollback_attempted":     true,
+						"rollback_succeeded":     true,
+						"rollback_record_id":     rollbackRecord.ID,
+						"rollback_action_key":    rollbackRecord.RollbackActionKey,
+					}, "verification failed, but automatic rollback succeeded and incident was moved to rolled_back"); err != nil {
+						return domain.VerificationResult{}, err
+					}
 					if _, err := s.transitionIncidentState(ctx, incidentRecord, domain.IncidentStateRolledBack); err != nil {
 						return domain.VerificationResult{}, fmt.Errorf("move incident to rolled_back: %w", err)
 					}
@@ -230,6 +255,21 @@ func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAc
 	}
 
 	return result, nil
+}
+
+func (s *Service) updateVerificationResult(ctx context.Context, result *domain.VerificationResult, evidence map[string]any, notes string) error {
+	body, err := marshalEvidence(evidence)
+	if err != nil {
+		return fmt.Errorf("marshal verification result update: %w", err)
+	}
+
+	result.EvidenceJSON = body
+	result.Notes = notes
+	if err := s.repository.SaveVerificationResult(ctx, *result); err != nil {
+		return fmt.Errorf("update verification result: %w", err)
+	}
+
+	return nil
 }
 
 func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (demo.Snapshot, demo.Snapshot, map[string]bool, string, string, error) {
