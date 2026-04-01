@@ -54,8 +54,9 @@ type Recorder struct {
 	verificationOutcomes map[outcomeKey]int64
 	verificationLatency  map[outcomeKey]durationMetric
 
-	killSwitchEnabled bool
-	killSwitchToggles int64
+	killSwitchEnabled     bool
+	killSwitchInitialized bool
+	killSwitchToggles     int64
 }
 
 func NewRecorder() *Recorder {
@@ -179,10 +180,11 @@ func (r *Recorder) RecordKillSwitchState(enabled bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.killSwitchEnabled != enabled {
+	if r.killSwitchInitialized && r.killSwitchEnabled != enabled {
 		r.killSwitchToggles++
 	}
 	r.killSwitchEnabled = enabled
+	r.killSwitchInitialized = true
 }
 
 func (r *Recorder) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
