@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/approval"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/demo"
+	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/observability"
@@ -592,6 +594,56 @@ func TestServerEndToEndMediumRiskRollback(t *testing.T) {
 	}
 }
 
+func TestServerActionEndpointsReturnNotFoundForMissingCandidateAction(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	catalog := execution.DefaultCatalog()
+	killSwitch := approval.NewKillSwitch(false)
+	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
+	executionService := execution.NewService(repository, catalog, &fakeHTTPAdapter{}, killSwitch, nil, 2*time.Second, 0, time.Minute)
+
+	server := NewServer(config.Config{
+		ServiceName:     "triovexa",
+		Environment:     "test",
+		HTTPPort:        "0",
+		DatabaseURL:     "postgres://test",
+		ReadTimeout:     5 * time.Second,
+		WriteTimeout:    5 * time.Second,
+		IdleTimeout:     5 * time.Second,
+		ShutdownTimeout: 5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, nil, policyService, executionService)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	for _, endpoint := range []string{"/approve", "/reject", "/execute"} {
+		body, err := json.Marshal(map[string]string{
+			"approved_by":  "operator-x",
+			"initiated_by": "operator-x",
+		})
+		if err != nil {
+			t.Fatalf("marshal action payload: %v", err)
+		}
+
+		request, err := http.NewRequest(http.MethodPost, api.URL+"/actions/missing-action"+endpoint, bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("create request for %s: %v", endpoint, err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatalf("do request for %s: %v", endpoint, err)
+		}
+		response.Body.Close()
+
+		if response.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want %d", endpoint, response.StatusCode, http.StatusNotFound)
+		}
+	}
+}
+
 func mustWriteFile(t *testing.T, path string, content string) {
 	t.Helper()
 
@@ -602,4 +654,10 @@ func mustWriteFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write file %s: %v", path, err)
 	}
+}
+
+type fakeHTTPAdapter struct{}
+
+func (fakeHTTPAdapter) Execute(_ context.Context, _ domain.CandidateAction, _ execution.AdapterRequest) (execution.AdapterResult, error) {
+	return execution.AdapterResult{ExecutorType: "fake-http-adapter"}, nil
 }

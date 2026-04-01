@@ -222,6 +222,10 @@ func NewServer(
 			action, err := approvalService.ApproveAction(r.Context(), actionID, approvedBy, note)
 			if err != nil {
 				logger.Error("failed to approve action", slog.String("error", err.Error()))
+				if errors.Is(err, storage.ErrNotFound) {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "candidate action not found"})
+					return
+				}
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
@@ -247,6 +251,10 @@ func NewServer(
 			action, err := approvalService.RejectAction(r.Context(), actionID, approvedBy, note)
 			if err != nil {
 				logger.Error("failed to reject action", slog.String("error", err.Error()))
+				if errors.Is(err, storage.ErrNotFound) {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "candidate action not found"})
+					return
+				}
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
@@ -266,6 +274,10 @@ func NewServer(
 			candidateAction, candidateErr := repository.GetCandidateAction(r.Context(), actionID)
 			if candidateErr != nil {
 				logger.Error("failed to load candidate action before execute", slog.String("error", candidateErr.Error()))
+				if errors.Is(candidateErr, storage.ErrNotFound) {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "candidate action not found"})
+					return
+				}
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": candidateErr.Error()})
 				return
 			}
