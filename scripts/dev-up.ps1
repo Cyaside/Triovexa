@@ -1,5 +1,10 @@
 $ErrorActionPreference = "Stop"
 
+$dockerInfo = docker info 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "Docker daemon is not reachable. Start Docker Desktop first, then rerun this script. Details: $dockerInfo"
+}
+
 $composeArgs = @("compose", "up", "-d", "postgres")
 docker @composeArgs
 

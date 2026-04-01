@@ -29,6 +29,12 @@ Opsi termudah sekarang adalah memakai otomasi Docker Compose yang sudah ada di r
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-up.ps1
 ```
 
+Atau jika ingin langsung menyalakan database, demo service, dan app server sekaligus:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1
+```
+
 3. Untuk melihat status:
 
 ```powershell
@@ -47,6 +53,8 @@ Otomasi ini akan menyalakan PostgreSQL lokal dengan konfigurasi berikut:
 - user: `postgres`
 - password: `postgres`
 - port: `5432`
+- syarat: Docker daemon harus sedang berjalan dan dapat diakses dari terminal
+- `dev-start.ps1` akan membuka dua jendela PowerShell tambahan untuk service lokal
 
 ## Strategi Development
 
@@ -60,3 +68,4 @@ Otomasi ini akan menyalakan PostgreSQL lokal dengan konfigurasi berikut:
 - `prd.md` dan `guide/` sudah diselaraskan secara lokal agar storage baseline memakai PostgreSQL
 - bila belum ada PostgreSQL lokal, aplikasi server utama tidak akan bisa start sampai `DATABASE_URL` valid tersedia
 - bila image `postgres:17-alpine` belum ada, Docker akan menarik image tersebut saat pertama kali setup
+- bila Docker daemon belum aktif, `dev-up.ps1` dan `dev-start.ps1` akan berhenti lebih awal dengan pesan error yang jelas

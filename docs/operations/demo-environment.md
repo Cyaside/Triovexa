@@ -39,6 +39,20 @@ Cara paling cepat:
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-up.ps1
 ```
 
+Cara paling praktis untuk menyalakan semuanya sekaligus:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1
+```
+
+Jika hanya ingin menyalakan proses aplikasi tanpa bootstrap database ulang:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1 -SkipDatabase
+```
+
+Jika skrip memberi error bahwa Docker daemon tidak reachable, nyalakan Docker Desktop dulu lalu jalankan ulang.
+
 ## Contoh Memicu Insiden
 
 ```powershell
