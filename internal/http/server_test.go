@@ -73,7 +73,7 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 		WriteTimeout:       5 * time.Second,
 		IdleTimeout:        5 * time.Second,
 		ShutdownTimeout:    5 * time.Second,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, incidentService)
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, incidentService, policyService)
 
 	api := httptest.NewServer(server.Handler)
 	defer api.Close()
@@ -188,6 +188,82 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 
 	if !strings.Contains(string(uiBody), "Candidate Actions") {
 		t.Fatalf("ui body does not contain candidate actions section")
+	}
+
+	actionID, ok := actionsPayload.Actions[0]["ID"].(string)
+	if !ok || actionID == "" {
+		t.Fatalf("candidate action id missing from response")
+	}
+
+	approveBody, err := json.Marshal(map[string]string{
+		"approved_by": "operator-a",
+		"note":        "safe to proceed",
+	})
+	if err != nil {
+		t.Fatalf("marshal approve payload: %v", err)
+	}
+
+	approveRequest, err := http.NewRequest(http.MethodPost, api.URL+"/actions/"+actionID+"/approve", bytes.NewReader(approveBody))
+	if err != nil {
+		t.Fatalf("create approve request: %v", err)
+	}
+	approveRequest.Header.Set("Content-Type", "application/json")
+
+	approveResponse, err := http.DefaultClient.Do(approveRequest)
+	if err != nil {
+		t.Fatalf("approve action: %v", err)
+	}
+	defer approveResponse.Body.Close()
+
+	if approveResponse.StatusCode != http.StatusOK {
+		t.Fatalf("approve status = %d, want %d", approveResponse.StatusCode, http.StatusOK)
+	}
+
+	actionsAfterApproveResponse, err := http.Get(api.URL + "/incidents/" + incidentID + "/actions")
+	if err != nil {
+		t.Fatalf("get candidate actions after approval: %v", err)
+	}
+	defer actionsAfterApproveResponse.Body.Close()
+
+	var actionsAfterApprovePayload struct {
+		Actions []map[string]any `json:"actions"`
+	}
+	if err := json.NewDecoder(actionsAfterApproveResponse.Body).Decode(&actionsAfterApprovePayload); err != nil {
+		t.Fatalf("decode actions after approval response: %v", err)
+	}
+
+	if status, ok := actionsAfterApprovePayload.Actions[0]["Status"].(string); !ok || status != "approved" {
+		t.Fatalf("candidate action status after approval = %v, want %q", actionsAfterApprovePayload.Actions[0]["Status"], "approved")
+	}
+
+	killSwitchBody, err := json.Marshal(map[string]bool{"enabled": true})
+	if err != nil {
+		t.Fatalf("marshal kill switch payload: %v", err)
+	}
+
+	killSwitchResponse, err := http.Post(api.URL+"/admin/kill-switch", "application/json", bytes.NewReader(killSwitchBody))
+	if err != nil {
+		t.Fatalf("toggle kill switch: %v", err)
+	}
+	defer killSwitchResponse.Body.Close()
+
+	if killSwitchResponse.StatusCode != http.StatusOK {
+		t.Fatalf("kill switch status = %d, want %d", killSwitchResponse.StatusCode, http.StatusOK)
+	}
+
+	debugResponse, err := http.Get(api.URL + "/debug/tools")
+	if err != nil {
+		t.Fatalf("get debug tools: %v", err)
+	}
+	defer debugResponse.Body.Close()
+
+	var serverInfo map[string]any
+	if err := json.NewDecoder(debugResponse.Body).Decode(&serverInfo); err != nil {
+		t.Fatalf("decode debug tools response: %v", err)
+	}
+
+	if enabled, ok := serverInfo["kill_switch_enabled"].(bool); !ok || !enabled {
+		t.Fatalf("kill switch should be enabled in debug response")
 	}
 }
 

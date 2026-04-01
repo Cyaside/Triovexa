@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Cyaside/Triovexa/internal/alerting"
+	"github.com/Cyaside/Triovexa/internal/approval"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/incident"
@@ -16,12 +17,13 @@ import (
 )
 
 type ServerInfo struct {
-	Name               string   `json:"name"`
-	Environment        string   `json:"environment"`
-	KillSwitchEnabled  bool     `json:"kill_switch_enabled"`
-	Phase              string   `json:"phase"`
-	AvailableEndpoints []string `json:"available_endpoints"`
-	Timestamp          string   `json:"timestamp"`
+	Name                string   `json:"name"`
+	Environment         string   `json:"environment"`
+	KillSwitchEnabled   bool     `json:"kill_switch_enabled"`
+	KillSwitchUpdatedAt string   `json:"kill_switch_updated_at"`
+	Phase               string   `json:"phase"`
+	AvailableEndpoints  []string `json:"available_endpoints"`
+	Timestamp           string   `json:"timestamp"`
 }
 
 func NewServer(
@@ -29,6 +31,7 @@ func NewServer(
 	logger *slog.Logger,
 	repository storage.Repository,
 	incidentService *incident.Service,
+	approvalService *approval.Service,
 ) *http.Server {
 	mux := http.NewServeMux()
 
@@ -50,11 +53,20 @@ func NewServer(
 	})
 
 	mux.HandleFunc("/debug/tools", func(w http.ResponseWriter, r *http.Request) {
+		killSwitchState := approval.KillSwitchState{
+			Enabled:   cfg.KillSwitchEnabled,
+			UpdatedAt: time.Now().UTC(),
+		}
+		if approvalService != nil {
+			killSwitchState = approvalService.KillSwitchState()
+		}
+
 		writeJSON(w, http.StatusOK, ServerInfo{
-			Name:              cfg.ServiceName,
-			Environment:       cfg.Environment,
-			KillSwitchEnabled: cfg.KillSwitchEnabled,
-			Phase:             "phase-02-candidate-action-generation",
+			Name:                cfg.ServiceName,
+			Environment:         cfg.Environment,
+			KillSwitchEnabled:   killSwitchState.Enabled,
+			KillSwitchUpdatedAt: killSwitchState.UpdatedAt.Format(time.RFC3339),
+			Phase:               "phase-03-policy-approval-workflow",
 			AvailableEndpoints: []string{
 				"GET /health",
 				"GET /debug/tools",
@@ -63,10 +75,37 @@ func NewServer(
 				"GET /incidents/{id}",
 				"GET /incidents/{id}/triage",
 				"GET /incidents/{id}/actions",
+				"POST /actions/{id}/approve",
+				"POST /actions/{id}/reject",
+				"POST /admin/kill-switch",
 				"GET /ui/incidents",
 				"GET /ui/incidents/{id}",
 			},
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		})
+	})
+
+	mux.HandleFunc("/admin/kill-switch", func(w http.ResponseWriter, r *http.Request) {
+		if approvalService == nil {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "approval workflow is not configured"})
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		enabled, err := parseKillSwitchRequest(r)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		state := approvalService.SetKillSwitch(enabled)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled":    state.Enabled,
+			"updated_at": state.UpdatedAt.Format(time.RFC3339),
 		})
 	})
 
@@ -95,6 +134,66 @@ func NewServer(
 			"state":             record.State,
 			"title":             record.Title,
 		})
+	})
+
+	mux.HandleFunc("/actions/", func(w http.ResponseWriter, r *http.Request) {
+		if approvalService == nil {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "approval workflow is not configured"})
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		actionPath := strings.TrimPrefix(r.URL.Path, "/actions/")
+		switch {
+		case strings.HasSuffix(actionPath, "/approve"):
+			actionID := strings.TrimSuffix(actionPath, "/approve")
+			approvedBy, note, wantsHTML, err := parseApprovalRequest(r)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+
+			action, err := approvalService.ApproveAction(r.Context(), actionID, approvedBy, note)
+			if err != nil {
+				logger.Error("failed to approve action", slog.String("error", err.Error()))
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+
+			if wantsHTML {
+				http.Redirect(w, r, "/ui/incidents/"+action.IncidentID, http.StatusSeeOther)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{"action": action})
+		case strings.HasSuffix(actionPath, "/reject"):
+			actionID := strings.TrimSuffix(actionPath, "/reject")
+			approvedBy, note, wantsHTML, err := parseApprovalRequest(r)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+
+			action, err := approvalService.RejectAction(r.Context(), actionID, approvedBy, note)
+			if err != nil {
+				logger.Error("failed to reject action", slog.String("error", err.Error()))
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+
+			if wantsHTML {
+				http.Redirect(w, r, "/ui/incidents/"+action.IncidentID, http.StatusSeeOther)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{"action": action})
+		default:
+			http.NotFound(w, r)
+		}
 	})
 
 	mux.HandleFunc("/incidents", func(w http.ResponseWriter, r *http.Request) {
@@ -196,6 +295,20 @@ func NewServer(
 			return
 		}
 
+		policyDecisions, err := repository.ListPolicyDecisions(r.Context(), incidentID)
+		if err != nil {
+			logger.Error("failed to list policy decisions", slog.String("error", err.Error()))
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get policy decisions"})
+			return
+		}
+
+		approvalRecords, err := repository.ListApprovalRecords(r.Context(), incidentID)
+		if err != nil {
+			logger.Error("failed to list approval records", slog.String("error", err.Error()))
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get approval records"})
+			return
+		}
+
 		var triageResult *domain.TriageResult
 		result, err := repository.GetTriageResult(r.Context(), incidentID)
 		if err == nil {
@@ -212,6 +325,8 @@ func NewServer(
 			"evidence":          evidence,
 			"documents":         documents,
 			"candidate_actions": actions,
+			"policy_decisions":  policyDecisions,
+			"approval_records":  approvalRecords,
 			"audit_events":      auditEvents,
 		})
 	})
@@ -228,7 +343,10 @@ func NewServer(
 			return
 		}
 
-		renderIncidentList(w, incidentListPageData{Incidents: incidents})
+		renderIncidentList(w, incidentListPageData{
+			Incidents:         incidents,
+			KillSwitchEnabled: approvalService != nil && approvalService.KillSwitchState().Enabled,
+		})
 	})
 
 	mux.HandleFunc("/ui/incidents/", func(w http.ResponseWriter, r *http.Request) {
@@ -271,6 +389,18 @@ func NewServer(
 			return
 		}
 
+		policyDecisions, err := repository.ListPolicyDecisions(r.Context(), incidentID)
+		if err != nil {
+			http.Error(w, "failed to load policy decisions", http.StatusInternalServerError)
+			return
+		}
+
+		approvalRecords, err := repository.ListApprovalRecords(r.Context(), incidentID)
+		if err != nil {
+			http.Error(w, "failed to load approval records", http.StatusInternalServerError)
+			return
+		}
+
 		auditEvents, err := repository.ListAuditEvents(r.Context(), incidentID)
 		if err != nil {
 			http.Error(w, "failed to load audit trail", http.StatusInternalServerError)
@@ -287,12 +417,15 @@ func NewServer(
 		}
 
 		renderIncidentDetail(w, incidentDetailPageData{
-			Incident:   record,
-			Triage:     triageResult,
-			Evidence:   evidence,
-			Documents:  documents,
-			Actions:    actions,
-			AuditTrail: auditEvents,
+			Incident:          record,
+			Triage:            triageResult,
+			Evidence:          evidence,
+			Documents:         documents,
+			Actions:           actions,
+			PolicyDecisions:   policyDecisions,
+			ApprovalRecords:   approvalRecords,
+			KillSwitchEnabled: approvalService != nil && approvalService.KillSwitchState().Enabled,
+			AuditTrail:        auditEvents,
 		})
 	})
 
@@ -321,4 +454,57 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func parseApprovalRequest(r *http.Request) (approvedBy string, note string, wantsHTML bool, err error) {
+	contentType := r.Header.Get("Content-Type")
+	wantsHTML = strings.Contains(contentType, "application/x-www-form-urlencoded")
+
+	if wantsHTML {
+		if err := r.ParseForm(); err != nil {
+			return "", "", wantsHTML, errors.New("invalid approval form payload")
+		}
+		approvedBy = strings.TrimSpace(r.FormValue("approved_by"))
+		note = strings.TrimSpace(r.FormValue("note"))
+	} else {
+		var payload struct {
+			ApprovedBy string `json:"approved_by"`
+			Note       string `json:"note"`
+		}
+		if r.ContentLength != 0 {
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				return "", "", wantsHTML, errors.New("invalid approval payload")
+			}
+		}
+		approvedBy = strings.TrimSpace(payload.ApprovedBy)
+		note = strings.TrimSpace(payload.Note)
+	}
+
+	if approvedBy == "" {
+		approvedBy = strings.TrimSpace(r.Header.Get("X-Operator-Name"))
+	}
+	if approvedBy == "" {
+		return "", "", wantsHTML, errors.New("approved_by is required")
+	}
+
+	return approvedBy, note, wantsHTML, nil
+}
+
+func parseKillSwitchRequest(r *http.Request) (bool, error) {
+	if strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+		if err := r.ParseForm(); err != nil {
+			return false, errors.New("invalid kill switch form payload")
+		}
+		enabled := strings.EqualFold(strings.TrimSpace(r.FormValue("enabled")), "true")
+		return enabled, nil
+	}
+
+	var payload struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		return false, errors.New("invalid kill switch payload")
+	}
+
+	return payload.Enabled, nil
 }

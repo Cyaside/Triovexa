@@ -12,16 +12,20 @@ import (
 )
 
 type incidentListPageData struct {
-	Incidents []domain.Incident
+	Incidents         []domain.Incident
+	KillSwitchEnabled bool
 }
 
 type incidentDetailPageData struct {
-	Incident   domain.Incident
-	Triage     *domain.TriageResult
-	Evidence   []domain.EvidenceItem
-	Documents  []domain.DocumentReference
-	Actions    []domain.CandidateAction
-	AuditTrail []domain.AuditEvent
+	Incident          domain.Incident
+	Triage            *domain.TriageResult
+	Evidence          []domain.EvidenceItem
+	Documents         []domain.DocumentReference
+	Actions           []domain.CandidateAction
+	PolicyDecisions   []domain.PolicyDecision
+	ApprovalRecords   []domain.ApprovalRecord
+	KillSwitchEnabled bool
+	AuditTrail        []domain.AuditEvent
 }
 
 var templateFuncs = template.FuncMap{
@@ -49,6 +53,15 @@ var templateFuncs = template.FuncMap{
 		}
 		return strings.Join(values, ", ")
 	},
+	"policyFor": func(actionID string, decisions []domain.PolicyDecision) *domain.PolicyDecision {
+		for _, decision := range decisions {
+			if decision.CandidateActionID == actionID {
+				copy := decision
+				return &copy
+			}
+		}
+		return nil
+	},
 }
 
 var incidentListTemplate = template.Must(template.New("incident-list").Funcs(templateFuncs).Parse(`
@@ -66,11 +79,15 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
     a { color: #0f62fe; text-decoration: none; }
     .badge { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px; background: #e6edf5; }
     .muted { color: #5b6b7d; }
+    .banner { margin: 0 0 1rem 0; padding: 0.85rem 1rem; border-radius: 12px; background: #fff1d6; color: #8a5a00; border: 1px solid #f2d395; }
   </style>
 </head>
 <body>
   <h1>Incident List</h1>
-  <p class="muted">Operator view untuk Phase 2 candidate action generation.</p>
+  <p class="muted">Operator view untuk Phase 3 policy and approval workflow.</p>
+  {{if .KillSwitchEnabled}}
+  <p class="banner">Kill switch sedang aktif. Evaluasi dan triage tetap berjalan, tetapi action baru akan diblok oleh policy.</p>
+  {{end}}
   <table>
     <thead>
       <tr>
@@ -118,17 +135,27 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
     .card { background: #fff; border-radius: 14px; padding: 1rem 1.15rem; box-shadow: 0 10px 35px rgba(19,34,56,0.08); }
     .muted { color: #5b6b7d; }
     .pill { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px; background: #e6edf5; margin-right: 0.35rem; }
+    .banner { margin: 0 0 1rem 0; padding: 0.85rem 1rem; border-radius: 12px; background: #fff1d6; color: #8a5a00; border: 1px solid #f2d395; }
     ul { padding-left: 1.2rem; }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 0.65rem; border-bottom: 1px solid #e6edf5; text-align: left; vertical-align: top; }
     th { background: #132238; color: #fff; }
     pre { margin: 0.75rem 0 0 0; padding: 0.75rem; background: #f3f6fb; border-radius: 10px; white-space: pre-wrap; }
+    form { margin-top: 0.75rem; display: grid; gap: 0.5rem; }
+    input, textarea, button { font: inherit; }
+    input, textarea { width: 100%; padding: 0.55rem; border: 1px solid #d5dde8; border-radius: 8px; }
+    button { padding: 0.55rem 0.75rem; border: none; border-radius: 8px; cursor: pointer; }
+    .approve { background: #0f9d58; color: #fff; }
+    .reject { background: #c5221f; color: #fff; }
   </style>
 </head>
 <body>
   <p><a href="/ui/incidents">Back to incident list</a></p>
   <h1>{{.Incident.Title}}</h1>
   <p class="muted">{{.Incident.ServiceName}} | {{.Incident.Environment}} | severity {{.Incident.Severity}} | state {{.Incident.State}}</p>
+  {{if .KillSwitchEnabled}}
+  <p class="banner">Kill switch sedang aktif. Action baru akan ditolak oleh policy evaluator sampai dinonaktifkan kembali.</p>
+  {{end}}
 
   <div class="grid">
     <section class="card">
@@ -178,7 +205,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
     <h2>Candidate Actions</h2>
     <table>
       <thead>
-        <tr><th>Action</th><th>Target</th><th>Risk</th><th>Status</th><th>Approval</th><th>Evidence Refs</th></tr>
+        <tr><th>Action</th><th>Target</th><th>Risk</th><th>Status</th><th>Policy Decision</th><th>Approval</th><th>Evidence Refs</th><th>Controls</th></tr>
       </thead>
       <tbody>
         {{if .Actions}}
@@ -192,12 +219,61 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
             <td>{{.TargetResource}}</td>
             <td><span class="pill">{{.RiskLevel}}</span></td>
             <td><span class="pill">{{.Status}}</span></td>
+            <td>
+              {{with policyFor .ID $.PolicyDecisions}}
+                <strong>{{.Decision}}</strong>
+                <p>{{.Reason}}</p>
+                <p><code>{{.PolicyRuleRef}}</code></p>
+              {{else}}
+                <p>Belum ada policy decision.</p>
+              {{end}}
+            </td>
             <td>{{.ApprovalHint}}</td>
             <td>{{joinStrings .EvidenceRefs}}</td>
+            <td>
+              {{if eq .Status "awaiting_approval"}}
+              <form method="post" action="/actions/{{.ID}}/approve">
+                <input type="text" name="approved_by" placeholder="operator name" />
+                <textarea name="note" rows="2" placeholder="approval note"></textarea>
+                <button class="approve" type="submit">Approve</button>
+              </form>
+              <form method="post" action="/actions/{{.ID}}/reject">
+                <input type="text" name="approved_by" placeholder="operator name" />
+                <textarea name="note" rows="2" placeholder="rejection note"></textarea>
+                <button class="reject" type="submit">Reject</button>
+              </form>
+              {{else}}
+                <p>Tidak ada aksi approval manual.</p>
+              {{end}}
+            </td>
           </tr>
           {{end}}
         {{else}}
-          <tr><td colspan="6">Belum ada candidate action.</td></tr>
+          <tr><td colspan="8">Belum ada candidate action.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card" style="margin-top:1rem;">
+    <h2>Approval Records</h2>
+    <table>
+      <thead>
+        <tr><th>Action ID</th><th>Decision</th><th>Approved By</th><th>Note</th><th>Created</th></tr>
+      </thead>
+      <tbody>
+        {{if .ApprovalRecords}}
+          {{range .ApprovalRecords}}
+          <tr>
+            <td>{{.CandidateActionID}}</td>
+            <td><span class="pill">{{.Decision}}</span></td>
+            <td>{{.ApprovedBy}}</td>
+            <td>{{.Note}}</td>
+            <td>{{formatTime .CreatedAt}}</td>
+          </tr>
+          {{end}}
+        {{else}}
+          <tr><td colspan="5">Belum ada approval record.</td></tr>
         {{end}}
       </tbody>
     </table>

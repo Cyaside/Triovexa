@@ -47,7 +47,7 @@ func main() {
 	actionGenerator := remediation.NewHeuristicGenerator(catalog)
 	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), approval.NewKillSwitch(cfg.KillSwitchEnabled))
 	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService)
-	server := apphttp.NewServer(cfg, logger, repository, incidentService)
+	server := apphttp.NewServer(cfg, logger, repository, incidentService, policyService)
 
 	logger.Info("starting server",
 		slog.String("addr", server.Addr),
