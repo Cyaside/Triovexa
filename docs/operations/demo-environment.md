@@ -33,6 +33,12 @@ go run ./cmd/server
 
 Sebelum menjalankan server utama, pastikan `DATABASE_URL` sudah mengarah ke PostgreSQL yang aktif.
 
+Cara paling cepat:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-up.ps1
+```
+
 ## Contoh Memicu Insiden
 
 ```powershell

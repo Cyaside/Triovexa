@@ -18,19 +18,45 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disabl
 
 ## Kebutuhan Lokal
 
-Minimal siapkan:
+Opsi termudah sekarang adalah memakai otomasi Docker Compose yang sudah ada di repo.
 
-- PostgreSQL server lokal
-- database bernama `triovexa`
-- user yang punya izin create table dan write data
+## Cara Menjalankan Otomasi Lokal
+
+1. Pastikan Docker Desktop aktif.
+2. Jalankan:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-up.ps1
+```
+
+3. Untuk melihat status:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-status.ps1
+```
+
+4. Untuk mematikan environment lokal:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-down.ps1
+```
+
+Otomasi ini akan menyalakan PostgreSQL lokal dengan konfigurasi berikut:
+
+- database: `triovexa`
+- user: `postgres`
+- password: `postgres`
+- port: `5432`
 
 ## Strategi Development
 
 - aplikasi melakukan migrasi schema dasar saat startup
 - test HTTP dan orchestration tidak wajib memakai PostgreSQL nyata setiap saat
 - runtime utama tetap diasumsikan memakai PostgreSQL
+- local bootstrap diotomasi lewat `docker-compose.yml` dan skrip PowerShell
 
 ## Catatan
 
 - `prd.md` dan `guide/` sudah diselaraskan secara lokal agar storage baseline memakai PostgreSQL
 - bila belum ada PostgreSQL lokal, aplikasi server utama tidak akan bisa start sampai `DATABASE_URL` valid tersedia
+- bila image `postgres:17-alpine` belum ada, Docker akan menarik image tersebut saat pertama kali setup
