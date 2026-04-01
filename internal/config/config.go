@@ -2,6 +2,7 @@ package config
 
 import (
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -21,7 +22,7 @@ type Config struct {
 	ServiceName        string
 	Environment        string
 	HTTPPort           string
-	DatabasePath       string
+	DatabaseURL        string
 	DocsRoot           string
 	DemoServiceBaseURL string
 	ReadTimeout        time.Duration
@@ -37,7 +38,7 @@ func Load() Config {
 		ServiceName:        getEnv("APP_NAME", "triovexa"),
 		Environment:        getEnv("APP_ENV", defaultEnvironment),
 		HTTPPort:           getEnv("HTTP_PORT", defaultHTTPPort),
-		DatabasePath:       getEnv("DATABASE_PATH", "triovexa.db"),
+		DatabaseURL:        getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disable"),
 		DocsRoot:           getEnv("DOCS_ROOT", "docs"),
 		DemoServiceBaseURL: getEnv("DEMO_SERVICE_BASE_URL", "http://localhost:8090"),
 		ReadTimeout:        getDurationEnv("HTTP_READ_TIMEOUT", defaultReadTimeout),
@@ -51,6 +52,30 @@ func Load() Config {
 
 func (c Config) HTTPAddress() string {
 	return ":" + c.HTTPPort
+}
+
+func (c Config) DatabaseTarget() string {
+	if strings.TrimSpace(c.DatabaseURL) == "" {
+		return "unset"
+	}
+
+	parsed, err := url.Parse(c.DatabaseURL)
+	if err != nil {
+		return "configured"
+	}
+
+	host := parsed.Host
+	database := strings.TrimPrefix(parsed.Path, "/")
+	if host == "" && database == "" {
+		return "configured"
+	}
+	if database == "" {
+		return host
+	}
+	if host == "" {
+		return database
+	}
+	return host + "/" + database
 }
 
 func getEnv(key, fallback string) string {

@@ -48,13 +48,7 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	}))
 	defer demoServer.Close()
 
-	repository, err := storage.NewSQLiteStore(filepath.Join(tempDir, "triovexa-test.db"))
-	if err != nil {
-		t.Fatalf("create sqlite store: %v", err)
-	}
-	defer func() {
-		_ = repository.Close()
-	}()
+	repository := storage.NewMemoryStore()
 
 	collector := observability.NewDemoCollector(demoServer.URL)
 	retriever := retrieval.NewFileRetriever(docsRoot)
@@ -65,6 +59,7 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 		ServiceName:        "triovexa",
 		Environment:        "test",
 		HTTPPort:           "0",
+		DatabaseURL:        "postgres://test",
 		DocsRoot:           docsRoot,
 		DemoServiceBaseURL: demoServer.URL,
 		ReadTimeout:        5 * time.Second,

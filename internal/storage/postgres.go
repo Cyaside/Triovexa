@@ -8,53 +8,43 @@ import (
 	"fmt"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/Cyaside/Triovexa/internal/domain"
 )
 
-var ErrNotFound = errors.New("storage: not found")
-
-type Repository interface {
-	Close() error
-	CreateIncident(context.Context, domain.Incident) error
-	UpdateIncidentState(context.Context, string, domain.IncidentState) error
-	GetIncident(context.Context, string) (domain.Incident, error)
-	ListIncidents(context.Context) ([]domain.Incident, error)
-	AddAuditEvent(context.Context, domain.AuditEvent) error
-	ListAuditEvents(context.Context, string) ([]domain.AuditEvent, error)
-	SaveEvidenceItems(context.Context, []domain.EvidenceItem) error
-	ListEvidenceItems(context.Context, string) ([]domain.EvidenceItem, error)
-	SaveDocumentReferences(context.Context, []domain.DocumentReference) error
-	ListDocumentReferences(context.Context, string) ([]domain.DocumentReference, error)
-	SaveTriageResult(context.Context, domain.TriageResult) error
-	GetTriageResult(context.Context, string) (domain.TriageResult, error)
-}
-
-type SQLiteStore struct {
+type PostgresStore struct {
 	db *sql.DB
 }
 
-func NewSQLiteStore(databasePath string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite", databasePath)
+func NewPostgresStore(databaseURL string) (*PostgresStore, error) {
+	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite database: %w", err)
+		return nil, fmt.Errorf("open postgres database: %w", err)
 	}
 
-	store := &SQLiteStore{db: db}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ping postgres database: %w", err)
+	}
+
+	store := &PostgresStore{db: db}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("migrate sqlite database: %w", err)
+		return nil, fmt.Errorf("migrate postgres database: %w", err)
 	}
 
 	return store, nil
 }
 
-func (s *SQLiteStore) Close() error {
+func (s *PostgresStore) Close() error {
 	return s.db.Close()
 }
 
-func (s *SQLiteStore) migrate(ctx context.Context) error {
+func (s *PostgresStore) migrate(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS incidents (
 			id TEXT PRIMARY KEY,
@@ -65,30 +55,30 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 			environment TEXT NOT NULL,
 			severity TEXT NOT NULL,
 			state TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS audit_events (
 			id TEXT PRIMARY KEY,
-			incident_id TEXT NOT NULL,
+			incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
 			step_name TEXT NOT NULL,
 			status TEXT NOT NULL,
-			details_json TEXT NOT NULL,
-			started_at TEXT NOT NULL,
-			finished_at TEXT NOT NULL
+			details_json JSONB NOT NULL,
+			started_at TIMESTAMPTZ NOT NULL,
+			finished_at TIMESTAMPTZ NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS evidence_items (
 			id TEXT PRIMARY KEY,
-			incident_id TEXT NOT NULL,
+			incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
 			type TEXT NOT NULL,
 			source TEXT NOT NULL,
 			snippet TEXT NOT NULL,
-			timestamp TEXT NOT NULL,
-			metadata_json TEXT NOT NULL
+			timestamp TIMESTAMPTZ NOT NULL,
+			metadata_json JSONB NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS document_references (
 			id TEXT PRIMARY KEY,
-			incident_id TEXT NOT NULL,
+			incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
 			document_title TEXT NOT NULL,
 			document_type TEXT NOT NULL,
 			relevance_reason TEXT NOT NULL,
@@ -96,14 +86,14 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS triage_results (
 			id TEXT PRIMARY KEY,
-			incident_id TEXT NOT NULL UNIQUE,
+			incident_id TEXT NOT NULL UNIQUE REFERENCES incidents(id) ON DELETE CASCADE,
 			summary TEXT NOT NULL,
-			hypotheses_json TEXT NOT NULL,
+			hypotheses_json JSONB NOT NULL,
 			blast_radius TEXT NOT NULL,
-			next_steps_json TEXT NOT NULL,
+			next_steps_json JSONB NOT NULL,
 			draft_status_update TEXT NOT NULL,
 			confidence_notes TEXT NOT NULL,
-			created_at TEXT NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		);`,
 	}
 
@@ -116,11 +106,11 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 	return nil
 }
 
-func (s *SQLiteStore) CreateIncident(ctx context.Context, incident domain.Incident) error {
+func (s *PostgresStore) CreateIncident(ctx context.Context, incident domain.Incident) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO incidents (
 			id, external_alert_id, alert_source, title, service_name, environment, severity, state, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`,
 		incident.ID,
 		incident.ExternalAlertID,
@@ -130,32 +120,30 @@ func (s *SQLiteStore) CreateIncident(ctx context.Context, incident domain.Incide
 		incident.Environment,
 		incident.Severity,
 		string(incident.State),
-		formatTime(incident.CreatedAt),
-		formatTime(incident.UpdatedAt),
+		incident.CreatedAt.UTC(),
+		incident.UpdatedAt.UTC(),
 	)
 	return err
 }
 
-func (s *SQLiteStore) UpdateIncidentState(ctx context.Context, incidentID string, state domain.IncidentState) error {
+func (s *PostgresStore) UpdateIncidentState(ctx context.Context, incidentID string, state domain.IncidentState) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE incidents
-		SET state = ?, updated_at = ?
-		WHERE id = ?
-	`, string(state), formatTime(time.Now().UTC()), incidentID)
+		SET state = $1, updated_at = $2
+		WHERE id = $3
+	`, string(state), time.Now().UTC(), incidentID)
 	return err
 }
 
-func (s *SQLiteStore) GetIncident(ctx context.Context, incidentID string) (domain.Incident, error) {
+func (s *PostgresStore) GetIncident(ctx context.Context, incidentID string) (domain.Incident, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, external_alert_id, alert_source, title, service_name, environment, severity, state, created_at, updated_at
 		FROM incidents
-		WHERE id = ?
+		WHERE id = $1
 	`, incidentID)
 
 	var incident domain.Incident
 	var state string
-	var createdAt string
-	var updatedAt string
 	if err := row.Scan(
 		&incident.ID,
 		&incident.ExternalAlertID,
@@ -165,8 +153,8 @@ func (s *SQLiteStore) GetIncident(ctx context.Context, incidentID string) (domai
 		&incident.Environment,
 		&incident.Severity,
 		&state,
-		&createdAt,
-		&updatedAt,
+		&incident.CreatedAt,
+		&incident.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Incident{}, ErrNotFound
@@ -175,12 +163,10 @@ func (s *SQLiteStore) GetIncident(ctx context.Context, incidentID string) (domai
 	}
 
 	incident.State = domain.IncidentState(state)
-	incident.CreatedAt = parseTime(createdAt)
-	incident.UpdatedAt = parseTime(updatedAt)
 	return incident, nil
 }
 
-func (s *SQLiteStore) ListIncidents(ctx context.Context) ([]domain.Incident, error) {
+func (s *PostgresStore) ListIncidents(ctx context.Context) ([]domain.Incident, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, external_alert_id, alert_source, title, service_name, environment, severity, state, created_at, updated_at
 		FROM incidents
@@ -195,8 +181,6 @@ func (s *SQLiteStore) ListIncidents(ctx context.Context) ([]domain.Incident, err
 	for rows.Next() {
 		var incident domain.Incident
 		var state string
-		var createdAt string
-		var updatedAt string
 		if err := rows.Scan(
 			&incident.ID,
 			&incident.ExternalAlertID,
@@ -206,42 +190,39 @@ func (s *SQLiteStore) ListIncidents(ctx context.Context) ([]domain.Incident, err
 			&incident.Environment,
 			&incident.Severity,
 			&state,
-			&createdAt,
-			&updatedAt,
+			&incident.CreatedAt,
+			&incident.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
-
 		incident.State = domain.IncidentState(state)
-		incident.CreatedAt = parseTime(createdAt)
-		incident.UpdatedAt = parseTime(updatedAt)
 		incidents = append(incidents, incident)
 	}
 
 	return incidents, rows.Err()
 }
 
-func (s *SQLiteStore) AddAuditEvent(ctx context.Context, event domain.AuditEvent) error {
+func (s *PostgresStore) AddAuditEvent(ctx context.Context, event domain.AuditEvent) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO audit_events (id, incident_id, step_name, status, details_json, started_at, finished_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
 	`,
 		event.ID,
 		event.IncidentID,
 		event.StepName,
 		event.Status,
 		event.DetailsJSON,
-		formatTime(event.StartedAt),
-		formatTime(event.FinishedAt),
+		event.StartedAt.UTC(),
+		event.FinishedAt.UTC(),
 	)
 	return err
 }
 
-func (s *SQLiteStore) ListAuditEvents(ctx context.Context, incidentID string) ([]domain.AuditEvent, error) {
+func (s *PostgresStore) ListAuditEvents(ctx context.Context, incidentID string) ([]domain.AuditEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, incident_id, step_name, status, details_json, started_at, finished_at
 		FROM audit_events
-		WHERE incident_id = ?
+		WHERE incident_id = $1
 		ORDER BY started_at ASC
 	`, incidentID)
 	if err != nil {
@@ -252,29 +233,24 @@ func (s *SQLiteStore) ListAuditEvents(ctx context.Context, incidentID string) ([
 	var events []domain.AuditEvent
 	for rows.Next() {
 		var event domain.AuditEvent
-		var startedAt string
-		var finishedAt string
 		if err := rows.Scan(
 			&event.ID,
 			&event.IncidentID,
 			&event.StepName,
 			&event.Status,
 			&event.DetailsJSON,
-			&startedAt,
-			&finishedAt,
+			&event.StartedAt,
+			&event.FinishedAt,
 		); err != nil {
 			return nil, err
 		}
-
-		event.StartedAt = parseTime(startedAt)
-		event.FinishedAt = parseTime(finishedAt)
 		events = append(events, event)
 	}
 
 	return events, rows.Err()
 }
 
-func (s *SQLiteStore) SaveEvidenceItems(ctx context.Context, items []domain.EvidenceItem) error {
+func (s *PostgresStore) SaveEvidenceItems(ctx context.Context, items []domain.EvidenceItem) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -288,8 +264,8 @@ func (s *SQLiteStore) SaveEvidenceItems(ctx context.Context, items []domain.Evid
 	for _, item := range items {
 		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO evidence_items (id, incident_id, type, source, snippet, timestamp, metadata_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, item.ID, item.IncidentID, item.Type, item.Source, item.Snippet, formatTime(item.Timestamp), item.MetadataJSON); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+		`, item.ID, item.IncidentID, item.Type, item.Source, item.Snippet, item.Timestamp.UTC(), item.MetadataJSON); err != nil {
 			return err
 		}
 	}
@@ -297,11 +273,11 @@ func (s *SQLiteStore) SaveEvidenceItems(ctx context.Context, items []domain.Evid
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) ListEvidenceItems(ctx context.Context, incidentID string) ([]domain.EvidenceItem, error) {
+func (s *PostgresStore) ListEvidenceItems(ctx context.Context, incidentID string) ([]domain.EvidenceItem, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, incident_id, type, source, snippet, timestamp, metadata_json
 		FROM evidence_items
-		WHERE incident_id = ?
+		WHERE incident_id = $1
 		ORDER BY timestamp ASC
 	`, incidentID)
 	if err != nil {
@@ -312,27 +288,24 @@ func (s *SQLiteStore) ListEvidenceItems(ctx context.Context, incidentID string) 
 	var items []domain.EvidenceItem
 	for rows.Next() {
 		var item domain.EvidenceItem
-		var timestamp string
 		if err := rows.Scan(
 			&item.ID,
 			&item.IncidentID,
 			&item.Type,
 			&item.Source,
 			&item.Snippet,
-			&timestamp,
+			&item.Timestamp,
 			&item.MetadataJSON,
 		); err != nil {
 			return nil, err
 		}
-
-		item.Timestamp = parseTime(timestamp)
 		items = append(items, item)
 	}
 
 	return items, rows.Err()
 }
 
-func (s *SQLiteStore) SaveDocumentReferences(ctx context.Context, references []domain.DocumentReference) error {
+func (s *PostgresStore) SaveDocumentReferences(ctx context.Context, references []domain.DocumentReference) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -346,7 +319,7 @@ func (s *SQLiteStore) SaveDocumentReferences(ctx context.Context, references []d
 	for _, reference := range references {
 		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO document_references (id, incident_id, document_title, document_type, relevance_reason, snippet)
-			VALUES (?, ?, ?, ?, ?, ?)
+			VALUES ($1, $2, $3, $4, $5, $6)
 		`, reference.ID, reference.IncidentID, reference.DocumentTitle, reference.DocumentType, reference.RelevanceReason, reference.Snippet); err != nil {
 			return err
 		}
@@ -355,11 +328,11 @@ func (s *SQLiteStore) SaveDocumentReferences(ctx context.Context, references []d
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) ListDocumentReferences(ctx context.Context, incidentID string) ([]domain.DocumentReference, error) {
+func (s *PostgresStore) ListDocumentReferences(ctx context.Context, incidentID string) ([]domain.DocumentReference, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, incident_id, document_title, document_type, relevance_reason, snippet
 		FROM document_references
-		WHERE incident_id = ?
+		WHERE incident_id = $1
 	`, incidentID)
 	if err != nil {
 		return nil, err
@@ -379,14 +352,13 @@ func (s *SQLiteStore) ListDocumentReferences(ctx context.Context, incidentID str
 		); err != nil {
 			return nil, err
 		}
-
 		references = append(references, reference)
 	}
 
 	return references, rows.Err()
 }
 
-func (s *SQLiteStore) SaveTriageResult(ctx context.Context, result domain.TriageResult) error {
+func (s *PostgresStore) SaveTriageResult(ctx context.Context, result domain.TriageResult) error {
 	hypothesesJSON, err := json.Marshal(result.Hypotheses)
 	if err != nil {
 		return err
@@ -399,7 +371,7 @@ func (s *SQLiteStore) SaveTriageResult(ctx context.Context, result domain.Triage
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO triage_results (id, incident_id, summary, hypotheses_json, blast_radius, next_steps_json, draft_status_update, confidence_notes, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8, $9)
 		ON CONFLICT(incident_id) DO UPDATE SET
 			summary = excluded.summary,
 			hypotheses_json = excluded.hypotheses_json,
@@ -417,22 +389,21 @@ func (s *SQLiteStore) SaveTriageResult(ctx context.Context, result domain.Triage
 		string(nextStepsJSON),
 		result.DraftStatusUpdate,
 		result.ConfidenceNotes,
-		formatTime(result.CreatedAt),
+		result.CreatedAt.UTC(),
 	)
 	return err
 }
 
-func (s *SQLiteStore) GetTriageResult(ctx context.Context, incidentID string) (domain.TriageResult, error) {
+func (s *PostgresStore) GetTriageResult(ctx context.Context, incidentID string) (domain.TriageResult, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, incident_id, summary, hypotheses_json, blast_radius, next_steps_json, draft_status_update, confidence_notes, created_at
 		FROM triage_results
-		WHERE incident_id = ?
+		WHERE incident_id = $1
 	`, incidentID)
 
 	var result domain.TriageResult
 	var hypothesesJSON string
 	var nextStepsJSON string
-	var createdAt string
 	if err := row.Scan(
 		&result.ID,
 		&result.IncidentID,
@@ -442,7 +413,7 @@ func (s *SQLiteStore) GetTriageResult(ctx context.Context, incidentID string) (d
 		&nextStepsJSON,
 		&result.DraftStatusUpdate,
 		&result.ConfidenceNotes,
-		&createdAt,
+		&result.CreatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.TriageResult{}, ErrNotFound
@@ -453,24 +424,8 @@ func (s *SQLiteStore) GetTriageResult(ctx context.Context, incidentID string) (d
 	if err := json.Unmarshal([]byte(hypothesesJSON), &result.Hypotheses); err != nil {
 		return domain.TriageResult{}, err
 	}
-
 	if err := json.Unmarshal([]byte(nextStepsJSON), &result.NextSteps); err != nil {
 		return domain.TriageResult{}, err
 	}
-
-	result.CreatedAt = parseTime(createdAt)
 	return result, nil
-}
-
-func formatTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339Nano)
-}
-
-func parseTime(value string) time.Time {
-	parsed, err := time.Parse(time.RFC3339Nano, value)
-	if err != nil {
-		return time.Time{}
-	}
-
-	return parsed
 }

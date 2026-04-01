@@ -25,7 +25,7 @@ func main() {
 		Level: cfg.LogLevel,
 	}))
 
-	repository, err := storage.NewSQLiteStore(cfg.DatabasePath)
+	repository, err := storage.NewPostgresStore(cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("failed to initialize storage", slog.String("error", err.Error()))
 		os.Exit(1)
@@ -46,7 +46,7 @@ func main() {
 		slog.String("addr", server.Addr),
 		slog.String("environment", cfg.Environment),
 		slog.Bool("kill_switch_enabled", cfg.KillSwitchEnabled),
-		slog.String("database_path", cfg.DatabasePath),
+		slog.String("database_target", cfg.DatabaseTarget()),
 	)
 
 	errCh := make(chan error, 1)
