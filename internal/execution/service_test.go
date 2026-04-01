@@ -47,7 +47,7 @@ func TestServiceExecuteActionSuccess(t *testing.T) {
 		},
 	}
 
-	service := NewService(repository, DefaultCatalog(), adapter, staticKillSwitch{}, 2*time.Second, 1, time.Minute)
+	service := NewService(repository, DefaultCatalog(), adapter, staticKillSwitch{}, nil, 2*time.Second, 1, time.Minute)
 	record, err := service.ExecuteAction(context.Background(), action.ID, "operator-a")
 	if err != nil {
 		t.Fatalf("execute action: %v", err)
@@ -95,7 +95,7 @@ func TestServiceExecuteActionRetriesRetryableError(t *testing.T) {
 		},
 	}
 
-	service := NewService(repository, DefaultCatalog(), adapter, staticKillSwitch{}, 2*time.Second, 1, time.Minute)
+	service := NewService(repository, DefaultCatalog(), adapter, staticKillSwitch{}, nil, 2*time.Second, 1, time.Minute)
 	_, err := service.ExecuteAction(context.Background(), action.ID, "operator-a")
 	if err == nil {
 		t.Fatalf("expected execution error")
@@ -115,7 +115,7 @@ func TestServiceExecuteActionBlocksKillSwitchAndDuplicates(t *testing.T) {
 		exec: func(ctx context.Context, action domain.CandidateAction, request AdapterRequest) (AdapterResult, error) {
 			return AdapterResult{ExecutorType: "fake-adapter"}, nil
 		},
-	}, staticKillSwitch{enabled: true}, 2*time.Second, 0, time.Minute)
+	}, staticKillSwitch{enabled: true}, nil, 2*time.Second, 0, time.Minute)
 
 	if _, err := service.ExecuteAction(context.Background(), action.ID, "operator-a"); err == nil {
 		t.Fatalf("expected kill switch error")
@@ -125,7 +125,7 @@ func TestServiceExecuteActionBlocksKillSwitchAndDuplicates(t *testing.T) {
 		exec: func(ctx context.Context, action domain.CandidateAction, request AdapterRequest) (AdapterResult, error) {
 			return AdapterResult{ExecutorType: "fake-adapter"}, nil
 		},
-	}, staticKillSwitch{}, 2*time.Second, 0, time.Minute)
+	}, staticKillSwitch{}, nil, 2*time.Second, 0, time.Minute)
 
 	first, err := service.ExecuteAction(context.Background(), action.ID, "operator-a")
 	if err != nil {

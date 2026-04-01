@@ -20,6 +20,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/retrieval"
 	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/triage"
+	"github.com/Cyaside/Triovexa/internal/verification"
 )
 
 func main() {
@@ -47,11 +48,13 @@ func main() {
 	actionGenerator := remediation.NewHeuristicGenerator(catalog)
 	killSwitch := approval.NewKillSwitch(cfg.KillSwitchEnabled)
 	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
+	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL))
 	executionService := execution.NewService(
 		repository,
 		catalog,
 		execution.NewDemoAdapter(cfg.DemoServiceBaseURL),
 		killSwitch,
+		verificationService,
 		cfg.ActionExecutionTimeout,
 		cfg.ActionExecutionRetries,
 		cfg.ActionExecutionCooldown,

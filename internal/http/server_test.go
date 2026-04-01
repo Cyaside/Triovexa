@@ -25,6 +25,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/retrieval"
 	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/triage"
+	"github.com/Cyaside/Triovexa/internal/verification"
 )
 
 func TestServerEndToEndReadOnlyTriage(t *testing.T) {
@@ -79,7 +80,8 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	actionGenerator := remediation.NewHeuristicGenerator(catalog)
 	killSwitch := approval.NewKillSwitch(false)
 	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
-	executionService := execution.NewService(repository, catalog, execution.NewDemoAdapter(demoServer.URL), killSwitch, 2*time.Second, 1, time.Minute)
+	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(demoServer.URL))
+	executionService := execution.NewService(repository, catalog, execution.NewDemoAdapter(demoServer.URL), killSwitch, verificationService, 2*time.Second, 1, time.Minute)
 	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService)
 
 	server := NewServer(config.Config{
@@ -278,6 +280,25 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 
 	if status, ok := actionsAfterApprovePayload.Actions[0]["Status"].(string); !ok || status != "succeeded" {
 		t.Fatalf("candidate action status after execution = %v, want %q", actionsAfterApprovePayload.Actions[0]["Status"], "succeeded")
+	}
+
+	incidentResponse, err := http.Get(api.URL + "/incidents/" + incidentID)
+	if err != nil {
+		t.Fatalf("get incident detail: %v", err)
+	}
+	defer incidentResponse.Body.Close()
+
+	var incidentPayload map[string]any
+	if err := json.NewDecoder(incidentResponse.Body).Decode(&incidentPayload); err != nil {
+		t.Fatalf("decode incident detail response: %v", err)
+	}
+
+	incidentValue, ok := incidentPayload["incident"].(map[string]any)
+	if !ok {
+		t.Fatalf("incident detail response is missing incident payload")
+	}
+	if state, ok := incidentValue["State"].(string); !ok || state != "resolved" {
+		t.Fatalf("incident state after verification = %v, want %q", incidentValue["State"], "resolved")
 	}
 
 	killSwitchBody, err := json.Marshal(map[string]bool{"enabled": true})

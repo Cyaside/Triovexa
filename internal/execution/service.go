@@ -25,6 +25,10 @@ type KillSwitchReader interface {
 	Enabled() bool
 }
 
+type VerificationWorkflow interface {
+	VerifyExecution(context.Context, domain.CandidateAction, domain.ExecutionRecord) (domain.VerificationResult, error)
+}
+
 type AdapterRequest struct {
 	IdempotencyKey string
 	Timeout        time.Duration
@@ -57,6 +61,7 @@ type Service struct {
 	catalog    Catalog
 	adapter    Adapter
 	killSwitch KillSwitchReader
+	verifier   VerificationWorkflow
 	timeout    time.Duration
 	retries    int
 	cooldown   time.Duration
@@ -68,6 +73,7 @@ func NewService(
 	catalog Catalog,
 	adapter Adapter,
 	killSwitch KillSwitchReader,
+	verifier VerificationWorkflow,
 	timeout time.Duration,
 	retries int,
 	cooldown time.Duration,
@@ -87,6 +93,7 @@ func NewService(
 		catalog:    catalog,
 		adapter:    adapter,
 		killSwitch: killSwitch,
+		verifier:   verifier,
 		timeout:    timeout,
 		retries:    retries,
 		cooldown:   cooldown,
@@ -240,6 +247,11 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 		"status":              record.Status,
 	}); err != nil {
 		return domain.ExecutionRecord{}, fmt.Errorf("audit execution completed: %w", err)
+	}
+	if s.verifier != nil {
+		if _, err := s.verifier.VerifyExecution(ctx, action, record); err != nil {
+			return record, fmt.Errorf("verify execution outcome: %w", err)
+		}
 	}
 
 	return record, nil
