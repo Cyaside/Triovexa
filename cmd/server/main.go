@@ -48,7 +48,8 @@ func main() {
 	actionGenerator := remediation.NewHeuristicGenerator(catalog)
 	killSwitch := approval.NewKillSwitch(cfg.KillSwitchEnabled)
 	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
-	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL))
+	rollbackService := execution.NewRollbackService(repository, catalog, execution.NewDemoAdapter(cfg.DemoServiceBaseURL))
+	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL), catalog, rollbackService)
 	executionService := execution.NewService(
 		repository,
 		catalog,

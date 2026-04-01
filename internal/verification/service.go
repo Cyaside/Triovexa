@@ -12,6 +12,7 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/demo"
 	"github.com/Cyaside/Triovexa/internal/domain"
+	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/storage"
 )
@@ -67,13 +68,26 @@ func (f *DemoSnapshotFetcher) Snapshot(ctx context.Context) (demo.Snapshot, erro
 type Service struct {
 	repository storage.Repository
 	fetcher    SnapshotFetcher
-	now        func() time.Time
+	catalog    execution.Catalog
+	rollbacker interface {
+		RollbackAction(context.Context, domain.CandidateAction, string, string) (domain.RollbackRecord, error)
+	}
+	now func() time.Time
 }
 
-func NewService(repository storage.Repository, fetcher SnapshotFetcher) *Service {
+func NewService(
+	repository storage.Repository,
+	fetcher SnapshotFetcher,
+	catalog execution.Catalog,
+	rollbacker interface {
+		RollbackAction(context.Context, domain.CandidateAction, string, string) (domain.RollbackRecord, error)
+	},
+) *Service {
 	return &Service{
 		repository: repository,
 		fetcher:    fetcher,
+		catalog:    catalog,
+		rollbacker: rollbacker,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -151,6 +165,45 @@ func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAc
 				"verification_id":     result.ID,
 			}, startedAt, s.now()); err != nil {
 				return domain.VerificationResult{}, fmt.Errorf("audit verification failure: %w", err)
+			}
+
+			definition, ok := s.catalog.Get(action.ActionType)
+			if ok && definition.SupportsRollback && definition.RollbackActionKey != "" && s.rollbacker != nil {
+				if err := s.audit(ctx, action.IncidentID, "rollback_triggered", "started", map[string]any{
+					"candidate_action_id": action.ID,
+					"execution_record_id": record.ID,
+					"rollback_action_key": definition.RollbackActionKey,
+					"verification_id":     result.ID,
+				}, startedAt, startedAt); err != nil {
+					return domain.VerificationResult{}, fmt.Errorf("audit rollback start: %w", err)
+				}
+
+				rollbackRecord, rollbackErr := s.rollbacker.RollbackAction(ctx, action, "system:auto-rollback", "automatic rollback triggered after failed verification")
+				if rollbackErr != nil {
+					if err := s.audit(ctx, action.IncidentID, "rollback_failed", "completed", map[string]any{
+						"candidate_action_id": action.ID,
+						"execution_record_id": record.ID,
+						"verification_id":     result.ID,
+						"rollback_action_key": definition.RollbackActionKey,
+						"error":               rollbackErr.Error(),
+					}, startedAt, s.now()); err != nil {
+						return domain.VerificationResult{}, fmt.Errorf("audit rollback failure: %w", err)
+					}
+				} else {
+					if _, err := s.transitionIncidentState(ctx, incidentRecord, domain.IncidentStateRolledBack); err != nil {
+						return domain.VerificationResult{}, fmt.Errorf("move incident to rolled_back: %w", err)
+					}
+					if err := s.audit(ctx, action.IncidentID, "rollback_succeeded", "completed", map[string]any{
+						"candidate_action_id": action.ID,
+						"execution_record_id": record.ID,
+						"verification_id":     result.ID,
+						"rollback_record_id":  rollbackRecord.ID,
+						"rollback_action_key": rollbackRecord.RollbackActionKey,
+					}, startedAt, s.now()); err != nil {
+						return domain.VerificationResult{}, fmt.Errorf("audit rollback success: %w", err)
+					}
+					return result, nil
+				}
 			}
 		} else {
 			if err := s.audit(ctx, action.IncidentID, "verification_inconclusive", "completed", map[string]any{

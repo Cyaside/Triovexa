@@ -80,7 +80,8 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	actionGenerator := remediation.NewHeuristicGenerator(catalog)
 	killSwitch := approval.NewKillSwitch(false)
 	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
-	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(demoServer.URL))
+	rollbackService := execution.NewRollbackService(repository, catalog, execution.NewDemoAdapter(demoServer.URL))
+	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(demoServer.URL), catalog, rollbackService)
 	executionService := execution.NewService(repository, catalog, execution.NewDemoAdapter(demoServer.URL), killSwitch, verificationService, 2*time.Second, 1, time.Minute)
 	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService)
 
