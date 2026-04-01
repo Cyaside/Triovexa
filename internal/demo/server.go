@@ -90,7 +90,7 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 	})
 
 	mux.HandleFunc("/simulate/error-rate-spike", func(w http.ResponseWriter, r *http.Request) {
-		state.apply(State{
+		state.apply(Snapshot{
 			Mode:           ModeErrorRateSpike,
 			ErrorRate:      0.38,
 			LatencyMs:      850,
@@ -104,7 +104,7 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 	})
 
 	mux.HandleFunc("/simulate/worker-stall", func(w http.ResponseWriter, r *http.Request) {
-		state.apply(State{
+		state.apply(Snapshot{
 			Mode:           ModeWorkerStall,
 			ErrorRate:      0.12,
 			LatencyMs:      430,
@@ -118,7 +118,7 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 	})
 
 	mux.HandleFunc("/simulate/timeout-after-deploy", func(w http.ResponseWriter, r *http.Request) {
-		state.apply(State{
+		state.apply(Snapshot{
 			Mode:           ModeTimeoutAfterDeploy,
 			ErrorRate:      0.27,
 			LatencyMs:      1250,
@@ -132,7 +132,7 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 	})
 
 	mux.HandleFunc("/simulate/reset", func(w http.ResponseWriter, r *http.Request) {
-		state.apply(State{
+		state.apply(Snapshot{
 			Mode:           ModeHealthy,
 			ErrorRate:      0.01,
 			LatencyMs:      120,
@@ -159,7 +159,7 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			payload.WorkerID = "worker-primary"
 		}
 
-		state.apply(State{
+		state.apply(Snapshot{
 			Mode:           ModeHealthy,
 			ErrorRate:      0.04,
 			LatencyMs:      190,
@@ -191,7 +191,7 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			payload.JobID = "backlog-drain-batch"
 		}
 
-		state.apply(State{
+		state.apply(Snapshot{
 			Mode:           ModeHealthy,
 			ErrorRate:      0.03,
 			LatencyMs:      170,
@@ -223,7 +223,7 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 			payload.CacheKey = "all"
 		}
 
-		state.apply(State{
+		state.apply(Snapshot{
 			Mode:           ModeHealthy,
 			ErrorRate:      0.02,
 			LatencyMs:      150,
@@ -248,7 +248,7 @@ func NewServer(cfg Config, logger *slog.Logger) *http.Server {
 	}
 }
 
-func (s *State) apply(next State) {
+func (s *State) apply(next Snapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
