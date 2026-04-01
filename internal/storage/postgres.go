@@ -187,12 +187,24 @@ func (s *PostgresStore) CreateIncident(ctx context.Context, incident domain.Inci
 }
 
 func (s *PostgresStore) UpdateIncidentState(ctx context.Context, incidentID string, state domain.IncidentState) error {
-	_, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, `
 		UPDATE incidents
 		SET state = $1, updated_at = $2
 		WHERE id = $3
 	`, string(state), time.Now().UTC(), incidentID)
-	return err
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
 }
 
 func (s *PostgresStore) GetIncident(ctx context.Context, incidentID string) (domain.Incident, error) {
