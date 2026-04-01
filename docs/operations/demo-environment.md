@@ -19,6 +19,8 @@ Service demo ini disiapkan untuk menghasilkan sinyal insiden yang bisa dipakai p
 - `POST /actions/restart-worker`
 - `POST /actions/retry-job`
 - `POST /actions/refresh-cache`
+- `POST /actions/pause-queue-consumer`
+- `POST /actions/resume-queue-consumer`
 
 ## Mode Insiden
 
@@ -70,7 +72,7 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - menyediakan metrics sederhana untuk observability
 - menyediakan kondisi yang bisa dipakai saat demo triage dan candidate action
 
-## Endpoint UI dan API Phase 5
+## Endpoint UI dan API Phase 6
 
 - `GET /ui/incidents`
 - `GET /ui/incidents/{id}`
@@ -80,6 +82,7 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 - `GET /incidents/{id}/triage`
 - `GET /incidents/{id}/actions`
 - `GET /actions/{id}/verification`
+- `GET /actions/{id}/rollbacks`
 - `POST /actions/{id}/approve`
 - `POST /actions/{id}/reject`
 - `POST /actions/{id}/execute`
@@ -143,11 +146,27 @@ Invoke-RestMethod -Method Post `
   -Body '{"initiated_by":"operator-a","note":"execute approved action"}'
 ```
 
+Execute action medium-risk yang sudah approved:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8080/actions/<ACTION_ID>/execute `
+  -ContentType "application/json" `
+  -Body '{"initiated_by":"operator-b","note":"execute medium-risk action with rollback plan"}'
+```
+
 Lihat hasil verification untuk action tersebut:
 
 ```powershell
 Invoke-RestMethod -Method Get `
   -Uri http://localhost:8080/actions/<ACTION_ID>/verification
+```
+
+Lihat rollback record untuk action yang sama:
+
+```powershell
+Invoke-RestMethod -Method Get `
+  -Uri http://localhost:8080/actions/<ACTION_ID>/rollbacks
 ```
 
 Aktifkan kill switch:
@@ -168,6 +187,8 @@ Setelah `POST /actions/{id}/execute` berhasil, server utama sekarang otomatis ak
 - menyimpan `verification_result`
 - memindahkan incident ke `resolved` jika sinyal membaik kuat
 - memindahkan incident ke `escalated` jika hasil gagal atau tidak meyakinkan
+- memicu rollback otomatis untuk medium-risk action yang punya rollback plan jika verification gagal
+- memindahkan incident ke `rolled_back` jika rollback berhasil
 
 Rule awal yang dipakai tetap sederhana dan mudah diaudit:
 

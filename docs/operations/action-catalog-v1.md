@@ -27,6 +27,7 @@ Catalog ini adalah allowlist awal untuk action yang boleh dipertimbangkan sistem
 - target: `demo-cache`
 - approval: wajib
 - executable: ya
+- max attempts: `2`
 
 ## Medium Risk
 
@@ -49,10 +50,20 @@ Catalog ini adalah allowlist awal untuk action yang boleh dipertimbangkan sistem
 ### `pause_demo_queue_consumer`
 
 - tujuan: pause consumer untuk membatasi blast radius
-- environment: `staging`
+- environment: `local`, `staging`
 - target: `demo-queue-consumer`
 - approval: wajib
-- executable: belum
+- executable: ya
+- rollback plan: `resume_demo_queue_consumer`
+- max attempts: `1`
+
+### `resume_demo_queue_consumer`
+
+- tujuan: rollback aman untuk melanjutkan queue consumer yang sebelumnya dipause
+- environment: `local`, `staging`
+- target: `demo-queue-consumer`
+- approval: tidak wajib untuk auto-rollback internal
+- executable: ya
 
 ## High Risk
 
