@@ -12,7 +12,10 @@ import (
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
 	apphttp "github.com/Cyaside/Triovexa/internal/http"
 	"github.com/Cyaside/Triovexa/internal/incident"
+	"github.com/Cyaside/Triovexa/internal/observability"
+	"github.com/Cyaside/Triovexa/internal/retrieval"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/triage"
 )
 
 func main() {
@@ -33,7 +36,10 @@ func main() {
 		}
 	}()
 
-	incidentService := incident.NewService(repository)
+	collector := observability.NewDemoCollector(cfg.DemoServiceBaseURL)
+	retriever := retrieval.NewFileRetriever(cfg.DocsRoot)
+	generator := triage.NewHeuristicGenerator()
+	incidentService := incident.NewService(repository, collector, retriever, generator)
 	server := apphttp.NewServer(cfg, logger, repository, incidentService)
 
 	logger.Info("starting server",
