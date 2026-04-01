@@ -9,11 +9,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Cyaside/Triovexa/internal/approval"
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	apphttp "github.com/Cyaside/Triovexa/internal/http"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/observability"
+	"github.com/Cyaside/Triovexa/internal/policy"
 	"github.com/Cyaside/Triovexa/internal/remediation"
 	"github.com/Cyaside/Triovexa/internal/retrieval"
 	"github.com/Cyaside/Triovexa/internal/storage"
@@ -40,9 +42,11 @@ func main() {
 
 	collector := observability.NewDemoCollector(cfg.DemoServiceBaseURL)
 	retriever := retrieval.NewFileRetriever(cfg.DocsRoot)
+	catalog := execution.DefaultCatalog()
 	generator := triage.NewHeuristicGenerator()
-	actionGenerator := remediation.NewHeuristicGenerator(execution.DefaultCatalog())
-	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator)
+	actionGenerator := remediation.NewHeuristicGenerator(catalog)
+	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), approval.NewKillSwitch(cfg.KillSwitchEnabled))
+	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService)
 	server := apphttp.NewServer(cfg, logger, repository, incidentService)
 
 	logger.Info("starting server",

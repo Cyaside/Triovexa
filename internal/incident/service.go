@@ -19,6 +19,7 @@ type Service struct {
 	retriever  KnowledgeRetriever
 	generator  TriageGenerator
 	actions    ActionGenerator
+	workflow   PolicyWorkflow
 	now        func() time.Time
 }
 
@@ -38,12 +39,17 @@ type ActionGenerator interface {
 	Generate(context.Context, domain.Incident, domain.TriageResult, []domain.EvidenceItem, []domain.DocumentReference) ([]domain.CandidateAction, error)
 }
 
+type PolicyWorkflow interface {
+	EvaluateActions(context.Context, domain.Incident, []domain.CandidateAction) (domain.Incident, error)
+}
+
 func NewService(
 	repository storage.Repository,
 	collector ContextCollector,
 	retriever KnowledgeRetriever,
 	generator TriageGenerator,
 	actionGenerator ActionGenerator,
+	policyWorkflow PolicyWorkflow,
 ) *Service {
 	return &Service{
 		repository: repository,
@@ -51,6 +57,7 @@ func NewService(
 		retriever:  retriever,
 		generator:  generator,
 		actions:    actionGenerator,
+		workflow:   policyWorkflow,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -242,6 +249,15 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 	incident, err = s.transitionIncidentState(ctx, incident, domain.IncidentStateActionProposed)
 	if err != nil {
 		return domain.Incident{}, fmt.Errorf("move incident to action proposed: %w", err)
+	}
+
+	if s.workflow == nil {
+		return incident, nil
+	}
+
+	incident, err = s.workflow.EvaluateActions(ctx, incident, actions)
+	if err != nil {
+		return domain.Incident{}, fmt.Errorf("evaluate candidate actions: %w", err)
 	}
 
 	return incident, nil

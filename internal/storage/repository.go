@@ -25,4 +25,11 @@ type Repository interface {
 	GetTriageResult(context.Context, string) (domain.TriageResult, error)
 	SaveCandidateActions(context.Context, []domain.CandidateAction) error
 	ListCandidateActions(context.Context, string) ([]domain.CandidateAction, error)
+	GetCandidateAction(context.Context, string) (domain.CandidateAction, error)
+	UpdateCandidateActionStatus(context.Context, string, domain.CandidateActionStatus) error
+	SavePolicyDecisions(context.Context, []domain.PolicyDecision) error
+	GetPolicyDecision(context.Context, string) (domain.PolicyDecision, error)
+	ListPolicyDecisions(context.Context, string) ([]domain.PolicyDecision, error)
+	CreateApprovalRecord(context.Context, domain.ApprovalRecord) error
+	ListApprovalRecords(context.Context, string) ([]domain.ApprovalRecord, error)
 }

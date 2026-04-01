@@ -108,6 +108,23 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			status TEXT NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS policy_decisions (
+			id TEXT PRIMARY KEY,
+			candidate_action_id TEXT NOT NULL UNIQUE REFERENCES candidate_actions(id) ON DELETE CASCADE,
+			decision TEXT NOT NULL,
+			reason TEXT NOT NULL,
+			approval_required BOOLEAN NOT NULL,
+			policy_rule_ref TEXT NOT NULL,
+			decided_at TIMESTAMPTZ NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS approval_records (
+			id TEXT PRIMARY KEY,
+			candidate_action_id TEXT NOT NULL REFERENCES candidate_actions(id) ON DELETE CASCADE,
+			approved_by TEXT NOT NULL,
+			decision TEXT NOT NULL,
+			note TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL
+		);`,
 	}
 
 	for _, statement := range statements {
@@ -543,4 +560,217 @@ func (s *PostgresStore) ListCandidateActions(ctx context.Context, incidentID str
 	}
 
 	return actions, rows.Err()
+}
+
+func (s *PostgresStore) GetCandidateAction(ctx context.Context, actionID string) (domain.CandidateAction, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, incident_id, action_type, target_resource, parameters_json, risk_level, rationale, evidence_refs_json, approval_hint, status, created_at
+		FROM candidate_actions
+		WHERE id = $1
+	`, actionID)
+
+	var action domain.CandidateAction
+	var riskLevel string
+	var evidenceRefsJSON string
+	var status string
+	if err := row.Scan(
+		&action.ID,
+		&action.IncidentID,
+		&action.ActionType,
+		&action.TargetResource,
+		&action.ParametersJSON,
+		&riskLevel,
+		&action.Rationale,
+		&evidenceRefsJSON,
+		&action.ApprovalHint,
+		&status,
+		&action.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CandidateAction{}, ErrNotFound
+		}
+		return domain.CandidateAction{}, err
+	}
+
+	action.RiskLevel = domain.RiskLevel(riskLevel)
+	action.Status = domain.CandidateActionStatus(status)
+	if err := json.Unmarshal([]byte(evidenceRefsJSON), &action.EvidenceRefs); err != nil {
+		return domain.CandidateAction{}, err
+	}
+
+	return action, nil
+}
+
+func (s *PostgresStore) UpdateCandidateActionStatus(ctx context.Context, actionID string, status domain.CandidateActionStatus) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE candidate_actions
+		SET status = $1
+		WHERE id = $2
+	`, string(status), actionID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+func (s *PostgresStore) SavePolicyDecisions(ctx context.Context, decisions []domain.PolicyDecision) error {
+	if len(decisions) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	for _, decision := range decisions {
+		if _, err = tx.ExecContext(ctx, `
+			INSERT INTO policy_decisions (id, candidate_action_id, decision, reason, approval_required, policy_rule_ref, decided_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			ON CONFLICT(candidate_action_id) DO UPDATE SET
+				id = excluded.id,
+				decision = excluded.decision,
+				reason = excluded.reason,
+				approval_required = excluded.approval_required,
+				policy_rule_ref = excluded.policy_rule_ref,
+				decided_at = excluded.decided_at
+		`,
+			decision.ID,
+			decision.CandidateActionID,
+			string(decision.Decision),
+			decision.Reason,
+			decision.ApprovalRequired,
+			decision.PolicyRuleRef,
+			decision.DecidedAt.UTC(),
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *PostgresStore) GetPolicyDecision(ctx context.Context, actionID string) (domain.PolicyDecision, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, candidate_action_id, decision, reason, approval_required, policy_rule_ref, decided_at
+		FROM policy_decisions
+		WHERE candidate_action_id = $1
+	`, actionID)
+
+	var decision domain.PolicyDecision
+	var decisionType string
+	if err := row.Scan(
+		&decision.ID,
+		&decision.CandidateActionID,
+		&decisionType,
+		&decision.Reason,
+		&decision.ApprovalRequired,
+		&decision.PolicyRuleRef,
+		&decision.DecidedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.PolicyDecision{}, ErrNotFound
+		}
+		return domain.PolicyDecision{}, err
+	}
+
+	decision.Decision = domain.PolicyDecisionType(decisionType)
+	return decision, nil
+}
+
+func (s *PostgresStore) ListPolicyDecisions(ctx context.Context, incidentID string) ([]domain.PolicyDecision, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT pd.id, pd.candidate_action_id, pd.decision, pd.reason, pd.approval_required, pd.policy_rule_ref, pd.decided_at
+		FROM policy_decisions pd
+		INNER JOIN candidate_actions ca ON ca.id = pd.candidate_action_id
+		WHERE ca.incident_id = $1
+		ORDER BY pd.decided_at ASC
+	`, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var decisions []domain.PolicyDecision
+	for rows.Next() {
+		var decision domain.PolicyDecision
+		var decisionType string
+		if err := rows.Scan(
+			&decision.ID,
+			&decision.CandidateActionID,
+			&decisionType,
+			&decision.Reason,
+			&decision.ApprovalRequired,
+			&decision.PolicyRuleRef,
+			&decision.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		decision.Decision = domain.PolicyDecisionType(decisionType)
+		decisions = append(decisions, decision)
+	}
+
+	return decisions, rows.Err()
+}
+
+func (s *PostgresStore) CreateApprovalRecord(ctx context.Context, record domain.ApprovalRecord) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO approval_records (id, candidate_action_id, approved_by, decision, note, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`,
+		record.ID,
+		record.CandidateActionID,
+		record.ApprovedBy,
+		record.Decision,
+		record.Note,
+		record.CreatedAt.UTC(),
+	)
+	return err
+}
+
+func (s *PostgresStore) ListApprovalRecords(ctx context.Context, incidentID string) ([]domain.ApprovalRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT ar.id, ar.candidate_action_id, ar.approved_by, ar.decision, ar.note, ar.created_at
+		FROM approval_records ar
+		INNER JOIN candidate_actions ca ON ca.id = ar.candidate_action_id
+		WHERE ca.incident_id = $1
+		ORDER BY ar.created_at ASC
+	`, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []domain.ApprovalRecord
+	for rows.Next() {
+		var record domain.ApprovalRecord
+		if err := rows.Scan(
+			&record.ID,
+			&record.CandidateActionID,
+			&record.ApprovedBy,
+			&record.Decision,
+			&record.Note,
+			&record.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+
+	return records, rows.Err()
 }

@@ -13,11 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Cyaside/Triovexa/internal/approval"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/demo"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/observability"
+	"github.com/Cyaside/Triovexa/internal/policy"
 	"github.com/Cyaside/Triovexa/internal/remediation"
 	"github.com/Cyaside/Triovexa/internal/retrieval"
 	"github.com/Cyaside/Triovexa/internal/storage"
@@ -54,9 +56,11 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 
 	collector := observability.NewDemoCollector(demoServer.URL)
 	retriever := retrieval.NewFileRetriever(docsRoot)
+	catalog := execution.DefaultCatalog()
 	generator := triage.NewHeuristicGenerator()
-	actionGenerator := remediation.NewHeuristicGenerator(execution.DefaultCatalog())
-	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator)
+	actionGenerator := remediation.NewHeuristicGenerator(catalog)
+	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), approval.NewKillSwitch(false))
+	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService)
 
 	server := NewServer(config.Config{
 		ServiceName:        "triovexa",
@@ -124,8 +128,8 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	}
 
 	state, ok := webhookPayload["state"].(string)
-	if !ok || state != "action_proposed" {
-		t.Fatalf("webhook state = %v, want %q", webhookPayload["state"], "action_proposed")
+	if !ok || state != "awaiting_approval" {
+		t.Fatalf("webhook state = %v, want %q", webhookPayload["state"], "awaiting_approval")
 	}
 
 	triageResponse, err := http.Get(api.URL + "/incidents/" + incidentID + "/triage")
@@ -161,6 +165,10 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 
 	if actionType, ok := actionsPayload.Actions[0]["ActionType"].(string); !ok || actionType == "" {
 		t.Fatalf("candidate action type missing from response")
+	}
+
+	if status, ok := actionsPayload.Actions[0]["Status"].(string); !ok || status != "awaiting_approval" {
+		t.Fatalf("candidate action status = %v, want %q", actionsPayload.Actions[0]["Status"], "awaiting_approval")
 	}
 
 	uiResponse, err := http.Get(api.URL + "/ui/incidents/" + incidentID)

@@ -16,6 +16,8 @@ type MemoryStore struct {
 	evidence   map[string][]domain.EvidenceItem
 	documents  map[string][]domain.DocumentReference
 	actions    map[string][]domain.CandidateAction
+	policies   map[string]domain.PolicyDecision
+	approvals  map[string][]domain.ApprovalRecord
 	triageByID map[string]domain.TriageResult
 }
 
@@ -26,6 +28,8 @@ func NewMemoryStore() *MemoryStore {
 		evidence:   make(map[string][]domain.EvidenceItem),
 		documents:  make(map[string][]domain.DocumentReference),
 		actions:    make(map[string][]domain.CandidateAction),
+		policies:   make(map[string]domain.PolicyDecision),
+		approvals:  make(map[string][]domain.ApprovalRecord),
 		triageByID: make(map[string]domain.TriageResult),
 	}
 }
@@ -170,4 +174,101 @@ func (s *MemoryStore) ListCandidateActions(_ context.Context, incidentID string)
 	})
 
 	return actions, nil
+}
+
+func (s *MemoryStore) GetCandidateAction(_ context.Context, actionID string) (domain.CandidateAction, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, actions := range s.actions {
+		for _, action := range actions {
+			if action.ID == actionID {
+				return action, nil
+			}
+		}
+	}
+
+	return domain.CandidateAction{}, ErrNotFound
+}
+
+func (s *MemoryStore) UpdateCandidateActionStatus(_ context.Context, actionID string, status domain.CandidateActionStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for incidentID, actions := range s.actions {
+		for idx, action := range actions {
+			if action.ID == actionID {
+				action.Status = status
+				s.actions[incidentID][idx] = action
+				return nil
+			}
+		}
+	}
+
+	return ErrNotFound
+}
+
+func (s *MemoryStore) SavePolicyDecisions(_ context.Context, decisions []domain.PolicyDecision) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, decision := range decisions {
+		s.policies[decision.CandidateActionID] = decision
+	}
+
+	return nil
+}
+
+func (s *MemoryStore) GetPolicyDecision(_ context.Context, actionID string) (domain.PolicyDecision, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	decision, ok := s.policies[actionID]
+	if !ok {
+		return domain.PolicyDecision{}, ErrNotFound
+	}
+
+	return decision, nil
+}
+
+func (s *MemoryStore) ListPolicyDecisions(_ context.Context, incidentID string) ([]domain.PolicyDecision, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var decisions []domain.PolicyDecision
+	for _, action := range s.actions[incidentID] {
+		if decision, ok := s.policies[action.ID]; ok {
+			decisions = append(decisions, decision)
+		}
+	}
+
+	sort.SliceStable(decisions, func(i, j int) bool {
+		return decisions[i].DecidedAt.Before(decisions[j].DecidedAt)
+	})
+
+	return decisions, nil
+}
+
+func (s *MemoryStore) CreateApprovalRecord(_ context.Context, record domain.ApprovalRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.approvals[record.CandidateActionID] = append(s.approvals[record.CandidateActionID], record)
+	return nil
+}
+
+func (s *MemoryStore) ListApprovalRecords(_ context.Context, incidentID string) ([]domain.ApprovalRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var records []domain.ApprovalRecord
+	for _, action := range s.actions[incidentID] {
+		records = append(records, s.approvals[action.ID]...)
+	}
+
+	sort.SliceStable(records, func(i, j int) bool {
+		return records[i].CreatedAt.Before(records[j].CreatedAt)
+	})
+
+	return records, nil
 }
