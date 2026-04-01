@@ -35,4 +35,8 @@ type Repository interface {
 	SaveExecutionRecord(context.Context, domain.ExecutionRecord) error
 	ListExecutionRecords(context.Context, string) ([]domain.ExecutionRecord, error)
 	ListExecutionRecordsByAction(context.Context, string) ([]domain.ExecutionRecord, error)
+	SaveVerificationResult(context.Context, domain.VerificationResult) error
+	GetVerificationResult(context.Context, string) (domain.VerificationResult, error)
+	ListVerificationResults(context.Context, string) ([]domain.VerificationResult, error)
+	ListVerificationResultsByAction(context.Context, string) ([]domain.VerificationResult, error)
 }

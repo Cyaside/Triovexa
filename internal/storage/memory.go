@@ -19,6 +19,7 @@ type MemoryStore struct {
 	policies   map[string]domain.PolicyDecision
 	approvals  map[string][]domain.ApprovalRecord
 	executions map[string][]domain.ExecutionRecord
+	verify     map[string][]domain.VerificationResult
 	triageByID map[string]domain.TriageResult
 }
 
@@ -32,6 +33,7 @@ func NewMemoryStore() *MemoryStore {
 		policies:   make(map[string]domain.PolicyDecision),
 		approvals:  make(map[string][]domain.ApprovalRecord),
 		executions: make(map[string][]domain.ExecutionRecord),
+		verify:     make(map[string][]domain.VerificationResult),
 		triageByID: make(map[string]domain.TriageResult),
 	}
 }
@@ -339,4 +341,111 @@ func (s *MemoryStore) ListExecutionRecordsByAction(_ context.Context, actionID s
 	})
 
 	return records, nil
+}
+
+func (s *MemoryStore) SaveVerificationResult(_ context.Context, result domain.VerificationResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	incidentID := ""
+	for candidateIncidentID, records := range s.executions {
+		for _, record := range records {
+			if record.ID == result.ExecutionRecordID {
+				incidentID = candidateIncidentID
+				break
+			}
+		}
+		if incidentID != "" {
+			break
+		}
+	}
+
+	if incidentID == "" {
+		return ErrNotFound
+	}
+
+	results := s.verify[incidentID]
+	for idx, existing := range results {
+		if existing.ID == result.ID || existing.ExecutionRecordID == result.ExecutionRecordID {
+			results[idx] = result
+			s.verify[incidentID] = results
+			return nil
+		}
+	}
+
+	s.verify[incidentID] = append(results, result)
+	return nil
+}
+
+func (s *MemoryStore) GetVerificationResult(_ context.Context, executionRecordID string) (domain.VerificationResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, results := range s.verify {
+		for _, result := range results {
+			if result.ExecutionRecordID == executionRecordID {
+				return result, nil
+			}
+		}
+	}
+
+	return domain.VerificationResult{}, ErrNotFound
+}
+
+func (s *MemoryStore) ListVerificationResults(_ context.Context, incidentID string) ([]domain.VerificationResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	results := append([]domain.VerificationResult(nil), s.verify[incidentID]...)
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].CreatedAt.Before(results[j].CreatedAt)
+	})
+
+	return results, nil
+}
+
+func (s *MemoryStore) ListVerificationResultsByAction(_ context.Context, actionID string) ([]domain.VerificationResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var executionIDs map[string]struct{}
+	for _, actions := range s.actions {
+		for _, action := range actions {
+			if action.ID != actionID {
+				continue
+			}
+			executionIDs = make(map[string]struct{})
+			break
+		}
+		if executionIDs != nil {
+			break
+		}
+	}
+
+	if executionIDs == nil {
+		return nil, ErrNotFound
+	}
+
+	for _, incidentRecords := range s.executions {
+		for _, record := range incidentRecords {
+			if record.CandidateActionID == actionID {
+				executionIDs[record.ID] = struct{}{}
+			}
+		}
+	}
+
+	var results []domain.VerificationResult
+	for _, incidentResults := range s.verify {
+		for _, result := range incidentResults {
+			if _, ok := executionIDs[result.ExecutionRecordID]; ok {
+				results = append(results, result)
+			}
+		}
+	}
+
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].CreatedAt.Before(results[j].CreatedAt)
+	})
+
+	return results, nil
 }

@@ -136,6 +136,14 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			finished_at TIMESTAMPTZ NOT NULL,
 			result_json JSONB NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS verification_results (
+			id TEXT PRIMARY KEY,
+			execution_record_id TEXT NOT NULL UNIQUE REFERENCES execution_records(id) ON DELETE CASCADE,
+			status TEXT NOT NULL,
+			evidence_json JSONB NOT NULL,
+			notes TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL
+		);`,
 	}
 
 	for _, statement := range statements {
@@ -879,4 +887,115 @@ func (s *PostgresStore) ListExecutionRecordsByAction(ctx context.Context, action
 	}
 
 	return records, rows.Err()
+}
+
+func (s *PostgresStore) SaveVerificationResult(ctx context.Context, result domain.VerificationResult) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO verification_results (id, execution_record_id, status, evidence_json, notes, created_at)
+		VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+		ON CONFLICT(execution_record_id) DO UPDATE SET
+			id = excluded.id,
+			status = excluded.status,
+			evidence_json = excluded.evidence_json,
+			notes = excluded.notes,
+			created_at = excluded.created_at
+	`,
+		result.ID,
+		result.ExecutionRecordID,
+		result.Status,
+		result.EvidenceJSON,
+		result.Notes,
+		result.CreatedAt.UTC(),
+	)
+	return err
+}
+
+func (s *PostgresStore) GetVerificationResult(ctx context.Context, executionRecordID string) (domain.VerificationResult, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, execution_record_id, status, evidence_json, notes, created_at
+		FROM verification_results
+		WHERE execution_record_id = $1
+	`, executionRecordID)
+
+	var result domain.VerificationResult
+	if err := row.Scan(
+		&result.ID,
+		&result.ExecutionRecordID,
+		&result.Status,
+		&result.EvidenceJSON,
+		&result.Notes,
+		&result.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.VerificationResult{}, ErrNotFound
+		}
+		return domain.VerificationResult{}, err
+	}
+
+	return result, nil
+}
+
+func (s *PostgresStore) ListVerificationResults(ctx context.Context, incidentID string) ([]domain.VerificationResult, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT vr.id, vr.execution_record_id, vr.status, vr.evidence_json, vr.notes, vr.created_at
+		FROM verification_results vr
+		INNER JOIN execution_records er ON er.id = vr.execution_record_id
+		INNER JOIN candidate_actions ca ON ca.id = er.candidate_action_id
+		WHERE ca.incident_id = $1
+		ORDER BY vr.created_at ASC
+	`, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []domain.VerificationResult
+	for rows.Next() {
+		var result domain.VerificationResult
+		if err := rows.Scan(
+			&result.ID,
+			&result.ExecutionRecordID,
+			&result.Status,
+			&result.EvidenceJSON,
+			&result.Notes,
+			&result.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+
+	return results, rows.Err()
+}
+
+func (s *PostgresStore) ListVerificationResultsByAction(ctx context.Context, actionID string) ([]domain.VerificationResult, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT vr.id, vr.execution_record_id, vr.status, vr.evidence_json, vr.notes, vr.created_at
+		FROM verification_results vr
+		INNER JOIN execution_records er ON er.id = vr.execution_record_id
+		WHERE er.candidate_action_id = $1
+		ORDER BY vr.created_at ASC
+	`, actionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []domain.VerificationResult
+	for rows.Next() {
+		var result domain.VerificationResult
+		if err := rows.Scan(
+			&result.ID,
+			&result.ExecutionRecordID,
+			&result.Status,
+			&result.EvidenceJSON,
+			&result.Notes,
+			&result.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+
+	return results, rows.Err()
 }
