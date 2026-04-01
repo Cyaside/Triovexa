@@ -31,10 +31,13 @@ Dokumen ini menerjemahkan arsitektur produk pada PRD ke fondasi implementasi awa
 9. `Verification Engine`
    Memeriksa apakah action memperbaiki kondisi.
 
-10. `Persistence & Audit Store`
+10. `Internal Telemetry & Diagnostics`
+    Menyediakan structured logging, metrics internal, dan endpoint diagnostik untuk operator.
+
+11. `Persistence & Audit Store`
     Menyimpan incident, triage result, policy decision, execution record, verification result, dan audit event.
 
-11. `Operator UI`
+12. `Operator UI`
     Menampilkan incident list, incident detail, evidence, action, approval, dan audit trail.
 
 ## Alur Tingkat Tinggi
@@ -50,6 +53,7 @@ Grafana Alert
      -> Approval Layer
      -> Execution Engine
      -> Verification Engine
+  -> Internal Telemetry & Diagnostics
   -> Persistence & Audit Store
   -> Operator UI
 ```
@@ -71,3 +75,4 @@ Grafana Alert
 - policy evaluator awal
 - example app configuration
 - baseline persistence layer berbasis PostgreSQL
+- internal telemetry endpoint untuk metrics dan diagnostics
