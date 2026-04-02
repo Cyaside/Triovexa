@@ -49,14 +49,7 @@ func (g *MistralGenerator) Generate(
 		return domain.TriageResult{}, err
 	}
 
-	var payload struct {
-		Summary           string   `json:"summary"`
-		Hypotheses        []string `json:"hypotheses"`
-		BlastRadius       string   `json:"blast_radius"`
-		NextSteps         []string `json:"next_steps"`
-		DraftStatusUpdate string   `json:"draft_status_update"`
-		ConfidenceNotes   string   `json:"confidence_notes"`
-	}
+	var payload map[string]any
 	if err := json.Unmarshal([]byte(content), &payload); err != nil {
 		return domain.TriageResult{}, fmt.Errorf("decode mistral triage payload: %w", err)
 	}
@@ -64,12 +57,12 @@ func (g *MistralGenerator) Generate(
 	result := domain.TriageResult{
 		ID:                uuid.NewString(),
 		IncidentID:        incident.ID,
-		Summary:           strings.TrimSpace(payload.Summary),
-		Hypotheses:        compactList(payload.Hypotheses, 4),
-		BlastRadius:       strings.TrimSpace(payload.BlastRadius),
-		NextSteps:         compactList(payload.NextSteps, 5),
-		DraftStatusUpdate: strings.TrimSpace(payload.DraftStatusUpdate),
-		ConfidenceNotes:   strings.TrimSpace(payload.ConfidenceNotes),
+		Summary:           coerceString(payload["summary"]),
+		Hypotheses:        compactList(coerceStringList(payload["hypotheses"]), 4),
+		BlastRadius:       coerceString(payload["blast_radius"]),
+		NextSteps:         compactList(coerceStringList(payload["next_steps"]), 5),
+		DraftStatusUpdate: coerceString(payload["draft_status_update"]),
+		ConfidenceNotes:   coerceString(payload["confidence_notes"]),
 		CreatedAt:         g.now(),
 	}
 
@@ -194,4 +187,41 @@ func compactList(values []string, limit int) []string {
 		}
 	}
 	return filtered
+}
+
+func coerceString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		return strings.TrimSpace(fmt.Sprintf("%.2f", typed))
+	case map[string]any:
+		for _, key := range []string{"text", "summary", "value", "title", "content"} {
+			if nested, ok := typed[key]; ok {
+				if coerced := coerceString(nested); coerced != "" {
+					return coerced
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+func coerceStringList(value any) []string {
+	rawItems, ok := value.([]any)
+	if !ok {
+		if typed, ok := value.([]string); ok {
+			return typed
+		}
+		return nil
+	}
+
+	items := make([]string, 0, len(rawItems))
+	for _, item := range rawItems {
+		if coerced := coerceString(item); coerced != "" {
+			items = append(items, coerced)
+		}
+	}
+	return items
 }

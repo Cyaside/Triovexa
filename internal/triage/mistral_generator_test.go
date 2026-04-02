@@ -25,6 +25,23 @@ func TestMistralGeneratorParsesJSONPayload(t *testing.T) {
 	}
 }
 
+func TestMistralGeneratorCoercesStructuredLists(t *testing.T) {
+	generator := NewMistralGenerator(stubCompleter{
+		content: `{"summary":"Ringkasan","hypotheses":[{"text":"H1"},{"summary":"H2"}],"blast_radius":"BR","next_steps":[{"value":"N1"},{"content":"N2"}],"confidence_notes":"tinggi"}`,
+	})
+
+	result, err := generator.Generate(context.Background(), domain.Incident{ID: "inc-2", Severity: "critical"}, nil, nil)
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if len(result.Hypotheses) != 2 {
+		t.Fatalf("len(Hypotheses) = %d, want 2", len(result.Hypotheses))
+	}
+	if len(result.NextSteps) != 2 {
+		t.Fatalf("len(NextSteps) = %d, want 2", len(result.NextSteps))
+	}
+}
+
 type stubCompleter struct {
 	content string
 	err     error
