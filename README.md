@@ -58,6 +58,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1
 3. Open the main endpoints:
 
 - UI: `http://localhost:8080/ui/incidents`
+- Observability setup: `http://localhost:8080/ui/setup/observability`
 - Health: `http://localhost:8080/health`
 - Metrics: `http://localhost:8080/metrics`
 - Debug tools: `http://localhost:8080/debug/tools`
@@ -65,6 +66,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1
 - Demo service state: `http://localhost:8090/state`
 
 Example configuration lives in [config/app.example.env](config/app.example.env).
+
+The observability setup page can save a machine-local Grafana profile file so future local runs start with the same datasource UIDs and query templates. That saved profile remains local to the current user and is intended for lightweight single-user workflows.
 
 For quick demos without a ready PostgreSQL instance, you can start the server with `DATABASE_URL=memory`. That mode is intentionally ephemeral and only persists data for the lifetime of the process.
 
@@ -124,6 +127,7 @@ Currently used:
 - `ACTION_EXECUTION_TIMEOUT`
 - `ACTION_EXECUTION_COOLDOWN`
 - `ACTION_EXECUTION_RETRIES`
+- `LOCAL_OBSERVABILITY_PROFILE_PATH`
 
 Required when real integrations are enabled:
 
