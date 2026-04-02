@@ -1,8 +1,8 @@
 # Incident State Machine
 
-State machine ini menjadi sumber aturan lifecycle incident agar alur sistem tetap terkendali dan dapat diaudit.
+This state machine defines the incident lifecycle so the workflow stays controlled and auditable.
 
-## Daftar State
+## States
 
 - `detected`
 - `triaging`
@@ -17,7 +17,7 @@ State machine ini menjadi sumber aturan lifecycle incident agar alur sistem teta
 - `escalated`
 - `closed`
 
-## Transisi Utama
+## Main Transitions
 
 - `detected -> triaging`
 - `triaging -> action_proposed`
@@ -33,9 +33,9 @@ State machine ini menjadi sumber aturan lifecycle incident agar alur sistem teta
 - `resolved -> closed`
 - `escalated -> closed`
 
-## Prinsip
+## Principles
 
-- incident tidak boleh lompat langsung dari proposal ke execution tanpa approval atau decision policy
-- verification adalah state eksplisit, bukan sekadar side effect
-- rollback dan escalation harus terlihat sebagai perubahan state nyata
-- close hanya boleh terjadi dari state terminal yang jelas
+- an incident must not jump from proposal directly to execution without a policy decision or approval
+- verification is an explicit state, not a side effect
+- rollback and escalation must appear as real state transitions
+- closing is only allowed from explicit terminal states

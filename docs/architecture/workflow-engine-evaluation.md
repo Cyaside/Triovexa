@@ -1,43 +1,43 @@
 # Workflow Engine Evaluation
 
-Catatan ini mendokumentasikan evaluasi awal apakah orkestrasi internal Triovexa masih cukup untuk Phase 6 atau sudah perlu workflow engine eksternal seperti Temporal.
+This note records the current evaluation of whether Triovexa still fits an internal orchestration model or should move to an external workflow engine such as Temporal.
 
-## Keputusan Saat Ini
+## Current Decision
 
-- keputusan: tetap memakai orchestration internal
-- status: diterima untuk Phase 6
-- evaluasi ulang: setelah Phase 7 atau saat action portfolio bertambah signifikan
+- decision: keep the internal orchestration approach
+- status: accepted for the current action portfolio
+- revisit when the action portfolio or recovery logic grows materially
 
-## Kenapa Masih Cukup
+## Why The Current Approach Is Still Enough
 
-- jumlah state incident masih terbatas dan eksplisit
-- retry dan timeout masih sederhana dan bisa diaudit langsung dari service code
-- rollback yang ada baru satu jalur medium-risk dengan compensation yang pendek
-- belum ada kebutuhan resume workflow lintas proses atau lintas hari
+- the number of incident states is still limited and explicit
+- retry and timeout behavior is simple and directly auditable in service code
+- current rollback support covers only a short medium-risk compensation path
+- there is no need yet for cross-process or long-running workflow resumption
 
-## Sinyal Yang Akan Memicu Evaluasi Ulang
+## Signals That Should Trigger Re-evaluation
 
-- retry policy mulai berbeda jauh antar action
-- rollback membutuhkan multi-step compensation
-- action chain mulai melibatkan lebih dari satu sistem eksternal
-- operator butuh resume workflow setelah process crash atau deploy
-- audit trail perlu menunjukkan branch workflow yang lebih kompleks daripada state machine sekarang
+- retry policies diverge significantly between actions
+- rollback needs multi-step compensation
+- action chains start spanning more than one external system
+- operators need workflow resumption after process crashes or deployments
+- the audit trail needs to represent branching workflows that exceed the current state machine
 
-## Risiko Kalau Terlalu Cepat Pindah Workflow Engine
+## Risks Of Moving Too Early
 
-- kompleksitas operasional naik sebelum use case benar-benar matang
-- debugging lokal jadi lebih lambat
-- model domain yang belum stabil bisa ikut membengkak karena constraint tool
+- operational complexity increases before the use case is mature
+- local debugging becomes slower
+- an unstable domain model can grow around tool constraints too early
 
-## Risiko Kalau Terlalu Lama Menunda
+## Risks Of Waiting Too Long
 
-- orchestration code mulai sulit dibaca karena banyak branch retry dan compensation
-- state transition makin tersebar
-- rollback dan escalation bisa saling tumpang tindih bila action portfolio bertambah cepat
+- orchestration code becomes harder to read due to retry and compensation branches
+- state transitions become scattered
+- rollback and escalation logic may start overlapping as the action portfolio grows
 
-## Guardrail Sampai Evaluasi Ulang
+## Guardrails Until Re-evaluation
 
-- pertahankan satu service orchestration utama
-- simpan audit event dan state transition secara eksplisit
-- hindari menambah action multi-step tanpa rollback plan yang jelas
-- dokumentasikan tiap workflow baru yang menambah compensation atau branching
+- keep a single primary orchestration service
+- store audit events and state transitions explicitly
+- avoid adding multi-step actions without a clear rollback plan
+- document every new workflow that adds compensation or branching

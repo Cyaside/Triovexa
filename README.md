@@ -1,27 +1,27 @@
 # Triovexa
 
-Triovexa adalah implementasi `AI Incident Triage Operator` berbasis Go: sistem incident-response copilot yang menerima alert, mengumpulkan evidence, menarik runbook/postmortem, mengusulkan candidate action, mengevaluasi policy, menjalankan remediation yang diizinkan, lalu memverifikasi outcome dan rollback bila perlu.
+Triovexa is a Go-based AI incident triage operator. It receives alerts, gathers evidence, retrieves runbooks and postmortems, proposes constrained remediation actions, evaluates policy, executes approved actions, verifies outcomes, and rolls back when needed.
 
-Repositori ini mengikuti PRD bertahap dari `Phase 0` sampai `Phase 7`, dengan fokus kuat pada safety, auditability, dan demoability.
+The codebase is designed around safety, auditability, and local demoability. The current implementation supports both lightweight local workflows and real-provider integrations through runtime-selectable adapters.
 
-## Yang Sudah Ada
+## What Is Included
 
 - Grafana-compatible webhook intake
-- incident list dan incident detail UI
-- evidence collection dari demo service atau Grafana datasource proxy
-- retrieval runbook dan postmortem dari folder `docs/`
-- heuristic triage dan heuristic candidate action generation
-- Mistral-backed triage dan candidate action generation
-- policy engine dengan allowlist, risk classification, dan approval gate
-- kill switch global
-- runtime switch untuk `heuristic|mistral` dan `demo|grafana` langsung dari UI
-- low-risk execution pipeline dengan timeout, retry, cooldown, dan idempotency
-- verification engine berbasis before/after signal comparison
-- automatic rollback untuk medium-risk demo action tertentu
-- audit trail persisten di PostgreSQL
-- internal telemetry dan diagnostics endpoint (`/metrics`, `/debug/tools`, `/debug/policies`)
+- incident list and incident detail UI
+- evidence collection from either the demo service or Grafana datasource proxies
+- runbook and postmortem retrieval from `docs/`
+- heuristic triage and action generation
+- Mistral-backed triage and action generation
+- policy evaluation with allowlists, risk levels, and approval gates
+- global kill switch
+- runtime UI switches for `heuristic|mistral` and `demo|grafana`
+- low-risk execution with timeout, retry, cooldown, and idempotency
+- verification based on before/after signal comparison
+- automatic rollback for selected medium-risk demo actions
+- PostgreSQL-backed audit trail and persistence
+- internal telemetry and diagnostics endpoints: `/metrics`, `/debug/tools`, `/debug/policies`
 
-## Arsitektur Ringkas
+## Architecture At A Glance
 
 ```text
 Grafana Alert
@@ -39,23 +39,23 @@ Grafana Alert
   -> Operator UI + Metrics + Diagnostics
 ```
 
-Komponen utamanya tetap vendor-neutral di layer domain. Adapter observability, execution, dan verification dipisahkan dari orchestration core supaya flow tetap bisa dijelaskan dan diganti bertahap.
+The domain layer stays vendor-neutral. Observability, reasoning, execution, and verification integrations live behind adapters so the orchestration flow remains understandable and replaceable.
 
-## Menjalankan Lokal
+## Running Locally
 
-1. Nyalakan PostgreSQL lokal:
+1. Start local PostgreSQL:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-up.ps1
 ```
 
-2. Jalankan semua proses dev:
+2. Start the full local stack:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1
 ```
 
-3. Akses endpoint utama:
+3. Open the main endpoints:
 
 - UI: `http://localhost:8080/ui/incidents`
 - Health: `http://localhost:8080/health`
@@ -64,13 +64,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1
 - Debug policies: `http://localhost:8080/debug/policies`
 - Demo service state: `http://localhost:8090/state`
 
-Konfigurasi contoh ada di [config/app.example.env](config/app.example.env).
+Example configuration lives in [config/app.example.env](config/app.example.env).
 
-Untuk demo cepat tanpa PostgreSQL lokal yang siap, Anda juga bisa menjalankan server dengan `DATABASE_URL=memory` agar data hanya hidup selama proses berjalan.
+For quick demos without a ready PostgreSQL instance, you can start the server with `DATABASE_URL=memory`. That mode is intentionally ephemeral and only persists data for the lifetime of the process.
 
 ## Demo Scenarios
 
-Pakai script helper berikut untuk memicu skenario demo end-to-end:
+Use the helper script below to trigger end-to-end demo scenarios:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario timeout-after-deploy
@@ -78,29 +78,29 @@ powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario w
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario error-rate-spike
 ```
 
-Skenario yang tersedia:
+Available scenarios:
 
 - [docs/scenarios/timeout-after-deploy.md](docs/scenarios/timeout-after-deploy.md)
 - [docs/scenarios/worker-stall-rollback.md](docs/scenarios/worker-stall-rollback.md)
 - [docs/scenarios/error-rate-spike.md](docs/scenarios/error-rate-spike.md)
 
-Demo guide lengkap ada di [docs/operations/demo-guide.md](docs/operations/demo-guide.md).
+The full walkthrough is documented in [docs/operations/demo-guide.md](docs/operations/demo-guide.md).
 
 ## Testing
 
-Perintah utama:
+Main commands:
 
 ```powershell
 go test ./...
 go vet ./...
 ```
 
-Strategi testing tertulis ada di [docs/operations/testing-strategy.md](docs/operations/testing-strategy.md).
+The test approach is documented in [docs/operations/testing-strategy.md](docs/operations/testing-strategy.md).
 
-Coverage yang sudah ada mencakup:
+Current coverage includes:
 
 - webhook intake
-- triage dan action generation flow
+- triage and action generation flow
 - policy decision
 - approval workflow
 - execution path
@@ -108,12 +108,12 @@ Coverage yang sudah ada mencakup:
 - blocked action
 - kill switch
 - rollback path
-- metrics dan diagnostics endpoint
-- runtime mode switching endpoint dan UI controls
+- metrics and diagnostics endpoints
+- runtime mode switching endpoint and UI controls
 
 ## Environment Variables
 
-Dipakai saat ini:
+Currently used:
 
 - `DATABASE_URL`
 - `DOCS_ROOT`
@@ -125,7 +125,7 @@ Dipakai saat ini:
 - `ACTION_EXECUTION_COOLDOWN`
 - `ACTION_EXECUTION_RETRIES`
 
-Belum wajib untuk mode demo lokal, tetapi akan dibutuhkan saat integrasi eksternal sungguhan diaktifkan:
+Required when real integrations are enabled:
 
 - `GRAFANA_BASE_URL`
 - `GRAFANA_API_TOKEN`
@@ -143,21 +143,21 @@ Belum wajib untuk mode demo lokal, tetapi akan dibutuhkan saat integrasi ekstern
 
 ## Safety Scope
 
-- hanya action yang ada di catalog yang bisa dievaluasi
-- high-risk action tetap diblok di fase awal
-- medium-risk action tetap approval-gated
-- execution revalidasi environment dan target sebelum adapter dipanggil
-- verification membedakan `success`, `failed`, dan `inconclusive`
-- rollback otomatis hanya berjalan untuk action yang memang punya rollback plan
+- only actions present in the catalog can be evaluated
+- high-risk actions remain blocked
+- medium-risk actions stay approval-gated
+- execution revalidates environment and target before the adapter is called
+- verification distinguishes `success`, `failed`, and `inconclusive`
+- automatic rollback only runs for actions that explicitly define a rollback plan
 
-## Batasan Saat Ini
+## Current Limitations
 
-- mode `grafana` butuh query template yang cocok dengan skema telemetry Anda; default repo belum bisa menebak nama metric dan label secara universal
-- datasource Grafana Anda saat ini sudah bisa di-discover, tetapi query generik dapat tetap kosong jika belum ada metric atau log yang di-ingest
-- autentikasi endpoint approval/execution belum ditambahkan
-- tracing distributed belum diaktifkan; phase saat ini baru mencakup structured logging dan metrics internal
+- `grafana` mode requires query templates that match your telemetry schema; the repository defaults cannot infer metric names or labels universally
+- datasource discovery may succeed even when generic queries return no data because metrics or logs have not been ingested yet
+- authentication for approval and execution endpoints is not implemented yet
+- distributed tracing is not enabled yet; current observability covers structured logging and internal metrics
 
-## Dokumentasi Tambahan
+## Additional Documentation
 
 - [docs/architecture/high-level.md](docs/architecture/high-level.md)
 - [docs/architecture/incident-state-machine.md](docs/architecture/incident-state-machine.md)

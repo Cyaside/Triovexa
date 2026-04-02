@@ -1,8 +1,8 @@
 # Docs
 
-Dokumentasi di folder ini adalah artefak implementasi yang mendukung Phase 00 dan phase-phase berikutnya.
+This folder contains the implementation documentation that supports the current Triovexa codebase.
 
-## Struktur
+## Structure
 
 - `architecture/`
 - `operations/`
@@ -10,12 +10,12 @@ Dokumentasi di folder ini adalah artefak implementasi yang mendukung Phase 00 da
 - `runbooks/`
 - `postmortems/`
 
-## Tujuan
+## Purpose
 
-- menjelaskan arsitektur awal proyek
-- mendokumentasikan state machine incident
-- mendefinisikan action catalog dan policy awal
-- mendokumentasikan environment demo untuk simulasi incident
-- menyediakan skenario demo yang bisa dipresentasikan end-to-end
-- mendokumentasikan baseline setup PostgreSQL untuk persistence
-- menyediakan knowledge base dummy untuk retrieval dan triage
+- describe the system architecture
+- document the incident state machine
+- define the action catalog and baseline policy rules
+- document the demo environment used for local simulations
+- provide end-to-end demo scenarios
+- capture the PostgreSQL persistence setup
+- provide sample runbooks and postmortems for retrieval and triage

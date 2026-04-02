@@ -1,46 +1,46 @@
 # High-Level Architecture
 
-Dokumen ini menerjemahkan arsitektur produk pada PRD ke fondasi implementasi awal.
+This document describes the implementation-level architecture of Triovexa.
 
-## Komponen Utama
+## Core Components
 
 1. `Alert Receiver`
-   Menerima alert webhook dari Grafana dan menormalisasi payload.
+   Accepts Grafana-compatible alert webhooks and normalizes the payload.
 
 2. `Incident Orchestrator`
-   Mengelola lifecycle incident dari `detected` sampai `closed`.
+   Manages the incident lifecycle from `detected` to `closed`.
 
 3. `Context Collectors`
-   Mengambil logs, metrics, deploy info, dan metadata layanan.
+   Collects logs, metrics, deployment signals, and service metadata.
 
 4. `Knowledge Retriever`
-   Mengambil runbook, postmortem, dan dokumen operasional yang relevan.
+   Retrieves relevant runbooks, postmortems, and operational documents.
 
-5. `AI Agent Layer`
-   Menyusun summary, hypotheses, next steps, dan candidate actions berbasis evidence.
+5. `Reasoning Layer`
+   Produces summaries, hypotheses, next steps, and candidate actions from the available evidence.
 
 6. `Policy Engine`
-   Memutuskan apakah candidate action diizinkan, perlu approval, atau ditolak.
+   Decides whether a candidate action is allowed, requires approval, or must be denied.
 
 7. `Approval Layer`
-   Menjadi gerbang human-in-the-loop untuk action tertentu.
+   Acts as the human-in-the-loop gate for selected actions.
 
 8. `Execution Engine`
-   Menjalankan action yang telah lolos policy dan approval.
+   Runs actions that passed policy and approval.
 
 9. `Verification Engine`
-   Memeriksa apakah action memperbaiki kondisi.
+   Checks whether an action improved the incident state.
 
 10. `Internal Telemetry & Diagnostics`
-    Menyediakan structured logging, metrics internal, dan endpoint diagnostik untuk operator.
+    Provides structured logging, internal metrics, and diagnostics endpoints for operators.
 
 11. `Persistence & Audit Store`
-    Menyimpan incident, triage result, policy decision, execution record, verification result, dan audit event.
+    Stores incidents, triage results, policy decisions, execution records, verification results, and audit events.
 
 12. `Operator UI`
-    Menampilkan incident list, incident detail, evidence, action, approval, dan audit trail.
+    Shows incident lists, incident detail, evidence, actions, approvals, and audit history.
 
-## Alur Tingkat Tinggi
+## High-Level Flow
 
 ```text
 Grafana Alert
@@ -58,21 +58,21 @@ Grafana Alert
   -> Operator UI
 ```
 
-## Boundary Awal
+## Boundaries
 
-- vendor-specific integration harus hidup di adapter masing-masing
-- orchestration core tidak boleh tahu detail implementasi vendor
-- AI provider harus bisa diganti tanpa merusak domain incident
-- write path hanya boleh lewat execution adapter yang terkontrol
-- policy decision dan approval harus selalu persisten
+- vendor-specific integrations should live in dedicated adapters
+- the orchestration core should not depend on vendor implementation details
+- the reasoning provider should be replaceable without changing the incident domain
+- write paths must go through controlled execution adapters
+- policy decisions and approvals must always be persisted
 
-## Implementasi Yang Sudah Disiapkan di Phase 00
+## Implemented Foundations
 
-- bootstrap HTTP service
+- HTTP service bootstrap
 - core domain entities
 - incident state machine
-- action catalog awal
-- policy evaluator awal
-- example app configuration
-- baseline persistence layer berbasis PostgreSQL
-- internal telemetry endpoint untuk metrics dan diagnostics
+- initial action catalog
+- baseline policy evaluator
+- example application configuration
+- PostgreSQL-backed persistence
+- internal telemetry endpoints for metrics and diagnostics
