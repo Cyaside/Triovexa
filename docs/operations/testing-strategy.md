@@ -1,17 +1,17 @@
 # Testing Strategy
 
-Dokumen ini menyelaraskan testing Triovexa dengan PRD section 31. Tujuannya bukan hanya memastikan flow bekerja, tetapi juga memastikan safety guardrails tidak mudah bocor.
+This document captures how Triovexa is tested. The goal is not only to prove that the happy path works, but also to ensure the safety guardrails are hard to bypass.
 
-## Prinsip
+## Principles
 
-- prioritaskan flow end-to-end yang mencerminkan lifecycle incident nyata
-- pastikan safety rule diuji sama seriusnya dengan success path
-- gunakan demo adapter dan in-memory repository untuk menjaga test tetap cepat
-- simpan failure mode penting dalam test agar regression mudah terdeteksi
+- prioritize end-to-end flows that reflect a real incident lifecycle
+- test safety rules as seriously as success paths
+- use demo adapters and in-memory repositories to keep tests fast
+- encode important failure modes in tests so regressions are easier to catch
 
 ## Functional Testing
 
-Yang sudah diotomasi:
+Already automated:
 
 - webhook intake
 - incident creation
@@ -23,7 +23,7 @@ Yang sudah diotomasi:
 - verification workflow
 - rollback workflow
 
-Referensi utama:
+Primary references:
 
 - `internal/http/server_test.go`
 - `internal/approval/service_test.go`
@@ -32,14 +32,14 @@ Referensi utama:
 
 ## Integration Testing
 
-Yang sudah diotomasi:
+Already automated:
 
 - Grafana-compatible webhook -> incident intake -> triage -> candidate actions
 - approval -> execution -> verification -> incident state transition
 - medium-risk execution -> verification failure -> rollback -> rolled_back state
-- metrics dan diagnostics endpoint setelah workflow berjalan
+- metrics and diagnostics endpoints after workflows run
 
-Karena mode demo masih local-first, integrasi ini menggunakan:
+Because the demo mode remains local-first, these integration tests use:
 
 - `httptest.Server`
 - `MemoryStore`
@@ -47,60 +47,60 @@ Karena mode demo masih local-first, integrasi ini menggunakan:
 
 ## Safety Testing
 
-Yang sudah diotomasi:
+Already automated:
 
-- action yang tidak ada di catalog ditolak oleh policy
-- action tanpa approval tidak bisa dieksekusi
-- kill switch memblokir execution
-- duplicate execution dicegah oleh idempotency guard
-- max attempt dan cooldown dijaga di execution layer
-- execution scope direvalidasi sebelum adapter dipanggil
-- missing action endpoint sekarang mengembalikan `404`
+- actions outside the catalog are denied by policy
+- actions cannot execute without approval
+- the kill switch blocks execution
+- duplicate execution is prevented by the idempotency guard
+- max attempts and cooldowns are enforced in the execution layer
+- execution scope is revalidated before the adapter is called
+- missing action endpoints return `404`
 
 ## Failure Testing
 
-Yang sudah diotomasi:
+Already automated:
 
-- retryable adapter error pada execution
+- retryable adapter errors during execution
 - verification `failed`
 - verification `inconclusive`
-- rollback sukses setelah verification gagal
-- rollback gagal tetap mengarah ke escalation recommendation
+- successful rollback after verification failure
+- failed rollback still leads to an escalation recommendation
 
-Yang masih bisa ditambah pada iterasi berikutnya:
+Useful additions for a future iteration:
 
-- PostgreSQL integration test nyata dengan container
-- collector failure dari observability source sungguhan
-- AI provider timeout saat provider eksternal sudah diaktifkan
+- real PostgreSQL integration tests with containers
+- collector failure from a real observability source
+- AI provider timeouts once external providers are always enabled
 - webhook secret validation failure
-- authorization failure untuk endpoint approval/execution
+- authorization failure for approval and execution endpoints
 
-## Cara Menjalankan
+## How To Run
 
-Semua test:
+Run the full suite:
 
 ```powershell
 go test ./...
 ```
 
-Static analysis ringan:
+Run light static analysis:
 
 ```powershell
 go vet ./...
 ```
 
-Package spesifik yang sering disentuh:
+Run the most commonly touched packages:
 
 ```powershell
 go test ./internal/http ./internal/approval ./internal/execution ./internal/verification
 ```
 
-## Exit Criteria Untuk Demo-Ready
+## Demo-Ready Exit Criteria
 
-Sebelum presentasi atau recording demo:
+Before a presentation or demo recording:
 
-- `go test ./...` harus hijau
-- `go vet ./...` harus hijau
-- scenario `timeout-after-deploy` harus bisa berakhir di `resolved`
-- scenario `worker-stall` harus bisa menunjukkan rollback sukses
-- `/metrics`, `/debug/tools`, dan `/debug/policies` harus bisa diakses
+- `go test ./...` must pass
+- `go vet ./...` must pass
+- the `timeout-after-deploy` scenario must end in `resolved`
+- the `worker-stall` scenario must demonstrate a successful rollback
+- `/metrics`, `/debug/tools`, and `/debug/policies` must be reachable

@@ -1,35 +1,35 @@
 # Demo Guide
 
-Panduan ini disiapkan untuk membantu orang lain menjalankan dan mendemokan Triovexa tanpa perlu dijelaskan panjang secara lisan.
+This guide helps other people run and demo Triovexa without needing a long verbal walkthrough.
 
-## Prasyarat
+## Prerequisites
 
-- Docker Desktop aktif untuk PostgreSQL lokal
-- Go terpasang
-- PowerShell bisa menjalankan script lokal
+- Docker Desktop running for local PostgreSQL
+- Go installed
+- PowerShell able to run local scripts
 
-## Menyalakan Environment
+## Starting The Environment
 
-1. Jalankan database lokal:
+1. Start the local database:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-up.ps1
 ```
 
-2. Jalankan demo service dan server utama:
+2. Start the demo service and main server:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1
 ```
 
-3. Cek health:
+3. Check health:
 
 ```powershell
 Invoke-RestMethod http://localhost:8080/health
 Invoke-RestMethod http://localhost:8090/health
 ```
 
-4. Cek observability internal Triovexa:
+4. Check Triovexa internal observability:
 
 ```powershell
 Invoke-WebRequest http://localhost:8080/metrics | Select-Object -ExpandProperty Content
@@ -37,9 +37,9 @@ Invoke-RestMethod http://localhost:8080/debug/tools
 Invoke-RestMethod http://localhost:8080/debug/policies
 ```
 
-## Menjalankan Skenario Demo
+## Running Demo Scenarios
 
-Cara paling cepat adalah memakai script helper:
+The fastest option is the helper script:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario timeout-after-deploy
@@ -47,72 +47,72 @@ powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario w
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario error-rate-spike
 ```
 
-Script akan:
+The script will:
 
-- memicu mode insiden pada demo service
-- mengirim webhook Grafana-compatible ke server utama
-- menampilkan `incident_id` yang baru dibuat
+- trigger an incident mode on the demo service
+- send a Grafana-compatible webhook to the main server
+- print the newly created `incident_id`
 
-## Alur Presentasi yang Disarankan
+## Suggested Demo Walkthrough
 
-### 1. Tunjukkan posture sistem
+### 1. Show the system posture
 
-- buka `GET /debug/tools`
-- buka `GET /debug/policies`
-- jelaskan kill switch, catalog action, dan scope safety
+- open `GET /debug/tools`
+- open `GET /debug/policies`
+- explain the kill switch, action catalog, and safety scope
 
-### 2. Trigger insiden
+### 2. Trigger an incident
 
-- jalankan salah satu skenario dengan `demo-scenario.ps1`
-- buka UI di `http://localhost:8080/ui/incidents`
-- klik incident terbaru
+- run one of the scenarios with `demo-scenario.ps1`
+- open the UI at `http://localhost:8080/ui/incidents`
+- open the newest incident
 
-### 3. Jelaskan triage
+### 3. Explain triage
 
-- tunjukkan summary, hypotheses, blast radius
-- sorot evidence dan dokumen runbook/postmortem yang terambil
-- jelaskan bahwa candidate action dibatasi ke catalog allowlist
+- show the summary, hypotheses, and blast radius
+- highlight the evidence and retrieved runbook/postmortem documents
+- explain that candidate actions are constrained to the allowlisted catalog
 
-### 4. Jelaskan policy dan approval
+### 4. Explain policy and approval
 
-- lihat candidate action panel
-- sorot risk level, rationale, dan approval hint
-- approve salah satu action dari UI atau API
+- inspect the candidate action panel
+- highlight risk level, rationale, and approval hints
+- approve one action from the UI or API
 
-### 5. Eksekusi action
+### 5. Execute an action
 
-- jalankan action dari UI
-- tunjukkan execution record dan verification result
-- buka `/metrics` untuk menunjukkan counter execution dan verification ikut bergerak
+- execute an action from the UI
+- show the execution record and verification result
+- open `/metrics` to show the execution and verification counters changing
 
-### 6. Tunjukkan rollback bila perlu
+### 6. Show rollback when needed
 
-- pakai skenario `worker-stall`
-- approve dan execute `pause_demo_queue_consumer`
-- tunjukkan incident berakhir di `rolled_back` jika verification gagal dan rollback otomatis berhasil
+- use the `worker-stall` scenario
+- approve and execute `pause_demo_queue_consumer`
+- show the incident ending in `rolled_back` when verification fails and automatic rollback succeeds
 
-### 7. Tunjukkan kontrol operator
+### 7. Show operator controls
 
-- aktifkan kill switch dari UI/API
-- jelaskan bahwa policy dan approval tetap terlihat, tetapi action baru diblok
+- enable the kill switch from the UI or API
+- explain that policy and approval remain visible while new execution is blocked
 
-## Checklist Demo Singkat
+## Quick Demo Checklist
 
-- PostgreSQL aktif
-- demo service aktif
-- server Triovexa aktif
-- `/metrics` mengembalikan metrik internal
-- `/ui/incidents` bisa dibuka
-- minimal satu skenario selesai end-to-end
+- PostgreSQL is running
+- the demo service is running
+- the Triovexa server is running
+- `/metrics` returns internal metrics
+- `/ui/incidents` opens successfully
+- at least one scenario completes end-to-end
 
-## Catatan Manual
+## Manual Notes
 
-Variable eksternal berikut belum wajib untuk mode demo lokal saat ini:
+These external variables are optional for the local demo, but needed when real integrations are enabled:
 
 - `GRAFANA_BASE_URL`
 - `GRAFANA_API_TOKEN`
 - `GRAFANA_WEBHOOK_SECRET`
-- `GOOGLE_API_KEY`
-- `GOOGLE_MODEL`
+- `MISTRAL_API_KEY`
+- `MISTRAL_MODEL`
 
-Kalau nanti variable itu sudah diisi, kita bisa ganti dari heuristic lokal ke integrasi observability dan provider AI sungguhan tanpa mengubah demo flow dasarnya.
+Once those variables are populated, you can switch from local heuristics to real observability and AI providers without changing the core demo flow.

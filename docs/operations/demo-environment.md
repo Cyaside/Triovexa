@@ -1,13 +1,13 @@
 # Demo Environment
 
-Service demo ini disiapkan untuk menghasilkan sinyal insiden yang bisa dipakai pada phase intake, triage, dan remediation berikutnya.
+The demo service exists to generate incident signals that can be used by the intake, triage, remediation, verification, and rollback flows.
 
-## Komponen
+## Component
 
 - `cmd/demo-service`
-  Service HTTP kecil yang bisa berpindah mode dari sehat ke beberapa kondisi insiden.
+  A small HTTP service that can switch between healthy and incident conditions.
 
-## Endpoint
+## Endpoints
 
 - `GET /health`
 - `GET /state`
@@ -22,45 +22,45 @@ Service demo ini disiapkan untuk menghasilkan sinyal insiden yang bisa dipakai p
 - `POST /actions/pause-queue-consumer`
 - `POST /actions/resume-queue-consumer`
 
-## Mode Insiden
+## Incident Modes
 
 - `healthy`
 - `error_rate_spike`
 - `worker_stall`
 - `timeout_after_deploy`
 
-## Contoh Menjalankan
+## Example Startup
 
 ```powershell
 go run ./cmd/demo-service
 go run ./cmd/server
 ```
 
-Sebelum menjalankan server utama, pastikan `DATABASE_URL` sudah mengarah ke PostgreSQL yang aktif.
+Before starting the main server, make sure `DATABASE_URL` points at a running PostgreSQL instance, or explicitly use `DATABASE_URL=memory` for an ephemeral local demo.
 
-Cara paling cepat:
+Fastest database bootstrap:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-up.ps1
 ```
 
-Cara paling praktis untuk menyalakan semuanya sekaligus:
+Most convenient way to start everything:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1
 ```
 
-Jika hanya ingin menyalakan proses aplikasi tanpa bootstrap database ulang:
+If you only want to start the application processes without bootstrapping the database again:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1 -SkipDatabase
 ```
 
-Jika skrip memberi error bahwa Docker daemon tidak reachable, nyalakan Docker Desktop dulu lalu jalankan ulang.
+If the script reports that the Docker daemon is unreachable, start Docker Desktop and try again.
 
-## Contoh Memicu Insiden
+## Example Incident Triggers
 
-Cara paling cepat:
+Fastest option:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario timeout-after-deploy
@@ -68,7 +68,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario w
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario error-rate-spike
 ```
 
-Cara manual:
+Manual option:
 
 ```powershell
 Invoke-WebRequest -Method Post http://localhost:8090/simulate/error-rate-spike
@@ -76,13 +76,13 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/worker-stall
 Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 ```
 
-## Tujuan Praktis
+## Practical Purpose
 
-- menyediakan target untuk alert rule Grafana
-- menyediakan metrics sederhana untuk observability
-- menyediakan kondisi yang bisa dipakai saat demo triage dan candidate action
+- provide a target for Grafana alert rules
+- provide simple metrics for observability
+- provide reproducible conditions for triage and candidate-action demos
 
-## Endpoint UI dan API Phase 6
+## UI And API Endpoints
 
 - `GET /ui/incidents`
 - `GET /ui/incidents/{id}`
@@ -102,7 +102,7 @@ Invoke-WebRequest -Method Post http://localhost:8090/simulate/reset
 
 ## Environment Variables
 
-Yang aktif dipakai saat ini:
+Used today:
 
 - `DATABASE_URL`
 - `DOCS_ROOT`
@@ -114,24 +114,40 @@ Yang aktif dipakai saat ini:
 - `ACTION_EXECUTION_COOLDOWN`
 - `ACTION_EXECUTION_RETRIES`
 
-Yang belum wajib sekarang, tetapi nanti perlu Anda isi saat kita sambungkan ke integrasi eksternal sungguhan:
+Needed when real integrations are enabled:
 
 - `GRAFANA_BASE_URL`
-  Dipakai jika kita ingin mengambil konteks tambahan dari Grafana API, bukan hanya menerima webhook.
+  Used to retrieve additional context from the Grafana API instead of only receiving webhooks.
 - `GRAFANA_API_TOKEN`
-  Token akses untuk query dashboard, alert detail, atau API pendukung Grafana.
+  Access token for datasource proxy queries and supporting Grafana APIs.
 - `GRAFANA_WEBHOOK_SECRET`
-  Secret untuk verifikasi request webhook Grafana agar intake lebih aman.
-- `GOOGLE_API_KEY`
-  Kredensial untuk provider model Google saat heuristik lokal diganti dengan model sungguhan.
-- `GOOGLE_MODEL`
-  Nama model Google yang akan dipakai untuk triage dan candidate action generation.
+  Secret used to verify Grafana webhooks.
+- `GRAFANA_METRICS_DATASOURCE_UID`
+  Metrics datasource UID used by the Grafana collector.
+- `GRAFANA_LOGS_DATASOURCE_UID`
+  Logs datasource UID used by the Grafana collector.
+- `GRAFANA_ERROR_RATE_QUERY`
+  Query template for the primary error-rate signal.
+- `GRAFANA_LATENCY_QUERY`
+  Query template for latency evidence.
+- `GRAFANA_QUEUE_QUERY`
+  Query template for queue backlog evidence.
+- `GRAFANA_REPLICA_QUERY`
+  Query template for replica-count evidence.
+- `GRAFANA_LOGS_QUERY`
+  Loki query template for general incident logs.
+- `GRAFANA_DEPLOY_LOGS_QUERY`
+  Loki query template for deployment-related logs.
+- `MISTRAL_API_KEY`
+  Credentials for the Mistral reasoning provider.
+- `MISTRAL_MODEL`
+  Model name used for triage and candidate action generation.
 
-Selama variable external integration di atas belum diisi, aplikasi tetap jalan dengan mode heuristik lokal yang kita pakai sekarang.
+When these values are not configured, the application can still run in local demo mode using heuristic reasoning and the built-in demo collector.
 
-## Contoh Approval, Execution, dan Kill Switch
+## Example Approval, Execution, And Kill Switch Requests
 
-Approve action dari API:
+Approve an action:
 
 ```powershell
 Invoke-RestMethod -Method Post `
@@ -140,7 +156,7 @@ Invoke-RestMethod -Method Post `
   -Body '{"approved_by":"operator-a","note":"safe to proceed"}'
 ```
 
-Reject action dari API:
+Reject an action:
 
 ```powershell
 Invoke-RestMethod -Method Post `
@@ -149,7 +165,7 @@ Invoke-RestMethod -Method Post `
   -Body '{"approved_by":"operator-a","note":"needs manual investigation"}'
 ```
 
-Execute action low-risk yang sudah approved:
+Execute an approved low-risk action:
 
 ```powershell
 Invoke-RestMethod -Method Post `
@@ -158,7 +174,7 @@ Invoke-RestMethod -Method Post `
   -Body '{"initiated_by":"operator-a","note":"execute approved action"}'
 ```
 
-Execute action medium-risk yang sudah approved:
+Execute an approved medium-risk action:
 
 ```powershell
 Invoke-RestMethod -Method Post `
@@ -167,21 +183,21 @@ Invoke-RestMethod -Method Post `
   -Body '{"initiated_by":"operator-b","note":"execute medium-risk action with rollback plan"}'
 ```
 
-Lihat hasil verification untuk action tersebut:
+View the verification result for that action:
 
 ```powershell
 Invoke-RestMethod -Method Get `
   -Uri http://localhost:8080/actions/<ACTION_ID>/verification
 ```
 
-Lihat rollback record untuk action yang sama:
+View rollback records for the same action:
 
 ```powershell
 Invoke-RestMethod -Method Get `
   -Uri http://localhost:8080/actions/<ACTION_ID>/rollbacks
 ```
 
-Aktifkan kill switch:
+Enable the kill switch:
 
 ```powershell
 Invoke-RestMethod -Method Post `
@@ -190,21 +206,21 @@ Invoke-RestMethod -Method Post `
   -Body '{"enabled":true}'
 ```
 
-## Closed-Loop Verification Yang Sudah Aktif
+## Active Closed-Loop Verification
 
-Setelah `POST /actions/{id}/execute` berhasil, server utama sekarang otomatis akan:
+After `POST /actions/{id}/execute` succeeds, the main server automatically:
 
-- mengambil snapshot kondisi layanan sesudah action
-- membandingkan sinyal sebelum dan sesudah action
-- menyimpan `verification_result`
-- memindahkan incident ke `resolved` jika sinyal membaik kuat
-- memindahkan incident ke `escalated` jika hasil gagal atau tidak meyakinkan
-- memicu rollback otomatis untuk medium-risk action yang punya rollback plan jika verification gagal
-- memindahkan incident ke `rolled_back` jika rollback berhasil
+- captures the service state after the action
+- compares before and after signals
+- stores a `verification_result`
+- moves the incident to `resolved` when the evidence clearly improved
+- moves the incident to `escalated` when the result failed or stayed inconclusive
+- triggers automatic rollback for medium-risk actions that define a rollback plan when verification fails
+- moves the incident to `rolled_back` if rollback succeeds
 
-Rule awal yang dipakai tetap sederhana dan mudah diaudit:
+The current rules remain simple and auditable:
 
-- alert dianggap clear jika mode demo kembali `healthy`
-- health check dianggap normal jika `worker_healthy=true`
-- improvement dihitung dari `error_rate`, `latency_ms`, dan `queue_backlog`
-- mixed signal tidak akan auto-resolve, tetapi akan di-escalate
+- the alert is considered cleared when the demo mode returns to `healthy`
+- the health check is considered normal when `worker_healthy=true`
+- improvement is evaluated using `error_rate`, `latency_ms`, and `queue_backlog`
+- mixed signals do not auto-resolve; they escalate instead

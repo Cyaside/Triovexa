@@ -1,89 +1,89 @@
 # Action Catalog v1
 
-Catalog ini adalah allowlist awal untuk action yang boleh dipertimbangkan sistem.
+This catalog is the baseline allowlist of actions the system may consider.
 
 ## Low Risk
 
 ### `restart_demo_worker`
 
-- tujuan: memulihkan worker demo non-critical
+- purpose: restore a non-critical demo worker
 - environment: `local`, `staging`
 - target: `demo-worker`
-- approval: wajib
-- executable: ya
+- approval: required
+- executable: yes
 
 ### `retry_demo_background_job`
 
-- tujuan: me-retry background job demo yang gagal
+- purpose: retry a failed demo background job
 - environment: `local`, `staging`
 - target: `demo-job-runner`
-- approval: wajib
-- executable: ya
+- approval: required
+- executable: yes
 
 ### `refresh_demo_cache`
 
-- tujuan: refresh cache non-critical
+- purpose: refresh a non-critical cache
 - environment: `local`, `staging`
 - target: `demo-cache`
-- approval: wajib
-- executable: ya
+- approval: required
+- executable: yes
 - max attempts: `2`
 
 ## Medium Risk
 
 ### `restart_demo_service`
 
-- tujuan: restart service demo penuh
+- purpose: restart the full demo service
 - environment: `staging`
 - target: `demo-api`
-- approval: wajib
-- executable: belum
+- approval: required
+- executable: not yet
 
 ### `scale_demo_replicas`
 
-- tujuan: scale replica count dalam batas aman
+- purpose: scale replica count within a safe range
 - environment: `staging`
 - target: `demo-api`
-- approval: wajib
-- executable: belum
+- approval: required
+- executable: not yet
 
 ### `pause_demo_queue_consumer`
 
-- tujuan: pause consumer untuk membatasi blast radius
+- purpose: pause the consumer to limit blast radius
 - environment: `local`, `staging`
 - target: `demo-queue-consumer`
-- approval: wajib
-- executable: ya
+- approval: required
+- executable: yes
 - rollback plan: `resume_demo_queue_consumer`
 - max attempts: `1`
 
 ### `resume_demo_queue_consumer`
 
-- tujuan: rollback aman untuk melanjutkan queue consumer yang sebelumnya dipause
+- purpose: safely resume a queue consumer that was previously paused
 - environment: `local`, `staging`
 - target: `demo-queue-consumer`
-- approval: tidak wajib untuk auto-rollback internal
-- executable: ya
+- approval: not required for internal auto-rollback
+- executable: yes
 
 ## High Risk
 
 ### `rollback_production_deployment`
 
-- tujuan: rollback deployment production
+- purpose: roll back a production deployment
 - environment: `production`
-- approval: wajib
-- executable: diblok pada fase awal
+- approval: required
+- executable: blocked
 
 ### `reroute_traffic`
 
-- tujuan: mengalihkan traffic
+- purpose: reroute live traffic
 - environment: `production`
-- approval: wajib
-- executable: diblok pada fase awal
+- approval: required
+- executable: blocked
 
 ### `disable_primary_feature_flag`
 
-- tujuan: menonaktifkan feature flag utama
+- purpose: disable a primary feature flag
 - environment: `production`
-- approval: wajib
-- executable: diblok pada fase awal
+- approval: required
+- executable: blocked

@@ -1,30 +1,30 @@
 # Policy Rules v1
 
-Dokumen ini menjelaskan rule baseline sebelum policy engine menjadi lebih kompleks.
+This document describes the baseline rules enforced by the current policy engine.
 
-## Rule Inti
+## Core Rules
 
-1. Action di luar catalog otomatis ditolak.
-2. Kill switch global memblok seluruh write path.
-3. Action hanya boleh dijalankan pada environment yang diizinkan.
-4. Action hanya boleh dijalankan pada target yang diizinkan.
-5. Semua low-risk action pada fase awal tetap approval-gated.
-6. Medium-risk action hanya boleh lanjut ke approval bila target punya dependency metadata dan rollback plan yang jelas.
-7. Medium-risk action tetap dibatasi environment, cooldown, dan max attempts.
-8. High-risk action diblok pada MVP dan foundation phase.
+1. Actions outside the catalog are automatically denied.
+2. The global kill switch blocks the full write path.
+3. An action may only run in allowed environments.
+4. An action may only run against allowed targets.
+5. Low-risk actions remain approval-gated.
+6. Medium-risk actions only proceed to approval when the target has dependency metadata and a clear rollback plan.
+7. Medium-risk actions remain constrained by environment, cooldown, and max attempts.
+8. High-risk actions are blocked.
 
-## Kenapa Rule Ini Dipilih
+## Why These Rules Exist
 
-- menjaga AI tetap constrained
-- membuat approval flow tetap berarti
-- mencegah execution liar sebelum verification siap
-- meminimalkan risiko pada demo dan local-first development
-- memastikan medium-risk action tidak aktif tanpa compensation path
-- memberi konteks dependency dasar sebelum operator mengeksekusi action yang lebih kuat
+- keep the AI layer constrained
+- preserve the meaning of the approval flow
+- prevent uncontrolled execution before verification is ready
+- minimize risk during demos and local-first development
+- ensure medium-risk actions never run without a compensation path
+- provide dependency context before operators execute stronger actions
 
-## Evolusi Yang Direncanakan
+## Planned Evolution
 
-- medium-risk action tertentu sudah bisa `approval_required` bila safety controls lengkap
-- beberapa low-risk action dapat menjadi auto-runnable setelah verification dan safety controls matang
-- rule sekarang sudah memakai dependency awareness, cooldown, dan max attempts dasar
-- evaluasi berikutnya fokus pada approval scope yang lebih granular dan dependency blast-radius yang lebih detail
+- some medium-risk actions may eventually move into a more nuanced approval policy when safety controls mature
+- selected low-risk actions may become auto-runnable once verification and safety controls are stronger
+- the current rules already include dependency awareness, cooldowns, and max attempts
+- future refinement should focus on granular approval scopes and more detailed dependency blast-radius modeling
