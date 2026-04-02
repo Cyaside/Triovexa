@@ -13,7 +13,7 @@ const (
 	defaultHTTPPort        = "8080"
 	defaultEnvironment     = "local"
 	defaultReadTimeout     = 5 * time.Second
-	defaultWriteTimeout    = 10 * time.Second
+	defaultWriteTimeout    = 30 * time.Second
 	defaultIdleTimeout     = 30 * time.Second
 	defaultShutdownTimeout = 10 * time.Second
 )
