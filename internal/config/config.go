@@ -61,11 +61,15 @@ func (c Config) HTTPAddress() string {
 }
 
 func (c Config) DatabaseTarget() string {
-	if strings.TrimSpace(c.DatabaseURL) == "" {
+	target := strings.TrimSpace(c.DatabaseURL)
+	if target == "" {
 		return "unset"
 	}
+	if strings.EqualFold(target, "memory") {
+		return "memory"
+	}
 
-	parsed, err := url.Parse(c.DatabaseURL)
+	parsed, err := url.Parse(target)
 	if err != nil {
 		return "configured"
 	}

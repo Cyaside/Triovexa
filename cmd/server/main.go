@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/Cyaside/Triovexa/internal/approval"
@@ -31,10 +32,17 @@ func main() {
 		Level: cfg.LogLevel,
 	}))
 
-	repository, err := storage.NewPostgresStore(cfg.DatabaseURL)
-	if err != nil {
-		logger.Error("failed to initialize storage", slog.String("error", err.Error()))
-		os.Exit(1)
+	var repository storage.Repository
+	var err error
+	if strings.EqualFold(strings.TrimSpace(cfg.DatabaseURL), "memory") {
+		logger.Warn("starting with in-memory repository; data will be lost on shutdown")
+		repository = storage.NewMemoryStore()
+	} else {
+		repository, err = storage.NewPostgresStore(cfg.DatabaseURL)
+		if err != nil {
+			logger.Error("failed to initialize storage", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
 	}
 	defer func() {
 		if err := repository.Close(); err != nil {
