@@ -19,3 +19,29 @@ func TestDatabaseTarget(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadConfigIncludesProviderDefaults(t *testing.T) {
+	t.Setenv("REASONING_MODE", "")
+	t.Setenv("OBSERVABILITY_MODE", "")
+	t.Setenv("MISTRAL_MODEL", "")
+	t.Setenv("GRAFANA_METRICS_DATASOURCE_UID", "")
+	t.Setenv("GRAFANA_LOGS_DATASOURCE_UID", "")
+
+	cfg := Load()
+
+	if cfg.ReasoningMode != "heuristic" {
+		t.Fatalf("ReasoningMode = %q, want %q", cfg.ReasoningMode, "heuristic")
+	}
+	if cfg.ObservabilityMode != "demo" {
+		t.Fatalf("ObservabilityMode = %q, want %q", cfg.ObservabilityMode, "demo")
+	}
+	if cfg.MistralModel != "mistral-small-latest" {
+		t.Fatalf("MistralModel = %q, want %q", cfg.MistralModel, "mistral-small-latest")
+	}
+	if cfg.GrafanaMetricsSourceUID != "grafanacloud-prom" {
+		t.Fatalf("GrafanaMetricsSourceUID = %q, want %q", cfg.GrafanaMetricsSourceUID, "grafanacloud-prom")
+	}
+	if cfg.GrafanaLogsSourceUID != "grafanacloud-logs" {
+		t.Fatalf("GrafanaLogsSourceUID = %q, want %q", cfg.GrafanaLogsSourceUID, "grafanacloud-logs")
+	}
+}

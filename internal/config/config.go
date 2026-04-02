@@ -25,6 +25,21 @@ type Config struct {
 	DatabaseURL             string
 	DocsRoot                string
 	DemoServiceBaseURL      string
+	ReasoningMode           string
+	ObservabilityMode       string
+	MistralAPIKey           string
+	MistralModel            string
+	GrafanaBaseURL          string
+	GrafanaAPIToken         string
+	GrafanaMetricsSourceUID string
+	GrafanaLogsSourceUID    string
+	GrafanaErrorRateQuery   string
+	GrafanaLatencyQuery     string
+	GrafanaQueueQuery       string
+	GrafanaReplicaQuery     string
+	GrafanaLogsQuery        string
+	GrafanaDeployLogsQuery  string
+	GrafanaQueryLookback    time.Duration
 	ActionExecutionTimeout  time.Duration
 	ActionExecutionCooldown time.Duration
 	ActionExecutionRetries  int
@@ -44,6 +59,21 @@ func Load() Config {
 		DatabaseURL:             getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disable"),
 		DocsRoot:                getEnv("DOCS_ROOT", "docs"),
 		DemoServiceBaseURL:      getEnv("DEMO_SERVICE_BASE_URL", "http://localhost:8090"),
+		ReasoningMode:           getEnv("REASONING_MODE", "heuristic"),
+		ObservabilityMode:       getEnv("OBSERVABILITY_MODE", "demo"),
+		MistralAPIKey:           getEnv("MISTRAL_API_KEY", ""),
+		MistralModel:            getEnv("MISTRAL_MODEL", "mistral-small-latest"),
+		GrafanaBaseURL:          getEnv("GRAFANA_BASE_URL", ""),
+		GrafanaAPIToken:         getEnv("GRAFANA_API_TOKEN", ""),
+		GrafanaMetricsSourceUID: getEnv("GRAFANA_METRICS_DATASOURCE_UID", "grafanacloud-prom"),
+		GrafanaLogsSourceUID:    getEnv("GRAFANA_LOGS_DATASOURCE_UID", "grafanacloud-logs"),
+		GrafanaErrorRateQuery:   getEnv("GRAFANA_ERROR_RATE_QUERY", ""),
+		GrafanaLatencyQuery:     getEnv("GRAFANA_LATENCY_QUERY", ""),
+		GrafanaQueueQuery:       getEnv("GRAFANA_QUEUE_QUERY", ""),
+		GrafanaReplicaQuery:     getEnv("GRAFANA_REPLICA_QUERY", ""),
+		GrafanaLogsQuery:        getEnv("GRAFANA_LOGS_QUERY", ""),
+		GrafanaDeployLogsQuery:  getEnv("GRAFANA_DEPLOY_LOGS_QUERY", ""),
+		GrafanaQueryLookback:    getDurationEnv("GRAFANA_QUERY_LOOKBACK", 15*time.Minute),
 		ActionExecutionTimeout:  getDurationEnv("ACTION_EXECUTION_TIMEOUT", 5*time.Second),
 		ActionExecutionCooldown: getDurationEnv("ACTION_EXECUTION_COOLDOWN", time.Minute),
 		ActionExecutionRetries:  getIntEnv("ACTION_EXECUTION_RETRIES", 1),
