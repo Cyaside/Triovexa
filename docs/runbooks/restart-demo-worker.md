@@ -1,25 +1,25 @@
 # Runbook: Restart Demo Worker
 
-## Tujuan
+## Goal
 
-Memulihkan worker demo non-critical yang berhenti memproses job atau mengalami error sementara.
+Restore a non-critical demo worker that stopped processing jobs or is experiencing transient failures.
 
-## Kapan Digunakan
+## When To Use It
 
-- queue backlog meningkat
-- worker tidak mengambil job baru
-- error worker meningkat tanpa indikasi kerusakan data
+- queue backlog increases
+- the worker stops taking new jobs
+- worker errors rise without signs of data corruption
 
-## Langkah Manual
+## Manual Steps
 
-1. Pastikan insiden hanya berdampak pada worker non-critical.
-2. Cek apakah ada deploy baru yang berhubungan dengan worker.
-3. Verifikasi log worker menunjukkan error sementara atau crash berulang.
-4. Restart worker target.
-5. Pantau backlog, error rate, dan health signal.
+1. Confirm that the incident only affects a non-critical worker.
+2. Check whether a recent deployment touched the worker.
+3. Verify that the worker logs show transient errors or repeated crashes.
+4. Restart the target worker.
+5. Watch backlog, error rate, and health signals.
 
-## Sinyal Keberhasilan
+## Success Signals
 
-- backlog mulai turun
-- worker kembali memproses job
-- error log mereda
+- backlog starts decreasing
+- the worker resumes job processing
+- error logs calm down

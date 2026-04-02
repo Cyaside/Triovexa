@@ -1,25 +1,25 @@
 # Pause Demo Queue Consumer
 
-## Kapan Dipakai
+## When To Use It
 
-Gunakan hanya ketika queue backlog terus meningkat dan worker downstream tidak mampu mengejar laju pesan baru.
+Use only when queue backlog keeps rising and downstream workers cannot keep up with the incoming message rate.
 
 ## Safety Notes
 
-- ini adalah action medium-risk
-- wajib approval operator
-- hanya dipakai pada target `demo-queue-consumer`
-- rollback yang disiapkan adalah `resume_demo_queue_consumer`
+- this is a medium-risk action
+- operator approval is required
+- it is only allowed on the `demo-queue-consumer` target
+- the paired rollback is `resume_demo_queue_consumer`
 
-## Langkah
+## Steps
 
-1. pastikan backlog benar-benar terus naik
-2. konfirmasi dependency map dan downstream yang dilindungi
-3. approve action hanya jika rollback plan siap
-4. jalankan verification segera setelah eksekusi
+1. Confirm that backlog is still climbing.
+2. Validate the dependency map and the downstream systems being protected.
+3. Approve the action only if the rollback plan is ready.
+4. Run verification immediately after execution.
 
-## Success Signal
+## Success Signals
 
-- blast radius berhenti meluas
-- backlog tidak naik secepat sebelumnya
-- operator punya waktu untuk stabilisasi
+- blast radius stops expanding
+- backlog grows more slowly than before
+- operators gain time to stabilize the system

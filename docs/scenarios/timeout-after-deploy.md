@@ -1,8 +1,8 @@
 # Scenario: Timeout After Deploy
 
-## Tujuan
+## Goal
 
-Menunjukkan alur triage sampai verification sukses untuk action low-risk `refresh_demo_cache`.
+Demonstrate a full triage-to-verification success path for the low-risk action `refresh_demo_cache`.
 
 ## Trigger
 
@@ -10,31 +10,31 @@ Menunjukkan alur triage sampai verification sukses untuk action low-risk `refres
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario timeout-after-deploy
 ```
 
-## Evidence Utama
+## Expected Evidence
 
-- mode demo berubah ke `timeout_after_deploy`
-- latency dan error rate meningkat
-- deploy context baru muncul
-- runbook dan postmortem timeout after deploy ikut diretrieval
+- the demo mode switches to `timeout_after_deploy`
+- latency and error rate increase
+- fresh deployment context appears
+- the matching runbook and postmortem are retrieved
 
-## Candidate Action yang Diharapkan
+## Expected Candidate Action
 
 - `refresh_demo_cache`
 
-## Policy Outcome yang Diharapkan
+## Expected Policy Outcome
 
 - `approval_required`
 
-## Verification Outcome yang Diharapkan
+## Expected Verification Outcome
 
-- action dieksekusi
-- verification status `success`
-- incident pindah ke `resolved`
+- the action is executed
+- verification status becomes `success`
+- the incident moves to `resolved`
 
-## Yang Perlu Ditunjukkan Saat Demo
+## What To Show During The Demo
 
-- evidence deploy dan metric
-- rationale kenapa cache refresh dipilih
+- deployment and metric evidence
+- the rationale for choosing cache refresh
 - execution record
 - verification result
-- counter internal di `/metrics`
+- internal counters in `/metrics`

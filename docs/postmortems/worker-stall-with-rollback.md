@@ -1,15 +1,15 @@
 # Worker Stall With Rollback
 
-## Ringkasan
+## Summary
 
-Insiden backlog tinggi pada consumer checkout pernah memburuk saat consumer dipause terlalu lama. Setelah itu rollback cepat dengan resume consumer terbukti menjadi guardrail yang aman.
+A high-backlog incident on the checkout consumer once became worse because the consumer stayed paused for too long. A fast rollback that resumed the consumer proved to be a safe guardrail.
 
-## Pelajaran Utama
+## Key Lessons
 
-- medium-risk action tetap perlu approval operator
-- rollback plan harus eksplisit sebelum action dijalankan
-- verification harus cepat dan evidence-based
+- medium-risk actions still require operator approval
+- rollback plans must be explicit before execution
+- verification must be fast and evidence-based
 
-## Relevansi Untuk Triovexa
+## Why This Matters In Triovexa
 
-Dokumen ini dipakai untuk memperkuat alasan kenapa `pause_demo_queue_consumer` tidak boleh berjalan tanpa rollback plan dan kenapa automatic rollback perlu diprioritaskan bila outcome awal buruk.
+This document reinforces why `pause_demo_queue_consumer` must never run without a rollback plan and why automatic rollback should be prioritized when the first outcome is poor.

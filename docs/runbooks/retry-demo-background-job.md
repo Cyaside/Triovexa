@@ -1,25 +1,25 @@
 # Runbook: Retry Demo Background Job
 
-## Tujuan
+## Goal
 
-Menjalankan ulang background job demo yang gagal karena error sementara.
+Retry a demo background job that failed because of a transient error.
 
-## Kapan Digunakan
+## When To Use It
 
-- job gagal karena timeout sesaat
-- dependency eksternal sempat tidak tersedia
-- retry aman dan tidak menyebabkan duplikasi berbahaya
+- the job failed due to a temporary timeout
+- an external dependency was briefly unavailable
+- retrying is safe and will not cause harmful duplication
 
-## Langkah Manual
+## Manual Steps
 
-1. Identifikasi `job_id` yang gagal.
-2. Pastikan job termasuk kategori aman untuk di-retry.
-3. Cek apakah dependency yang sebelumnya gagal sudah pulih.
-4. Jalankan retry untuk job tersebut.
-5. Verifikasi job selesai dan tidak menambah error baru.
+1. Identify the failed `job_id`.
+2. Confirm that the job belongs to a safe-to-retry category.
+3. Check whether the dependency that failed has recovered.
+4. Retry the job.
+5. Verify that the job completes without introducing new errors.
 
-## Sinyal Keberhasilan
+## Success Signals
 
-- job selesai tanpa error
-- antrean job kembali normal
-- tidak ada lonjakan error lanjutan
+- the job completes successfully
+- the job queue returns to normal
+- no follow-up error spike appears

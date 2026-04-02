@@ -1,8 +1,8 @@
 # Scenario: Worker Stall With Rollback
 
-## Tujuan
+## Goal
 
-Menunjukkan capability paling kuat sampai Phase 6: medium-risk approval-gated action dengan automatic rollback saat verification gagal.
+Demonstrate the strongest closed-loop path in the demo: a medium-risk, approval-gated action followed by automatic rollback after failed verification.
 
 ## Trigger
 
@@ -10,34 +10,34 @@ Menunjukkan capability paling kuat sampai Phase 6: medium-risk approval-gated ac
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario worker-stall
 ```
 
-## Evidence Utama
+## Expected Evidence
 
-- mode demo berubah ke `worker_stall`
-- queue backlog tinggi
-- worker tidak sehat
-- dokumen backlog/worker stall ikut diretrieval
+- the demo mode switches to `worker_stall`
+- queue backlog rises
+- the worker becomes unhealthy
+- the worker-stall runbook and postmortem are retrieved
 
-## Candidate Action yang Diharapkan
+## Expected Candidate Actions
 
 - `restart_demo_worker`
 - `retry_demo_background_job`
 - `pause_demo_queue_consumer`
 
-## Policy Outcome yang Diharapkan
+## Expected Policy Outcome
 
-- action medium-risk `pause_demo_queue_consumer` tetap `approval_required`
-- policy menampilkan dependency awareness dan rollback plan
+- the medium-risk action `pause_demo_queue_consumer` remains `approval_required`
+- the policy output highlights dependency awareness and the rollback plan
 
-## Verification Outcome yang Diharapkan
+## Expected Verification Outcome
 
-- action medium-risk dijalankan
-- verification status `failed`
-- rollback `resume_demo_queue_consumer` dipicu otomatis
-- incident pindah ke `rolled_back`
+- the medium-risk action is executed
+- verification status becomes `failed`
+- rollback `resume_demo_queue_consumer` is triggered automatically
+- the incident moves to `rolled_back`
 
-## Yang Perlu Ditunjukkan Saat Demo
+## What To Show During The Demo
 
-- risk level medium-risk
+- the medium-risk classification
 - approval flow
 - rollback records
-- verification evidence yang menyatakan escalation tidak lagi direkomendasikan setelah rollback sukses
+- verification evidence showing that escalation is no longer recommended after rollback succeeds

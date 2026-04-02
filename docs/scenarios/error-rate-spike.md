@@ -1,8 +1,8 @@
 # Scenario: Error Rate Spike
 
-## Tujuan
+## Goal
 
-Menunjukkan skenario ringan yang tetap menghasilkan triage dan candidate action terkontrol.
+Demonstrate a lighter scenario that still produces evidence-based triage and constrained candidate actions.
 
 ## Trigger
 
@@ -10,26 +10,26 @@ Menunjukkan skenario ringan yang tetap menghasilkan triage dan candidate action 
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-scenario.ps1 -Scenario error-rate-spike
 ```
 
-## Evidence Utama
+## Expected Evidence
 
-- mode demo berubah ke `error_rate_spike`
-- error rate dan latency naik
-- tidak ada rollback workflow yang dipakai
+- the demo mode switches to `error_rate_spike`
+- error rate and latency increase
+- no rollback workflow is needed
 
-## Candidate Action yang Diharapkan
+## Expected Candidate Action
 
-- `refresh_demo_cache` bila latency cukup tinggi
+- `refresh_demo_cache` when latency is high enough
 
-## Policy Outcome yang Diharapkan
+## Expected Policy Outcome
 
 - `approval_required`
 
-## Verification Outcome yang Diharapkan
+## Expected Verification Outcome
 
-- tergantung action yang dijalankan, tetapi flow approval, execution, dan audit trail tetap bisa ditunjukkan
+- depends on the chosen action, but approval, execution, and audit trail should still be visible
 
-## Yang Perlu Ditunjukkan Saat Demo
+## What To Show During The Demo
 
-- triage tetap evidence-based walau skenario lebih sederhana
-- policy engine tetap membatasi action
-- audit trail tetap lengkap
+- triage stays evidence-based even in the simpler scenario
+- the policy engine still constrains actions
+- the audit trail remains complete

@@ -1,23 +1,23 @@
-# Postmortem: Error Rate Spike Setelah Release
+# Postmortem: Error Rate Spike After Release
 
-## Ringkasan
+## Summary
 
-Rilis service demo menyebabkan error rate meningkat pada worker dan API secara bersamaan. Incident cepat memburuk karena operator butuh waktu untuk mengumpulkan logs, metrics, dan deploy context secara manual.
+The demo service release increased error rate across both workers and the API at the same time. The incident worsened quickly because operators needed time to gather logs, metrics, and deployment context manually.
 
-## Dugaan Penyebab
+## Suspected Causes
 
-- perubahan rilis belum kompatibel dengan job payload lama
-- worker crash loop setelah menerima payload tertentu
-- cache state tidak sinkron setelah release
+- the release change was not compatible with older job payloads
+- workers entered a crash loop after receiving a specific payload
+- cache state became inconsistent after the release
 
-## Evidence Yang Biasanya Terlihat
+## Typical Evidence
 
-- spike error rate lintas beberapa komponen
-- worker restart berulang
-- antrean job menumpuk
+- an error-rate spike across multiple components
+- repeated worker restarts
+- a growing job backlog
 
-## Pelajaran
+## Lessons
 
-- runbook restart worker dan retry job sangat penting sebagai initial response
-- evidence, inference, dan action harus dipisahkan dengan jelas
-- approval-gated remediation membantu mengurangi tindakan panik
+- restart-worker and retry-job runbooks are valuable as an initial response
+- evidence, inference, and action should stay clearly separated
+- approval-gated remediation helps reduce panic actions

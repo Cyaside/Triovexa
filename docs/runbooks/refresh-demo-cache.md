@@ -1,24 +1,24 @@
 # Runbook: Refresh Demo Cache
 
-## Tujuan
+## Goal
 
-Memulihkan cache non-critical yang stale atau korup ringan tanpa memengaruhi jalur kritikal.
+Restore a stale or mildly corrupted non-critical cache without affecting the critical path.
 
-## Kapan Digunakan
+## When To Use It
 
-- response masih menggunakan data usang
-- cache miss atau cache corruption ringan terdeteksi
-- refresh aman dilakukan pada service demo
+- responses still serve stale data
+- a cache miss spike or light cache corruption is detected
+- the refresh is safe for the demo service
 
-## Langkah Manual
+## Manual Steps
 
-1. Verifikasi masalah memang berasal dari layer cache.
-2. Identifikasi cache key spesifik jika tersedia.
-3. Jalankan refresh cache untuk target yang aman.
-4. Pantau latency dan error rate setelah refresh.
+1. Verify that the issue originates from the cache layer.
+2. Identify a specific cache key if available.
+3. Run a cache refresh against the safe target.
+4. Watch latency and error rate after the refresh.
 
-## Sinyal Keberhasilan
+## Success Signals
 
-- data baru terambil dengan benar
-- latency tidak memburuk
-- error tidak meningkat
+- fresh data is served correctly
+- latency does not worsen
+- errors do not increase

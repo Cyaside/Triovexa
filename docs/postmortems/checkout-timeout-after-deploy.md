@@ -1,23 +1,23 @@
-# Postmortem: Checkout Timeout Setelah Deploy
+# Postmortem: Checkout Timeout After Deploy
 
-## Ringkasan
+## Summary
 
-Setelah deploy versi baru `checkout-service`, error timeout meningkat tajam dalam 7 menit pertama. Alert berasal dari lonjakan error rate dan peningkatan latency pada endpoint checkout utama.
+After deploying a new version of `checkout-service`, timeout errors spiked during the first seven minutes. The alert was triggered by a jump in error rate and increased latency on the main checkout endpoint.
 
-## Dugaan Penyebab
+## Suspected Causes
 
-- koneksi ke dependency pembayaran menjadi lebih lambat
-- konfigurasi timeout internal terlalu agresif
-- perubahan deploy meningkatkan jumlah retry yang tidak terkendali
+- the payment dependency became slower to respond
+- internal timeout settings were too aggressive
+- the deployment change increased uncontrolled retry volume
 
-## Evidence Yang Biasanya Terlihat
+## Typical Evidence
 
-- spike error rate segera setelah deploy
-- log timeout pada integration layer
-- latency P95 dan P99 meningkat
+- an error-rate spike immediately after deployment
+- timeout logs in the integration layer
+- elevated P95 and P99 latency
 
-## Pelajaran
+## Lessons
 
-- deploy context harus selalu ikut diambil saat triage
-- rollback atau feature flag rollback perlu tersedia untuk kasus produksi
-- action awal harus dibatasi dan melalui approval
+- deployment context should always be included during triage
+- rollback or feature-flag rollback should be available in production
+- early remediation actions should remain constrained and approval-gated

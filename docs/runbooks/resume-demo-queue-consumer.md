@@ -1,18 +1,18 @@
 # Resume Demo Queue Consumer
 
-## Kapan Dipakai
+## When To Use It
 
-Dipakai sebagai rollback untuk `pause_demo_queue_consumer` setelah verification menyatakan hasil pause memperburuk kondisi atau tidak membantu.
+Use this as the rollback for `pause_demo_queue_consumer` after verification shows that the pause made things worse or provided no benefit.
 
-## Langkah
+## Steps
 
-1. resume consumer
-2. cek health worker
-3. bandingkan backlog sebelum dan sesudah resume
-4. pastikan incident status bergerak ke `rolled_back` bila rollback sukses
+1. Resume the consumer.
+2. Check worker health.
+3. Compare backlog before and after the resume.
+4. Confirm that the incident moves to `rolled_back` when rollback succeeds.
 
-## Success Signal
+## Success Signals
 
-- consumer tidak lagi paused
-- error rate, latency, atau backlog kembali mendekati baseline
-- operator bisa lanjut ke investigasi manual dengan sistem yang lebih stabil
+- the consumer is no longer paused
+- error rate, latency, or backlog returns closer to baseline
+- operators can continue manual investigation from a more stable system
