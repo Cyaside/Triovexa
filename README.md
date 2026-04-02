@@ -157,6 +157,10 @@ Required when real integrations are enabled:
 - authentication for approval and execution endpoints is not implemented yet
 - distributed tracing is not enabled yet; current observability covers structured logging and internal metrics
 
+## License
+
+This project is open sourced under the MIT License. See [LICENSE](LICENSE) for details.
+
 ## Additional Documentation
 
 - [docs/architecture/high-level.md](docs/architecture/high-level.md)
