@@ -117,6 +117,9 @@ func NewServerWithTelemetry(
 				"GET /ui/assets/workbench.css",
 				"GET /ui/incidents",
 				"GET /ui/incidents/{id}",
+				"GET /ui/setup/observability",
+				"POST /ui/setup/observability/test-connection",
+				"POST /ui/setup/observability/test-query",
 			},
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		}
@@ -670,6 +673,69 @@ func NewServerWithTelemetry(
 		http.Redirect(w, r, appendUIMessage(target, "notice", message), http.StatusSeeOther)
 	})
 
+	defaultSetupForm := defaultObservabilitySetupForm(cfg)
+	mux.HandleFunc("/ui/setup/observability", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		renderObservabilitySetupPage(w, observabilitySetupPageData{
+			Form:          defaultSetupForm,
+			Runtime:       buildRuntimeViewData(r.Context(), runtimeControl),
+			LocalModeNote: buildLocalModeNote(),
+			Readiness:     buildObservabilityReadiness(defaultSetupForm, observabilityConnectionResult{}, nil),
+		})
+	})
+
+	mux.HandleFunc("/ui/setup/observability/test-connection", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		form, err := parseObservabilitySetupForm(r, defaultSetupForm)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		connection, datasources := runObservabilityConnectionTest(r.Context(), form)
+		renderObservabilitySetupPage(w, observabilitySetupPageData{
+			Form:          form,
+			Runtime:       buildRuntimeViewData(r.Context(), runtimeControl),
+			LocalModeNote: buildLocalModeNote(),
+			Connection:    connection,
+			Datasources:   datasources,
+			Readiness:     buildObservabilityReadiness(form, connection, nil),
+		})
+	})
+
+	mux.HandleFunc("/ui/setup/observability/test-query", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		form, err := parseObservabilitySetupForm(r, defaultSetupForm)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		connection, datasources, queryResults, evidence := runObservabilityQueryPreview(r.Context(), form)
+		renderObservabilitySetupPage(w, observabilitySetupPageData{
+			Form:          form,
+			Runtime:       buildRuntimeViewData(r.Context(), runtimeControl),
+			LocalModeNote: buildLocalModeNote(),
+			Connection:    connection,
+			Datasources:   datasources,
+			QueryResults:  queryResults,
+			Evidence:      evidence,
+			Readiness:     buildObservabilityReadiness(form, connection, queryResults),
+		})
+	})
+
 	mux.HandleFunc("/ui/incidents/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -984,12 +1050,18 @@ func routeLabel(path string) string {
 		return "/admin/runtime-modes"
 	case path == "/ui/incidents":
 		return "/ui/incidents"
+	case path == "/ui/setup/observability":
+		return "/ui/setup/observability"
 	case path == "/ui/assets/workbench.css":
 		return "/ui/assets/workbench.css"
 	case path == "/ui/admin/kill-switch":
 		return "/ui/admin/kill-switch"
 	case path == "/ui/admin/runtime-modes":
 		return "/ui/admin/runtime-modes"
+	case path == "/ui/setup/observability/test-connection":
+		return "/ui/setup/observability/test-connection"
+	case path == "/ui/setup/observability/test-query":
+		return "/ui/setup/observability/test-query"
 	case strings.HasPrefix(path, "/ui/demo/scenarios/"):
 		return "/ui/demo/scenarios/{scenario}"
 	case strings.HasPrefix(path, "/ui/incidents/"):

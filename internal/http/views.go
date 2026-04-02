@@ -200,6 +200,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
         <a href="/debug/tools">Diagnostics</a>
         <a href="/debug/policies">Policy Catalog</a>
         <a href="/metrics">Metrics</a>
+        <a href="/ui/setup/observability">Observability Setup</a>
       </div>
     </div>
     <div class="hero-card">
@@ -277,6 +278,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
       {{if .Runtime.DatasourceError}}
       <p class="muted">Datasource discovery error: {{.Runtime.DatasourceError}}</p>
       {{end}}
+      <p><a href="/ui/setup/observability">Open observability setup page</a></p>
     </article>
   </section>
 

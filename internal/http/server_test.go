@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1158,6 +1159,145 @@ func TestServerIncidentWorkbenchShowsRuntimeControls(t *testing.T) {
 	}
 }
 
+func TestServerObservabilitySetupPageShowsLocalFirstGuidance(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	runtimeControls := &RuntimeControls{
+		Modes: mode.NewManager("heuristic", "demo"),
+		Providers: ProviderStatus{
+			MistralConfigured: false,
+			GrafanaConfigured: false,
+		},
+	}
+	server := NewServerWithTelemetry(config.Config{
+		ServiceName:             "triovexa",
+		Environment:             "test",
+		HTTPPort:                "0",
+		DatabaseURL:             "memory",
+		GrafanaMetricsSourceUID: "grafanacloud-prom",
+		GrafanaLogsSourceUID:    "grafanacloud-logs",
+		ReadTimeout:             5 * time.Second,
+		WriteTimeout:            5 * time.Second,
+		IdleTimeout:             5 * time.Second,
+		ShutdownTimeout:         5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, nil, nil, nil, telemetry.NewRecorder(), runtimeControls)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	response, err := http.Get(api.URL + "/ui/setup/observability")
+	if err != nil {
+		t.Fatalf("get observability setup page: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("setup page status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read setup page body: %v", err)
+	}
+
+	text := string(body)
+	for _, expected := range []string{
+		"Grafana Setup Preview",
+		"100% local, single-user workflow",
+		"Run Query Preview",
+		"Test Connection",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("setup page body missing %q", expected)
+		}
+	}
+}
+
+func TestServerObservabilitySetupQueryPreviewRendersDatasourceAndEvidence(t *testing.T) {
+	t.Parallel()
+
+	grafanaServer := newFakeGrafanaSetupServer(t)
+	defer grafanaServer.Close()
+
+	repository := storage.NewMemoryStore()
+	runtimeControls := &RuntimeControls{
+		Modes: mode.NewManager("heuristic", "demo"),
+		Providers: ProviderStatus{
+			MistralConfigured: false,
+			GrafanaConfigured: false,
+		},
+	}
+	server := NewServerWithTelemetry(config.Config{
+		ServiceName:     "triovexa",
+		Environment:     "test",
+		HTTPPort:        "0",
+		DatabaseURL:     "memory",
+		ReadTimeout:     5 * time.Second,
+		WriteTimeout:    5 * time.Second,
+		IdleTimeout:     5 * time.Second,
+		ShutdownTimeout: 5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, nil, nil, nil, telemetry.NewRecorder(), runtimeControls)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	form := strings.NewReader(strings.Join([]string{
+		"grafana_base_url=" + urlQueryEscape(grafanaServer.URL),
+		"grafana_api_token=test-token",
+		"grafana_metrics_datasource_uid=test-prom",
+		"grafana_logs_datasource_uid=test-logs",
+		"grafana_error_rate_query=" + urlQueryEscape("vector(0.12)"),
+		"grafana_latency_query=" + urlQueryEscape("vector(220)"),
+		"grafana_queue_query=" + urlQueryEscape("vector(4)"),
+		"grafana_replica_query=" + urlQueryEscape("vector(2)"),
+		"grafana_logs_query=" + urlQueryEscape("{service=\"{{service}}\"}"),
+		"grafana_deploy_logs_query=" + urlQueryEscape("{service=\"{{service}}\"} |= \"deploy\""),
+		"sample_service=checkout-service",
+		"sample_environment=staging",
+		"sample_severity=critical",
+		"sample_title=" + urlQueryEscape("checkout timeout after deploy"),
+	}, "&"))
+
+	request, err := http.NewRequest(http.MethodPost, api.URL+"/ui/setup/observability/test-query", form)
+	if err != nil {
+		t.Fatalf("new query preview request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post query preview: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("query preview status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read query preview body: %v", err)
+	}
+
+	text := string(body)
+	for _, expected := range []string{
+		"Connected successfully. 2 datasource(s) discovered.",
+		"Primary Metrics",
+		"Primary Logs",
+		"Error Rate",
+		"0.1200",
+		"Deploy Logs",
+		"checkout-service deployment v1.2.3",
+		"grafana-prometheus",
+		"grafana-loki",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("query preview body missing %q", expected)
+		}
+	}
+}
+
 func mustWriteFile(t *testing.T, path string, content string) {
 	t.Helper()
 
@@ -1174,4 +1314,63 @@ type fakeHTTPAdapter struct{}
 
 func (fakeHTTPAdapter) Execute(_ context.Context, _ domain.CandidateAction, _ execution.AdapterRequest) (execution.AdapterResult, error) {
 	return execution.AdapterResult{ExecutorType: "fake-http-adapter"}, nil
+}
+
+func newFakeGrafanaSetupServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		switch {
+		case r.URL.Path == "/api/datasources":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"uid": "test-prom", "name": "Primary Metrics", "type": "prometheus", "isDefault": true, "readOnly": false},
+				{"uid": "test-logs", "name": "Primary Logs", "type": "loki", "isDefault": false, "readOnly": false},
+			})
+		case strings.Contains(r.URL.Path, "/api/datasources/proxy/uid/test-prom/api/v1/query"):
+			value := "0"
+			switch r.URL.Query().Get("query") {
+			case "vector(0.12)":
+				value = "0.12"
+			case "vector(220)":
+				value = "220"
+			case "vector(4)":
+				value = "4"
+			case "vector(2)":
+				value = "2"
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "success",
+				"data": map[string]any{
+					"resultType": "vector",
+					"result": []map[string]any{
+						{"value": []any{float64(time.Now().Unix()), value}},
+					},
+				},
+			})
+		case strings.Contains(r.URL.Path, "/api/datasources/proxy/uid/test-logs/loki/api/v1/query_range"):
+			lines := [][]string{{"1712088000000000000", "checkout-service timeout log line"}}
+			if strings.Contains(r.URL.Query().Get("query"), "deploy") {
+				lines = [][]string{{"1712088000000000000", "checkout-service deployment v1.2.3 completed"}}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "success",
+				"data": map[string]any{
+					"result": []map[string]any{
+						{"values": lines},
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func urlQueryEscape(value string) string {
+	return url.QueryEscape(value)
 }
