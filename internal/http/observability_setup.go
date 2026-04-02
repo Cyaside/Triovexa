@@ -51,15 +51,24 @@ type observabilityReadinessItem struct {
 	Detail string
 }
 
+type observabilityProfileState struct {
+	Path   string
+	Loaded bool
+	Error  string
+}
+
 type observabilitySetupPageData struct {
 	Form          observabilitySetupForm
 	Runtime       runtimeViewData
 	LocalModeNote string
+	Profile       observabilityProfileState
 	Connection    observabilityConnectionResult
 	Datasources   []observability.DatasourceSummary
 	QueryResults  []observabilityQueryResult
 	Evidence      []domain.EvidenceItem
 	Readiness     []observabilityReadinessItem
+	Notice        string
+	Error         string
 }
 
 func defaultObservabilitySetupForm(cfg config.Config) observabilitySetupForm {
@@ -78,6 +87,84 @@ func defaultObservabilitySetupForm(cfg config.Config) observabilitySetupForm {
 		SampleEnvironment: "staging",
 		SampleSeverity:    "critical",
 		SampleTitle:       "checkout timeout after deploy",
+	}
+}
+
+func defaultObservabilityProfileState(cfg config.Config) observabilityProfileState {
+	return observabilityProfileState{
+		Path:   cfg.LocalObservabilityProfilePath,
+		Loaded: cfg.LocalObservabilityProfileLoaded,
+		Error:  cfg.LocalObservabilityProfileError,
+	}
+}
+
+func loadObservabilitySetupDefaults(cfg config.Config) (observabilitySetupForm, observabilityProfileState) {
+	form := defaultObservabilitySetupForm(cfg)
+	state := defaultObservabilityProfileState(cfg)
+
+	profile, loaded, err := config.LoadObservabilityProfile(state.Path)
+	if err != nil {
+		state.Loaded = false
+		state.Error = err.Error()
+		return form, state
+	}
+
+	state.Loaded = loaded
+	state.Error = ""
+	if !loaded {
+		return form, state
+	}
+
+	return applyObservabilityProfile(form, profile), state
+}
+
+func applyObservabilityProfile(form observabilitySetupForm, profile config.ObservabilityProfile) observabilitySetupForm {
+	if profile.BaseURL != "" {
+		form.BaseURL = profile.BaseURL
+	}
+	if profile.APIToken != "" {
+		form.APIToken = profile.APIToken
+	}
+	if profile.MetricsSourceUID != "" {
+		form.MetricsSourceUID = profile.MetricsSourceUID
+	}
+	if profile.LogsSourceUID != "" {
+		form.LogsSourceUID = profile.LogsSourceUID
+	}
+	if profile.ErrorRateQuery != "" {
+		form.ErrorRateQuery = profile.ErrorRateQuery
+	}
+	if profile.LatencyQuery != "" {
+		form.LatencyQuery = profile.LatencyQuery
+	}
+	if profile.QueueQuery != "" {
+		form.QueueQuery = profile.QueueQuery
+	}
+	if profile.ReplicaQuery != "" {
+		form.ReplicaQuery = profile.ReplicaQuery
+	}
+	if profile.LogsQuery != "" {
+		form.LogsQuery = profile.LogsQuery
+	}
+	if profile.DeployLogsQuery != "" {
+		form.DeployLogsQuery = profile.DeployLogsQuery
+	}
+
+	return form
+}
+
+func profileFromObservabilitySetupForm(form observabilitySetupForm) config.ObservabilityProfile {
+	return config.ObservabilityProfile{
+		BaseURL:          form.BaseURL,
+		APIToken:         form.APIToken,
+		MetricsSourceUID: form.MetricsSourceUID,
+		LogsSourceUID:    form.LogsSourceUID,
+		ErrorRateQuery:   form.ErrorRateQuery,
+		LatencyQuery:     form.LatencyQuery,
+		QueueQuery:       form.QueueQuery,
+		ReplicaQuery:     form.ReplicaQuery,
+		LogsQuery:        form.LogsQuery,
+		DeployLogsQuery:  form.DeployLogsQuery,
 	}
 }
 
@@ -144,7 +231,7 @@ func buildSetupIncident(form observabilitySetupForm) domain.Incident {
 }
 
 func buildLocalModeNote() string {
-	return "This page is designed for a 100% local, single-user workflow. It only tests ad-hoc Grafana inputs in memory and does not persist shared configuration."
+	return "This page is designed for a 100% local, single-user workflow. Query tests run in memory, and any saved observability profile stays on this machine only. Saved values become the next startup default unless environment variables override them."
 }
 
 func runObservabilityConnectionTest(ctx context.Context, form observabilitySetupForm) (observabilityConnectionResult, []observability.DatasourceSummary) {
@@ -314,21 +401,30 @@ var observabilitySetupTemplate = template.Must(template.New("observability-setup
       <article class="hero-card">
         <p class="eyebrow">Observability Setup</p>
         <h1>Grafana Setup Preview</h1>
-        <p class="muted">Lightweight setup assistant for a local single-user workflow. Test Grafana connection, inspect datasources, try query templates, and preview normalized evidence without changing persisted app state.</p>
+        <p class="muted">Lightweight setup assistant for a local single-user workflow. Test Grafana connection, inspect datasources, try query templates, and preview normalized evidence without adding frontend runtime or shared infrastructure.</p>
         <p><span class="chip">Observability {{.Runtime.ObservabilityMode}}</span> <span class="chip">Reasoning {{.Runtime.ReasoningMode}}</span></p>
       </article>
       <article class="hero-card">
         <p class="eyebrow">Local-First Note</p>
         <h2 class="tight">Ephemeral by Design</h2>
         <p class="muted">{{.LocalModeNote}}</p>
+        <p class="muted"><strong>Local profile path:</strong> {{if .Profile.Path}}<code>{{.Profile.Path}}</code>{{else}}not configured{{end}}</p>
+        {{if .Profile.Loaded}}<p class="chip">Saved local profile found</p>{{else}}<p class="chip">No saved local profile yet</p>{{end}}
+        {{if .Profile.Error}}<p class="banner error">{{.Profile.Error}}</p>{{end}}
         {{if .Connection.Summary}}<p class="chip">{{.Connection.Summary}}</p>{{end}}
         {{if .Connection.Error}}<p class="chip">{{.Connection.Error}}</p>{{end}}
       </article>
     </section>
+    {{if .Notice}}
+    <p class="banner success">{{.Notice}}</p>
+    {{end}}
+    {{if .Error}}
+    <p class="banner error">{{.Error}}</p>
+    {{end}}
 
     <section class="panel">
       <h2>Connection, Datasources, And Query Templates</h2>
-      <p class="muted">Use this single form to test connection or run a full evidence preview. Nothing here writes shared config; values are only used for the current request.</p>
+      <p class="muted">Use this single form to test connection, save a local profile, or run a full evidence preview. Save only writes to a machine-local profile file and does not touch the database.</p>
       <form method="post" action="/ui/setup/observability/test-query" class="setup-form">
         <div class="setup-grid">
           <label>
@@ -397,9 +493,14 @@ var observabilitySetupTemplate = template.Must(template.New("observability-setup
 
         <div class="hero-links">
           <button class="secondary-button" type="submit" formaction="/ui/setup/observability/test-connection">Test Connection</button>
+          <button class="secondary-button" type="submit" formaction="/ui/setup/observability/save-profile">Save Local Profile</button>
           <button class="primary-button" type="submit">Run Query Preview</button>
         </div>
       </form>
+      <form method="post" action="/ui/setup/observability/clear-profile" class="control-form">
+        <button class="secondary-button" type="submit">Clear Saved Profile</button>
+      </form>
+      <p class="muted">Saving a profile helps future local runs start with the same Grafana defaults. Runtime provider wiring in the current server process still follows the values loaded at startup.</p>
     </section>
 
     <section class="workbench-grid">

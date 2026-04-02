@@ -1207,10 +1207,137 @@ func TestServerObservabilitySetupPageShowsLocalFirstGuidance(t *testing.T) {
 		"100% local, single-user workflow",
 		"Run Query Preview",
 		"Test Connection",
+		"Save Local Profile",
+		"No saved local profile yet",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("setup page body missing %q", expected)
 		}
+	}
+}
+
+func TestServerObservabilitySetupCanSaveAndClearLocalProfile(t *testing.T) {
+	t.Parallel()
+
+	profilePath := filepath.Join(t.TempDir(), "observability-profile.json")
+	repository := storage.NewMemoryStore()
+	runtimeControls := &RuntimeControls{
+		Modes: mode.NewManager("heuristic", "demo"),
+		Providers: ProviderStatus{
+			MistralConfigured: false,
+			GrafanaConfigured: false,
+		},
+	}
+	server := NewServerWithTelemetry(config.Config{
+		ServiceName:                   "triovexa",
+		Environment:                   "test",
+		HTTPPort:                      "0",
+		DatabaseURL:                   "memory",
+		LocalObservabilityProfilePath: profilePath,
+		GrafanaMetricsSourceUID:       "grafanacloud-prom",
+		GrafanaLogsSourceUID:          "grafanacloud-logs",
+		ReadTimeout:                   5 * time.Second,
+		WriteTimeout:                  5 * time.Second,
+		IdleTimeout:                   5 * time.Second,
+		ShutdownTimeout:               5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, nil, nil, nil, telemetry.NewRecorder(), runtimeControls)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	client := &http.Client{
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	saveForm := strings.NewReader(strings.Join([]string{
+		"grafana_base_url=" + urlQueryEscape("https://grafana.example.com"),
+		"grafana_api_token=" + urlQueryEscape("local-token"),
+		"grafana_metrics_datasource_uid=metrics-uid",
+		"grafana_logs_datasource_uid=logs-uid",
+		"grafana_error_rate_query=" + urlQueryEscape("vector(0.12)"),
+		"sample_service=checkout-service",
+	}, "&"))
+
+	saveRequest, err := http.NewRequest(http.MethodPost, api.URL+"/ui/setup/observability/save-profile", saveForm)
+	if err != nil {
+		t.Fatalf("new save profile request: %v", err)
+	}
+	saveRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	saveResponse, err := client.Do(saveRequest)
+	if err != nil {
+		t.Fatalf("post save profile: %v", err)
+	}
+	defer saveResponse.Body.Close()
+
+	if saveResponse.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save profile status = %d, want %d", saveResponse.StatusCode, http.StatusSeeOther)
+	}
+
+	savedProfile, ok, err := config.LoadObservabilityProfile(profilePath)
+	if err != nil {
+		t.Fatalf("LoadObservabilityProfile() error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected local observability profile to be saved")
+	}
+	if savedProfile.BaseURL != "https://grafana.example.com" {
+		t.Fatalf("saved profile BaseURL = %q, want %q", savedProfile.BaseURL, "https://grafana.example.com")
+	}
+	if savedProfile.APIToken != "local-token" {
+		t.Fatalf("saved profile APIToken = %q, want %q", savedProfile.APIToken, "local-token")
+	}
+
+	location := saveResponse.Header.Get("Location")
+	if !strings.Contains(location, "notice=") {
+		t.Fatalf("save redirect missing notice, got %q", location)
+	}
+
+	followSaveResponse, err := http.Get(api.URL + location)
+	if err != nil {
+		t.Fatalf("get saved setup page: %v", err)
+	}
+	defer followSaveResponse.Body.Close()
+
+	followSaveBody, err := io.ReadAll(followSaveResponse.Body)
+	if err != nil {
+		t.Fatalf("read saved setup page body: %v", err)
+	}
+
+	followSaveText := string(followSaveBody)
+	for _, expected := range []string{
+		"Saved local profile found",
+		"https://grafana.example.com",
+		"Restart the server if you want runtime defaults to reload from the saved profile.",
+	} {
+		if !strings.Contains(followSaveText, expected) {
+			t.Fatalf("saved setup page missing %q", expected)
+		}
+	}
+
+	clearRequest, err := http.NewRequest(http.MethodPost, api.URL+"/ui/setup/observability/clear-profile", nil)
+	if err != nil {
+		t.Fatalf("new clear profile request: %v", err)
+	}
+
+	clearResponse, err := client.Do(clearRequest)
+	if err != nil {
+		t.Fatalf("post clear profile: %v", err)
+	}
+	defer clearResponse.Body.Close()
+
+	if clearResponse.StatusCode != http.StatusSeeOther {
+		t.Fatalf("clear profile status = %d, want %d", clearResponse.StatusCode, http.StatusSeeOther)
+	}
+
+	_, ok, err = config.LoadObservabilityProfile(profilePath)
+	if err != nil {
+		t.Fatalf("LoadObservabilityProfile() after clear error = %v", err)
+	}
+	if ok {
+		t.Fatalf("expected local observability profile to be cleared")
 	}
 }
 

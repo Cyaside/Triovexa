@@ -120,6 +120,8 @@ func NewServerWithTelemetry(
 				"GET /ui/setup/observability",
 				"POST /ui/setup/observability/test-connection",
 				"POST /ui/setup/observability/test-query",
+				"POST /ui/setup/observability/save-profile",
+				"POST /ui/setup/observability/clear-profile",
 			},
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		}
@@ -673,18 +675,24 @@ func NewServerWithTelemetry(
 		http.Redirect(w, r, appendUIMessage(target, "notice", message), http.StatusSeeOther)
 	})
 
-	defaultSetupForm := defaultObservabilitySetupForm(cfg)
+	loadSetupDefaults := func() (observabilitySetupForm, observabilityProfileState) {
+		return loadObservabilitySetupDefaults(cfg)
+	}
 	mux.HandleFunc("/ui/setup/observability", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
+		setupForm, profileState := loadSetupDefaults()
 		renderObservabilitySetupPage(w, observabilitySetupPageData{
-			Form:          defaultSetupForm,
+			Form:          setupForm,
 			Runtime:       buildRuntimeViewData(r.Context(), runtimeControl),
 			LocalModeNote: buildLocalModeNote(),
-			Readiness:     buildObservabilityReadiness(defaultSetupForm, observabilityConnectionResult{}, nil),
+			Profile:       profileState,
+			Readiness:     buildObservabilityReadiness(setupForm, observabilityConnectionResult{}, nil),
+			Notice:        strings.TrimSpace(r.URL.Query().Get("notice")),
+			Error:         strings.TrimSpace(r.URL.Query().Get("error")),
 		})
 	})
 
@@ -694,7 +702,8 @@ func NewServerWithTelemetry(
 			return
 		}
 
-		form, err := parseObservabilitySetupForm(r, defaultSetupForm)
+		setupForm, profileState := loadSetupDefaults()
+		form, err := parseObservabilitySetupForm(r, setupForm)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -705,6 +714,7 @@ func NewServerWithTelemetry(
 			Form:          form,
 			Runtime:       buildRuntimeViewData(r.Context(), runtimeControl),
 			LocalModeNote: buildLocalModeNote(),
+			Profile:       profileState,
 			Connection:    connection,
 			Datasources:   datasources,
 			Readiness:     buildObservabilityReadiness(form, connection, nil),
@@ -717,7 +727,8 @@ func NewServerWithTelemetry(
 			return
 		}
 
-		form, err := parseObservabilitySetupForm(r, defaultSetupForm)
+		setupForm, profileState := loadSetupDefaults()
+		form, err := parseObservabilitySetupForm(r, setupForm)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -728,12 +739,56 @@ func NewServerWithTelemetry(
 			Form:          form,
 			Runtime:       buildRuntimeViewData(r.Context(), runtimeControl),
 			LocalModeNote: buildLocalModeNote(),
+			Profile:       profileState,
 			Connection:    connection,
 			Datasources:   datasources,
 			QueryResults:  queryResults,
 			Evidence:      evidence,
 			Readiness:     buildObservabilityReadiness(form, connection, queryResults),
 		})
+	})
+
+	mux.HandleFunc("/ui/setup/observability/save-profile", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		setupForm, _ := loadSetupDefaults()
+		form, err := parseObservabilitySetupForm(r, setupForm)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if err := config.SaveObservabilityProfile(cfg.LocalObservabilityProfilePath, profileFromObservabilitySetupForm(form)); err != nil {
+			target := appendUIMessage("/ui/setup/observability", "error", "Failed to save the local observability profile.")
+			http.Redirect(w, r, target, http.StatusSeeOther)
+			return
+		}
+
+		target := appendUIMessage(
+			"/ui/setup/observability",
+			"notice",
+			"Local observability profile saved. Restart the server if you want runtime defaults to reload from the saved profile.",
+		)
+		http.Redirect(w, r, target, http.StatusSeeOther)
+	})
+
+	mux.HandleFunc("/ui/setup/observability/clear-profile", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if err := config.ClearObservabilityProfile(cfg.LocalObservabilityProfilePath); err != nil {
+			target := appendUIMessage("/ui/setup/observability", "error", "Failed to clear the local observability profile.")
+			http.Redirect(w, r, target, http.StatusSeeOther)
+			return
+		}
+
+		target := appendUIMessage("/ui/setup/observability", "notice", "Saved local observability profile cleared from this machine.")
+		http.Redirect(w, r, target, http.StatusSeeOther)
 	})
 
 	mux.HandleFunc("/ui/incidents/", func(w http.ResponseWriter, r *http.Request) {
@@ -1052,6 +1107,10 @@ func routeLabel(path string) string {
 		return "/ui/incidents"
 	case path == "/ui/setup/observability":
 		return "/ui/setup/observability"
+	case path == "/ui/setup/observability/save-profile":
+		return "/ui/setup/observability/save-profile"
+	case path == "/ui/setup/observability/clear-profile":
+		return "/ui/setup/observability/clear-profile"
 	case path == "/ui/assets/workbench.css":
 		return "/ui/assets/workbench.css"
 	case path == "/ui/admin/kill-switch":
