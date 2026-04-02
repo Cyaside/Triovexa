@@ -16,6 +16,7 @@ type incidentListPageData struct {
 	KillSwitchEnabled bool
 	Stats             incidentDashboardStats
 	DemoScenarios     []demoScenarioView
+	Runtime           runtimeViewData
 	Notice            string
 	Error             string
 }
@@ -58,6 +59,7 @@ type incidentDetailPageData struct {
 	RollbackRecords     []domain.RollbackRecord
 	KillSwitchEnabled   bool
 	AuditTrail          []domain.AuditEvent
+	Runtime             runtimeViewData
 	Notice              string
 	Error               string
 	NextOperatorStep    string
@@ -192,8 +194,8 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
   <section class="hero">
     <div class="hero-card">
       <p class="eyebrow">Triovexa Workbench</p>
-      <h1>Heuristic Incident Workbench</h1>
-      <p class="muted">UI sederhana untuk memicu demo scenario, membaca triage heuristik, lalu mengikuti approval, execution, verification, dan rollback dari satu tempat.</p>
+      <h1>Incident Workbench</h1>
+      <p class="muted">UI sederhana untuk memicu demo scenario, membaca triage AI atau heuristic, lalu mengikuti approval, execution, verification, dan rollback dari satu tempat.</p>
       <div class="hero-links">
         <a href="/debug/tools">Diagnostics</a>
         <a href="/debug/policies">Policy Catalog</a>
@@ -202,8 +204,9 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
     </div>
     <div class="hero-card">
       <p class="eyebrow">Operator Snapshot</p>
-      <h2 class="tight">{{if .KillSwitchEnabled}}Kill Switch Active{{else}}Heuristic Flow Ready{{end}}</h2>
-      <p class="muted">Gunakan workbench ini untuk melihat apakah rekomendasi heuristik selaras dengan intended flow sebelum kita sambungkan ke provider AI dan observability sungguhan.</p>
+      <h2 class="tight">{{if .KillSwitchEnabled}}Kill Switch Active{{else}}Runtime Flow Ready{{end}}</h2>
+      <p class="muted">Gunakan workbench ini untuk berpindah antara heuristic dan provider real, lalu bandingkan hasil triage dan action generation tanpa perlu restart server.</p>
+      <p><span class="chip">Reasoning {{.Runtime.ReasoningMode}}</span> <span class="chip">Observability {{.Runtime.ObservabilityMode}}</span></p>
       <p><span class="chip">Total incident {{.Stats.Total}}</span> <span class="chip">Awaiting approval {{.Stats.AwaitingApproval}}</span></p>
     </div>
   </section>
@@ -228,7 +231,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
   <section class="workbench-grid">
     <article class="panel">
       <h2>Demo Scenarios</h2>
-      <p class="muted">Trigger skenario demo langsung dari browser untuk melihat bagaimana heuristik membaca evidence dan mengusulkan candidate action.</p>
+      <p class="muted">Trigger skenario demo langsung dari browser untuk melihat bagaimana mode reasoning aktif membaca evidence dan mengusulkan candidate action.</p>
       <div class="scenario-grid">
         {{range .DemoScenarios}}
         <form class="scenario-card" method="post" action="/ui/demo/scenarios/{{.Key}}">
@@ -248,14 +251,32 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
 
     <article class="panel">
       <h2>Operator Controls</h2>
-      <p class="muted">Control panel sederhana untuk menguji safety guardrails saat heuristik berjalan.</p>
+      <p class="muted">Control panel sederhana untuk menguji safety guardrails dan mengganti provider runtime tanpa restart.</p>
       <form class="control-form" method="post" action="/ui/admin/kill-switch">
         <input type="hidden" name="redirect" value="/ui/incidents" />
         <input type="hidden" name="enabled" value="{{if .KillSwitchEnabled}}false{{else}}true{{end}}" />
         <button class="secondary-button" type="submit">{{if .KillSwitchEnabled}}Disable Kill Switch{{else}}Enable Kill Switch{{end}}</button>
       </form>
+      <form class="control-form" method="post" action="/ui/admin/runtime-modes">
+        <input type="hidden" name="redirect" value="/ui/incidents" />
+        <input type="hidden" name="reasoning_mode" value="{{if eq .Runtime.ReasoningMode "mistral"}}heuristic{{else}}mistral{{end}}" />
+        <button class="secondary-button" type="submit">Switch Reasoning to {{if eq .Runtime.ReasoningMode "mistral"}}heuristic{{else}}mistral{{end}}</button>
+      </form>
+      <form class="control-form" method="post" action="/ui/admin/runtime-modes">
+        <input type="hidden" name="redirect" value="/ui/incidents" />
+        <input type="hidden" name="observability_mode" value="{{if eq .Runtime.ObservabilityMode "grafana"}}demo{{else}}grafana{{end}}" />
+        <button class="secondary-button" type="submit">Switch Observability to {{if eq .Runtime.ObservabilityMode "grafana"}}demo{{else}}grafana{{end}}</button>
+      </form>
       <p class="muted">Current state: {{if .KillSwitchEnabled}}enabled{{else}}disabled{{end}}</p>
       <p class="muted">Saat kill switch aktif, incident intake dan triage tetap masuk, tetapi approval atau execution baru akan diblok.</p>
+      <p class="muted">Mistral: {{if .Runtime.MistralConfigured}}configured ({{.Runtime.MistralModel}}){{else}}not configured{{end}}</p>
+      <p class="muted">Grafana: {{if .Runtime.GrafanaConfigured}}configured{{else}}not configured{{end}} | metrics UID {{if .Runtime.MetricsSourceUID}}{{.Runtime.MetricsSourceUID}}{{else}}-{{end}} | logs UID {{if .Runtime.LogsSourceUID}}{{.Runtime.LogsSourceUID}}{{else}}-{{end}}</p>
+      {{if .Runtime.DatasourceCount}}
+      <p class="muted">Datasource discovery: {{.Runtime.DatasourceCount}} source(s) terlihat dari Grafana.</p>
+      {{end}}
+      {{if .Runtime.DatasourceError}}
+      <p class="muted">Datasource discovery error: {{.Runtime.DatasourceError}}</p>
+      {{end}}
     </article>
   </section>
 
@@ -348,7 +369,8 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
     <article class="card">
       <h2>Operator Step</h2>
       <p>{{.NextOperatorStep}}</p>
-      <p class="muted">Gunakan action lane di bawah untuk menilai apakah hasil heuristik ini cukup aman untuk dieksekusi atau justru perlu dihentikan dan dieskalasi.</p>
+      <p class="muted">Gunakan action lane di bawah untuk menilai apakah hasil reasoning aktif ini cukup aman untuk dieksekusi atau justru perlu dihentikan dan dieskalasi.</p>
+      <p class="muted">Reasoning mode: {{.Runtime.ReasoningMode}} | Observability mode: {{.Runtime.ObservabilityMode}}</p>
     </article>
   </section>
   {{if .Notice}}

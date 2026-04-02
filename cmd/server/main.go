@@ -10,11 +10,13 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/approval"
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	apphttp "github.com/Cyaside/Triovexa/internal/http"
 	"github.com/Cyaside/Triovexa/internal/incident"
+	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/observability"
 	"github.com/Cyaside/Triovexa/internal/policy"
 	"github.com/Cyaside/Triovexa/internal/remediation"
@@ -50,17 +52,55 @@ func main() {
 		}
 	}()
 
-	collector := observability.NewDemoCollector(cfg.DemoServiceBaseURL)
 	retriever := retrieval.NewFileRetriever(cfg.DocsRoot)
 	catalog := execution.DefaultCatalog()
 	recorder := telemetry.NewRecorder()
-	generator := triage.NewHeuristicGenerator()
-	actionGenerator := remediation.NewHeuristicGenerator(catalog)
+	runtimeModes := mode.NewManager(cfg.ReasoningMode, cfg.ObservabilityMode)
+	mistralClient := ai.NewMistralClient(cfg.MistralAPIKey, cfg.MistralModel)
+	grafanaClient := observability.NewGrafanaClient(
+		cfg.GrafanaBaseURL,
+		cfg.GrafanaAPIToken,
+		cfg.GrafanaMetricsSourceUID,
+		cfg.GrafanaLogsSourceUID,
+	)
+	grafanaSignals := observability.GrafanaSignalConfig{
+		ErrorRateQuery:  cfg.GrafanaErrorRateQuery,
+		LatencyQuery:    cfg.GrafanaLatencyQuery,
+		QueueQuery:      cfg.GrafanaQueueQuery,
+		ReplicaQuery:    cfg.GrafanaReplicaQuery,
+		LogsQuery:       cfg.GrafanaLogsQuery,
+		DeployLogsQuery: cfg.GrafanaDeployLogsQuery,
+		Lookback:        cfg.GrafanaQueryLookback,
+	}
+	collector := observability.NewSwitchingCollector(
+		runtimeModes,
+		observability.NewDemoCollector(cfg.DemoServiceBaseURL),
+		observability.NewGrafanaCollector(grafanaClient, grafanaSignals),
+	)
+	generator := triage.NewSwitchingGenerator(
+		runtimeModes,
+		triage.NewHeuristicGenerator(),
+		triage.NewMistralGenerator(mistralClient),
+	)
+	actionGenerator := remediation.NewSwitchingGenerator(
+		runtimeModes,
+		remediation.NewHeuristicGenerator(catalog),
+		remediation.NewMistralGenerator(catalog, mistralClient),
+	)
 	killSwitch := approval.NewKillSwitch(cfg.KillSwitchEnabled)
 	recorder.RecordKillSwitchState(cfg.KillSwitchEnabled)
 	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch).WithTelemetry(recorder)
 	rollbackService := execution.NewRollbackService(repository, catalog, execution.NewDemoAdapter(cfg.DemoServiceBaseURL))
-	verificationService := verification.NewService(repository, verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL), catalog, rollbackService).WithTelemetry(recorder)
+	verificationService := verification.NewService(
+		repository,
+		observability.NewSwitchingSnapshotFetcher(
+			runtimeModes,
+			verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL),
+			observability.NewGrafanaSnapshotFetcher(grafanaClient, grafanaSignals),
+		),
+		catalog,
+		rollbackService,
+	).WithTelemetry(recorder)
 	executionService := execution.NewService(
 		repository,
 		catalog,
@@ -72,13 +112,34 @@ func main() {
 		cfg.ActionExecutionCooldown,
 	).WithTelemetry(recorder)
 	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService).WithTelemetry(recorder)
-	server := apphttp.NewServerWithTelemetry(cfg, logger, repository, incidentService, policyService, executionService, recorder)
+	server := apphttp.NewServerWithTelemetry(
+		cfg,
+		logger,
+		repository,
+		incidentService,
+		policyService,
+		executionService,
+		recorder,
+		&apphttp.RuntimeControls{
+			Modes: runtimeModes,
+			Providers: apphttp.ProviderStatus{
+				MistralConfigured:  mistralClient.Configured(),
+				GrafanaConfigured:  grafanaClient.Configured(),
+				MistralModel:       cfg.MistralModel,
+				MetricsSourceUID:   cfg.GrafanaMetricsSourceUID,
+				LogsSourceUID:      cfg.GrafanaLogsSourceUID,
+				GrafanaDatasources: grafanaClient,
+			},
+		},
+	)
 
 	logger.Info("starting server",
 		slog.String("addr", server.Addr),
 		slog.String("environment", cfg.Environment),
 		slog.Bool("kill_switch_enabled", cfg.KillSwitchEnabled),
 		slog.String("database_target", cfg.DatabaseTarget()),
+		slog.String("reasoning_mode", string(runtimeModes.Snapshot().Reasoning)),
+		slog.String("observability_mode", string(runtimeModes.Snapshot().Observability)),
 	)
 
 	errCh := make(chan error, 1)

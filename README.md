@@ -8,11 +8,13 @@ Repositori ini mengikuti PRD bertahap dari `Phase 0` sampai `Phase 7`, dengan fo
 
 - Grafana-compatible webhook intake
 - incident list dan incident detail UI
-- evidence collection dari demo service
+- evidence collection dari demo service atau Grafana datasource proxy
 - retrieval runbook dan postmortem dari folder `docs/`
 - heuristic triage dan heuristic candidate action generation
+- Mistral-backed triage dan candidate action generation
 - policy engine dengan allowlist, risk classification, dan approval gate
 - kill switch global
+- runtime switch untuk `heuristic|mistral` dan `demo|grafana` langsung dari UI
 - low-risk execution pipeline dengan timeout, retry, cooldown, dan idempotency
 - verification engine berbasis before/after signal comparison
 - automatic rollback untuk medium-risk demo action tertentu
@@ -64,6 +66,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1
 
 Konfigurasi contoh ada di [config/app.example.env](config/app.example.env).
 
+Untuk demo cepat tanpa PostgreSQL lokal yang siap, Anda juga bisa menjalankan server dengan `DATABASE_URL=memory` agar data hanya hidup selama proses berjalan.
+
 ## Demo Scenarios
 
 Pakai script helper berikut untuk memicu skenario demo end-to-end:
@@ -105,6 +109,7 @@ Coverage yang sudah ada mencakup:
 - kill switch
 - rollback path
 - metrics dan diagnostics endpoint
+- runtime mode switching endpoint dan UI controls
 
 ## Environment Variables
 
@@ -125,8 +130,16 @@ Belum wajib untuk mode demo lokal, tetapi akan dibutuhkan saat integrasi ekstern
 - `GRAFANA_BASE_URL`
 - `GRAFANA_API_TOKEN`
 - `GRAFANA_WEBHOOK_SECRET`
-- `GOOGLE_API_KEY`
-- `GOOGLE_MODEL`
+- `GRAFANA_METRICS_DATASOURCE_UID`
+- `GRAFANA_LOGS_DATASOURCE_UID`
+- `GRAFANA_ERROR_RATE_QUERY`
+- `GRAFANA_LATENCY_QUERY`
+- `GRAFANA_QUEUE_QUERY`
+- `GRAFANA_REPLICA_QUERY`
+- `GRAFANA_LOGS_QUERY`
+- `GRAFANA_DEPLOY_LOGS_QUERY`
+- `MISTRAL_API_KEY`
+- `MISTRAL_MODEL`
 
 ## Safety Scope
 
@@ -139,8 +152,8 @@ Belum wajib untuk mode demo lokal, tetapi akan dibutuhkan saat integrasi ekstern
 
 ## Batasan Saat Ini
 
-- AI layer masih memakai heuristic generator lokal, belum provider AI sungguhan
-- observability source masih demo adapter, belum Grafana/Loki real query path
+- mode `grafana` butuh query template yang cocok dengan skema telemetry Anda; default repo belum bisa menebak nama metric dan label secara universal
+- datasource Grafana Anda saat ini sudah bisa di-discover, tetapi query generik dapat tetap kosong jika belum ada metric atau log yang di-ingest
 - autentikasi endpoint approval/execution belum ditambahkan
 - tracing distributed belum diaktifkan; phase saat ini baru mencakup structured logging dan metrics internal
 

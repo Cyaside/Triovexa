@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -36,8 +37,9 @@ func NewServer(
 	incidentService *incident.Service,
 	approvalService *approval.Service,
 	executionService *execution.Service,
+	runtimeControls ...*RuntimeControls,
 ) *http.Server {
-	return NewServerWithTelemetry(cfg, logger, repository, incidentService, approvalService, executionService, nil)
+	return NewServerWithTelemetry(cfg, logger, repository, incidentService, approvalService, executionService, nil, runtimeControls...)
 }
 
 func NewServerWithTelemetry(
@@ -48,11 +50,16 @@ func NewServerWithTelemetry(
 	approvalService *approval.Service,
 	executionService *execution.Service,
 	recorder *telemetry.Recorder,
+	runtimeControls ...*RuntimeControls,
 ) *http.Server {
 	mux := http.NewServeMux()
 	serverMetrics := recorder
 	if serverMetrics == nil {
 		serverMetrics = telemetry.NewRecorder()
+	}
+	var runtimeControl *RuntimeControls
+	if len(runtimeControls) > 0 {
+		runtimeControl = runtimeControls[0]
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -84,13 +91,13 @@ func NewServerWithTelemetry(
 			killSwitchState = approvalService.KillSwitchState()
 		}
 
-		writeJSON(w, http.StatusOK, ServerInfo{
-			Name:                cfg.ServiceName,
-			Environment:         cfg.Environment,
-			KillSwitchEnabled:   killSwitchState.Enabled,
-			KillSwitchUpdatedAt: killSwitchState.UpdatedAt.Format(time.RFC3339),
-			Phase:               "phase-07-hardening-portfolio-release",
-			AvailableEndpoints: []string{
+		payload := map[string]any{
+			"name":                   cfg.ServiceName,
+			"environment":            cfg.Environment,
+			"kill_switch_enabled":    killSwitchState.Enabled,
+			"kill_switch_updated_at": killSwitchState.UpdatedAt.Format(time.RFC3339),
+			"phase":                  "phase-07-hardening-portfolio-release",
+			"available_endpoints": []string{
 				"GET /health",
 				"GET /metrics",
 				"GET /debug/tools",
@@ -106,12 +113,18 @@ func NewServerWithTelemetry(
 				"POST /actions/{id}/reject",
 				"POST /actions/{id}/execute",
 				"POST /admin/kill-switch",
+				"POST /admin/runtime-modes",
 				"GET /ui/assets/workbench.css",
 				"GET /ui/incidents",
 				"GET /ui/incidents/{id}",
 			},
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-		})
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		if runtimeControl != nil {
+			payload["runtime"] = buildRuntimeViewData(r.Context(), runtimeControl)
+		}
+
+		writeJSON(w, http.StatusOK, payload)
 	})
 
 	mux.HandleFunc("/debug/policies", func(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +164,36 @@ func NewServerWithTelemetry(
 		writeJSON(w, http.StatusOK, map[string]any{
 			"enabled":    state.Enabled,
 			"updated_at": state.UpdatedAt.Format(time.RFC3339),
+		})
+	})
+
+	mux.HandleFunc("/admin/runtime-modes", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeControl == nil || runtimeControl.Modes == nil {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "runtime mode controls are not configured"})
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		reasoningMode, observabilityMode, err := parseRuntimeModeRequest(r)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		snapshot := runtimeControl.Modes.Snapshot()
+		if reasoningMode != "" {
+			snapshot = runtimeControl.Modes.SetReasoning(reasoningMode)
+		}
+		if observabilityMode != "" {
+			snapshot = runtimeControl.Modes.SetObservability(observabilityMode)
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"reasoning_mode":     snapshot.Reasoning,
+			"observability_mode": snapshot.Observability,
 		})
 	})
 
@@ -528,6 +571,7 @@ func NewServerWithTelemetry(
 			KillSwitchEnabled: approvalService != nil && approvalService.KillSwitchState().Enabled,
 			Stats:             buildIncidentDashboardStats(incidents),
 			DemoScenarios:     demoScenarioViews(),
+			Runtime:           buildRuntimeViewData(r.Context(), runtimeControl),
 			Notice:            strings.TrimSpace(r.URL.Query().Get("notice")),
 			Error:             strings.TrimSpace(r.URL.Query().Get("error")),
 		})
@@ -590,6 +634,39 @@ func NewServerWithTelemetry(
 		if state.Enabled {
 			message = "Kill switch diaktifkan. Flow triage tetap berjalan, tetapi action baru akan diblok."
 		}
+		http.Redirect(w, r, appendUIMessage(target, "notice", message), http.StatusSeeOther)
+	})
+
+	mux.HandleFunc("/ui/admin/runtime-modes", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeControl == nil || runtimeControl.Modes == nil {
+			http.Error(w, "runtime mode controls are not configured", http.StatusNotImplemented)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form payload", http.StatusBadRequest)
+			return
+		}
+
+		reasoningMode, observabilityMode, err := parseRuntimeModeRequest(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		snapshot := runtimeControl.Modes.Snapshot()
+		if reasoningMode != "" {
+			snapshot = runtimeControl.Modes.SetReasoning(reasoningMode)
+		}
+		if observabilityMode != "" {
+			snapshot = runtimeControl.Modes.SetObservability(observabilityMode)
+		}
+
+		target := sanitizeUIRedirectTarget(r.FormValue("redirect"), "/ui/incidents")
+		message := fmt.Sprintf("Runtime mode diperbarui. Reasoning=%s, Observability=%s.", snapshot.Reasoning, snapshot.Observability)
 		http.Redirect(w, r, appendUIMessage(target, "notice", message), http.StatusSeeOther)
 	})
 
@@ -691,6 +768,7 @@ func NewServerWithTelemetry(
 			RollbackRecords:     rollbackRecords,
 			KillSwitchEnabled:   approvalService != nil && approvalService.KillSwitchState().Enabled,
 			AuditTrail:          auditEvents,
+			Runtime:             buildRuntimeViewData(r.Context(), runtimeControl),
 			Notice:              strings.TrimSpace(r.URL.Query().Get("notice")),
 			Error:               strings.TrimSpace(r.URL.Query().Get("error")),
 			NextOperatorStep:    describeNextOperatorStep(record, approvalService != nil && approvalService.KillSwitchState().Enabled),
@@ -845,6 +923,29 @@ func parseExecutionRequest(r *http.Request) (initiatedBy string, note string, wa
 	return initiatedBy, note, wantsHTML, nil
 }
 
+func parseRuntimeModeRequest(r *http.Request) (reasoningMode string, observabilityMode string, err error) {
+	if strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+		reasoningMode = strings.TrimSpace(r.FormValue("reasoning_mode"))
+		observabilityMode = strings.TrimSpace(r.FormValue("observability_mode"))
+	} else {
+		var payload struct {
+			ReasoningMode     string `json:"reasoning_mode"`
+			ObservabilityMode string `json:"observability_mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			return "", "", errors.New("invalid runtime mode payload")
+		}
+		reasoningMode = strings.TrimSpace(payload.ReasoningMode)
+		observabilityMode = strings.TrimSpace(payload.ObservabilityMode)
+	}
+
+	if reasoningMode == "" && observabilityMode == "" {
+		return "", "", errors.New("reasoning_mode or observability_mode is required")
+	}
+
+	return reasoningMode, observabilityMode, nil
+}
+
 func routeLabel(path string) string {
 	switch {
 	case path == "/":
@@ -879,12 +980,16 @@ func routeLabel(path string) string {
 		return "/actions/{id}/execute"
 	case path == "/admin/kill-switch":
 		return "/admin/kill-switch"
+	case path == "/admin/runtime-modes":
+		return "/admin/runtime-modes"
 	case path == "/ui/incidents":
 		return "/ui/incidents"
 	case path == "/ui/assets/workbench.css":
 		return "/ui/assets/workbench.css"
 	case path == "/ui/admin/kill-switch":
 		return "/ui/admin/kill-switch"
+	case path == "/ui/admin/runtime-modes":
+		return "/ui/admin/runtime-modes"
 	case strings.HasPrefix(path, "/ui/demo/scenarios/"):
 		return "/ui/demo/scenarios/{scenario}"
 	case strings.HasPrefix(path, "/ui/incidents/"):

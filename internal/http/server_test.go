@@ -21,6 +21,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/incident"
+	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/observability"
 	"github.com/Cyaside/Triovexa/internal/policy"
 	"github.com/Cyaside/Triovexa/internal/remediation"
@@ -1048,6 +1049,112 @@ func TestServerDebugPoliciesExposesCatalog(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("catalog should include pause_demo_queue_consumer")
+	}
+}
+
+func TestServerRuntimeModeEndpointUpdatesModes(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	runtimeControls := &RuntimeControls{
+		Modes: mode.NewManager("heuristic", "demo"),
+		Providers: ProviderStatus{
+			MistralConfigured: true,
+			GrafanaConfigured: true,
+			MistralModel:      "mistral-small-latest",
+			MetricsSourceUID:  "grafanacloud-prom",
+			LogsSourceUID:     "grafanacloud-logs",
+		},
+	}
+	server := NewServerWithTelemetry(config.Config{
+		ServiceName:     "triovexa",
+		Environment:     "test",
+		HTTPPort:        "0",
+		DatabaseURL:     "postgres://test",
+		ReadTimeout:     5 * time.Second,
+		WriteTimeout:    5 * time.Second,
+		IdleTimeout:     5 * time.Second,
+		ShutdownTimeout: 5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, nil, nil, nil, telemetry.NewRecorder(), runtimeControls)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	payload := strings.NewReader("reasoning_mode=mistral&observability_mode=grafana")
+	request, err := http.NewRequest(http.MethodPost, api.URL+"/admin/runtime-modes", payload)
+	if err != nil {
+		t.Fatalf("new runtime mode request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post runtime modes: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("runtime mode status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	snapshot := runtimeControls.Modes.Snapshot()
+	if snapshot.Reasoning != mode.ReasoningMistral {
+		t.Fatalf("reasoning mode = %q, want %q", snapshot.Reasoning, mode.ReasoningMistral)
+	}
+	if snapshot.Observability != mode.ObservabilityGrafana {
+		t.Fatalf("observability mode = %q, want %q", snapshot.Observability, mode.ObservabilityGrafana)
+	}
+}
+
+func TestServerIncidentWorkbenchShowsRuntimeControls(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	runtimeControls := &RuntimeControls{
+		Modes: mode.NewManager("mistral", "grafana"),
+		Providers: ProviderStatus{
+			MistralConfigured: true,
+			GrafanaConfigured: true,
+			MistralModel:      "mistral-small-latest",
+			MetricsSourceUID:  "grafanacloud-prom",
+			LogsSourceUID:     "grafanacloud-logs",
+		},
+	}
+	server := NewServerWithTelemetry(config.Config{
+		ServiceName:     "triovexa",
+		Environment:     "test",
+		HTTPPort:        "0",
+		DatabaseURL:     "postgres://test",
+		ReadTimeout:     5 * time.Second,
+		WriteTimeout:    5 * time.Second,
+		IdleTimeout:     5 * time.Second,
+		ShutdownTimeout: 5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, nil, nil, nil, telemetry.NewRecorder(), runtimeControls)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	response, err := http.Get(api.URL + "/ui/incidents")
+	if err != nil {
+		t.Fatalf("get incident workbench: %v", err)
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read workbench body: %v", err)
+	}
+
+	text := string(body)
+	for _, expected := range []string{
+		"Switch Reasoning to heuristic",
+		"Switch Observability to demo",
+		"metrics UID grafanacloud-prom",
+		"logs UID grafanacloud-logs",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("workbench body missing %q", expected)
+		}
 	}
 }
 
