@@ -22,6 +22,9 @@ func TestRollbackServiceRollbackActionSuccess(t *testing.T) {
 			if action.ActionType != "resume_demo_queue_consumer" {
 				t.Fatalf("rollback action type = %q, want %q", action.ActionType, "resume_demo_queue_consumer")
 			}
+			if request.Timeout != 3*time.Second {
+				t.Fatalf("rollback timeout = %s, want %s", request.Timeout, 3*time.Second)
+			}
 			return AdapterResult{
 				ExecutorType: "fake-adapter",
 				Payload: map[string]any{
@@ -29,7 +32,7 @@ func TestRollbackServiceRollbackActionSuccess(t *testing.T) {
 				},
 			}, nil
 		},
-	})
+	}, 3*time.Second)
 
 	record, err := service.RollbackAction(context.Background(), action, "operator-a", "consumer pause made things worse")
 	if err != nil {

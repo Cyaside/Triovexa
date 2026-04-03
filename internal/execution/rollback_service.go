@@ -15,6 +15,7 @@ const (
 	RollbackStatusStarted   = "started"
 	RollbackStatusSucceeded = "succeeded"
 	RollbackStatusFailed    = "failed"
+	defaultRollbackTimeout  = 5 * time.Second
 )
 
 type RollbackService struct {
@@ -24,6 +25,7 @@ type RollbackService struct {
 	}
 	catalog Catalog
 	adapter Adapter
+	timeout time.Duration
 	now     func() time.Time
 }
 
@@ -34,11 +36,18 @@ func NewRollbackService(
 	},
 	catalog Catalog,
 	adapter Adapter,
+	timeouts ...time.Duration,
 ) *RollbackService {
+	timeout := defaultRollbackTimeout
+	if len(timeouts) > 0 && timeouts[0] > 0 {
+		timeout = timeouts[0]
+	}
+
 	return &RollbackService{
 		repository: repository,
 		catalog:    catalog,
 		adapter:    adapter,
+		timeout:    timeout,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -97,7 +106,7 @@ func (s *RollbackService) RollbackAction(ctx context.Context, action domain.Cand
 
 	result, err := s.adapter.Execute(ctx, rollbackAction, AdapterRequest{
 		IdempotencyKey: "rollback:" + action.ID,
-		Timeout:        rollbackDefinition.ExecutionCooldown,
+		Timeout:        s.timeout,
 		InitiatedBy:    triggeredBy,
 	})
 	record.FinishedAt = s.now()

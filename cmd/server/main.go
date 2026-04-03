@@ -90,7 +90,7 @@ func main() {
 	killSwitch := approval.NewKillSwitch(cfg.KillSwitchEnabled)
 	recorder.RecordKillSwitchState(cfg.KillSwitchEnabled)
 	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch).WithTelemetry(recorder)
-	rollbackService := execution.NewRollbackService(repository, catalog, execution.NewDemoAdapter(cfg.DemoServiceBaseURL))
+	rollbackService := execution.NewRollbackService(repository, catalog, execution.NewDemoAdapter(cfg.DemoServiceBaseURL), cfg.ActionExecutionTimeout)
 	verificationService := verification.NewService(
 		repository,
 		observability.NewSwitchingSnapshotFetcher(
