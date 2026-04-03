@@ -368,11 +368,7 @@ func findDuplicateExecution(records []domain.ExecutionRecord, idempotencyKey str
 }
 
 func countExecutionAttempts(records []domain.ExecutionRecord) int {
-	var attempts int
-	for range records {
-		attempts++
-	}
-	return attempts
+	return len(records)
 }
 
 func mapExecutionErrorToStatus(err error) string {
