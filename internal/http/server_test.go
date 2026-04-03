@@ -1501,3 +1501,46 @@ func newFakeGrafanaSetupServer(t *testing.T) *httptest.Server {
 func urlQueryEscape(value string) string {
 	return url.QueryEscape(value)
 }
+func TestServerRuntimeModeEndpointRejectsInvalidModes(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	runtimeControls := &RuntimeControls{
+		Modes: mode.NewManager("heuristic", "demo"),
+	}
+	server := NewServerWithTelemetry(config.Config{
+		ServiceName:     "triovexa",
+		Environment:     "test",
+		HTTPPort:        "0",
+		DatabaseURL:     "postgres://test",
+		ReadTimeout:     5 * time.Second,
+		WriteTimeout:    5 * time.Second,
+		IdleTimeout:     5 * time.Second,
+		ShutdownTimeout: 5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, nil, nil, nil, telemetry.NewRecorder(), runtimeControls)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	payload := strings.NewReader("reasoning_mode=wat")
+	request, err := http.NewRequest(http.MethodPost, api.URL+"/admin/runtime-modes", payload)
+	if err != nil {
+		t.Fatalf("new invalid runtime mode request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post invalid runtime mode: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("runtime mode invalid status = %d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+
+	snapshot := runtimeControls.Modes.Snapshot()
+	if snapshot.Reasoning != mode.ReasoningHeuristic {
+		t.Fatalf("reasoning mode changed unexpectedly to %q", snapshot.Reasoning)
+	}
+}

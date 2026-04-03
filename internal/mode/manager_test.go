@@ -27,3 +27,31 @@ func TestManagerSupportsModeUpdates(t *testing.T) {
 		t.Fatalf("Observability = %q, want %q", snapshot.Observability, ObservabilityGrafana)
 	}
 }
+
+func TestParseReasoningRejectsUnknownModes(t *testing.T) {
+	parsed, err := ParseReasoning("mistral")
+	if err != nil {
+		t.Fatalf("ParseReasoning() error = %v", err)
+	}
+	if parsed != ReasoningMistral {
+		t.Fatalf("ParseReasoning() = %q, want %q", parsed, ReasoningMistral)
+	}
+
+	if _, err := ParseReasoning("wat"); err == nil {
+		t.Fatalf("ParseReasoning() expected error for unknown mode")
+	}
+}
+
+func TestParseObservabilityRejectsUnknownModes(t *testing.T) {
+	parsed, err := ParseObservability("grafana")
+	if err != nil {
+		t.Fatalf("ParseObservability() error = %v", err)
+	}
+	if parsed != ObservabilityGrafana {
+		t.Fatalf("ParseObservability() = %q, want %q", parsed, ObservabilityGrafana)
+	}
+
+	if _, err := ParseObservability("wat"); err == nil {
+		t.Fatalf("ParseObservability() expected error for unknown mode")
+	}
+}

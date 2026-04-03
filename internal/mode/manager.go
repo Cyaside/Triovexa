@@ -1,6 +1,7 @@
 package mode
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -69,20 +70,40 @@ func (m *Manager) SetObservability(value string) Snapshot {
 	}
 }
 
-func normalizeReasoning(value string) Reasoning {
+func ParseReasoning(value string) (Reasoning, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(ReasoningHeuristic):
+		return ReasoningHeuristic, nil
 	case string(ReasoningMistral):
-		return ReasoningMistral
+		return ReasoningMistral, nil
 	default:
-		return ReasoningHeuristic
+		return "", fmt.Errorf("unsupported reasoning mode %q", value)
 	}
 }
 
-func normalizeObservability(value string) Observability {
+func ParseObservability(value string) (Observability, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(ObservabilityDemo):
+		return ObservabilityDemo, nil
 	case string(ObservabilityGrafana):
-		return ObservabilityGrafana
+		return ObservabilityGrafana, nil
 	default:
+		return "", fmt.Errorf("unsupported observability mode %q", value)
+	}
+}
+
+func normalizeReasoning(value string) Reasoning {
+	parsed, err := ParseReasoning(value)
+	if err != nil {
+		return ReasoningHeuristic
+	}
+	return parsed
+}
+
+func normalizeObservability(value string) Observability {
+	parsed, err := ParseObservability(value)
+	if err != nil {
 		return ObservabilityDemo
 	}
+	return parsed
 }

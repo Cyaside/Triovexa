@@ -16,6 +16,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/incident"
+	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
@@ -1062,6 +1063,16 @@ func parseRuntimeModeRequest(r *http.Request) (reasoningMode string, observabili
 
 	if reasoningMode == "" && observabilityMode == "" {
 		return "", "", errors.New("reasoning_mode or observability_mode is required")
+	}
+	if reasoningMode != "" {
+		if _, err := mode.ParseReasoning(reasoningMode); err != nil {
+			return "", "", err
+		}
+	}
+	if observabilityMode != "" {
+		if _, err := mode.ParseObservability(observabilityMode); err != nil {
+			return "", "", err
+		}
 	}
 
 	return reasoningMode, observabilityMode, nil
