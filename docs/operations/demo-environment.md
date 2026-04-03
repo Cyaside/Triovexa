@@ -120,8 +120,6 @@ Needed when real integrations are enabled:
   Used to retrieve additional context from the Grafana API instead of only receiving webhooks.
 - `GRAFANA_API_TOKEN`
   Access token for datasource proxy queries and supporting Grafana APIs.
-- `GRAFANA_WEBHOOK_SECRET`
-  Secret used to verify Grafana webhooks.
 - `GRAFANA_METRICS_DATASOURCE_UID`
   Metrics datasource UID used by the Grafana collector.
 - `GRAFANA_LOGS_DATASOURCE_UID`

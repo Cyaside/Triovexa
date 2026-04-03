@@ -67,6 +67,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\dev-start.ps1
 
 Example configuration lives in [config/app.example.env](config/app.example.env).
 
+Use Go 1.23 or newer for the current codebase.
+
 The observability setup page can save a machine-local Grafana profile file so future local runs start with the same datasource UIDs and query templates. That saved profile remains local to the current user and is intended for lightweight single-user workflows.
 
 For quick demos without a ready PostgreSQL instance, you can start the server with `DATABASE_URL=memory`. That mode is intentionally ephemeral and only persists data for the lifetime of the process.
@@ -133,7 +135,6 @@ Required when real integrations are enabled:
 
 - `GRAFANA_BASE_URL`
 - `GRAFANA_API_TOKEN`
-- `GRAFANA_WEBHOOK_SECRET`
 - `GRAFANA_METRICS_DATASOURCE_UID`
 - `GRAFANA_LOGS_DATASOURCE_UID`
 - `GRAFANA_ERROR_RATE_QUERY`

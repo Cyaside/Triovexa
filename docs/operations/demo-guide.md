@@ -5,7 +5,7 @@ This guide helps other people run and demo Triovexa without needing a long verba
 ## Prerequisites
 
 - Docker Desktop running for local PostgreSQL
-- Go installed
+- Go 1.23+ installed
 - PowerShell able to run local scripts
 
 ## Starting The Environment
@@ -111,7 +111,6 @@ These external variables are optional for the local demo, but needed when real i
 
 - `GRAFANA_BASE_URL`
 - `GRAFANA_API_TOKEN`
-- `GRAFANA_WEBHOOK_SECRET`
 - `MISTRAL_API_KEY`
 - `MISTRAL_MODEL`
 
