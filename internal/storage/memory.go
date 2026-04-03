@@ -72,6 +72,28 @@ func (s *MemoryStore) GetIncident(_ context.Context, incidentID string) (domain.
 	return incident, nil
 }
 
+func (s *MemoryStore) GetLatestIncidentByExternalAlertID(_ context.Context, externalAlertID string) (domain.Incident, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var latest domain.Incident
+	var found bool
+	for _, incident := range s.incidents {
+		if incident.ExternalAlertID != externalAlertID {
+			continue
+		}
+		if !found || incident.CreatedAt.After(latest.CreatedAt) {
+			latest = incident
+			found = true
+		}
+	}
+	if !found {
+		return domain.Incident{}, ErrNotFound
+	}
+
+	return latest, nil
+}
+
 func (s *MemoryStore) ListIncidents(_ context.Context) ([]domain.Incident, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

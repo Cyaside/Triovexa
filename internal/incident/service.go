@@ -3,6 +3,7 @@ package incident
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,8 @@ import (
 	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
+
+var ErrResolvedAlertIgnored = errors.New("resolved alert ignored because there is no active incident")
 
 type Service struct {
 	repository storage.Repository
@@ -126,6 +129,23 @@ func (s *Service) acceptGrafanaWebhook(ctx context.Context, payload alerting.Gra
 		return domain.Incident{}, false, fmt.Errorf("normalize grafana payload: %w", err)
 	}
 
+	latest, err := s.repository.GetLatestIncidentByExternalAlertID(ctx, normalized.ExternalAlertID)
+	if err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return domain.Incident{}, false, fmt.Errorf("lookup incident by external alert id: %w", err)
+	}
+	latestFound := err == nil
+
+	if latestFound && !isTerminalIncidentState(latest.State) {
+		dedupedAt := s.now()
+		if auditErr := s.audit(ctx, latest.ID, "webhook_deduplicated", "completed", map[string]any{
+			"external_alert_id": normalized.ExternalAlertID,
+			"status":            normalized.Status,
+		}, dedupedAt, dedupedAt); auditErr != nil {
+			return domain.Incident{}, false, fmt.Errorf("audit duplicate webhook: %w", auditErr)
+		}
+		return latest, false, nil
+	}
+
 	now := s.now()
 	incident := domain.Incident{
 		ID:              uuid.NewString(),
@@ -153,6 +173,7 @@ func (s *Service) acceptGrafanaWebhook(ctx context.Context, payload alerting.Gra
 		"service_name":      normalized.ServiceName,
 		"environment":       normalized.Environment,
 		"severity":          normalized.Severity,
+		"status":            normalized.Status,
 		"labels":            normalized.Labels,
 	})
 	if err != nil {
@@ -398,6 +419,15 @@ func actionCatalogMode(generator ActionGenerator) string {
 	}
 
 	return "heuristic-constrained"
+}
+
+func isTerminalIncidentState(state domain.IncidentState) bool {
+	switch state {
+	case domain.IncidentStateResolved, domain.IncidentStateFailedRemediation, domain.IncidentStateRolledBack, domain.IncidentStateEscalated, domain.IncidentStateClosed:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) audit(

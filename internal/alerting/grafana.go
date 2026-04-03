@@ -32,6 +32,7 @@ type NormalizedAlert struct {
 	Environment     string
 	Severity        string
 	AlertSource     string
+	Status          string
 	StartedAt       time.Time
 	Labels          map[string]string
 }
@@ -67,6 +68,7 @@ func NormalizeGrafanaPayload(payload GrafanaWebhookPayload) (NormalizedAlert, er
 	)
 
 	severity := firstNonEmpty(labels["severity"], "warning")
+	status := strings.ToLower(firstNonEmpty(payload.State, primary.Status, "firing"))
 	externalAlertID := firstNonEmpty(
 		primary.Fingerprint,
 		fmt.Sprintf("%s-%s-%d", serviceName, environment, primary.StartsAt.UTC().Unix()),
@@ -79,6 +81,7 @@ func NormalizeGrafanaPayload(payload GrafanaWebhookPayload) (NormalizedAlert, er
 		Environment:     environment,
 		Severity:        severity,
 		AlertSource:     "grafana",
+		Status:          status,
 		StartedAt:       primary.StartsAt.UTC(),
 		Labels:          labels,
 	}, nil

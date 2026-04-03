@@ -238,6 +238,39 @@ func (s *PostgresStore) GetIncident(ctx context.Context, incidentID string) (dom
 	return incident, nil
 }
 
+func (s *PostgresStore) GetLatestIncidentByExternalAlertID(ctx context.Context, externalAlertID string) (domain.Incident, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, external_alert_id, alert_source, title, service_name, environment, severity, state, created_at, updated_at
+		FROM incidents
+		WHERE external_alert_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, externalAlertID)
+
+	var incident domain.Incident
+	var state string
+	if err := row.Scan(
+		&incident.ID,
+		&incident.ExternalAlertID,
+		&incident.AlertSource,
+		&incident.Title,
+		&incident.ServiceName,
+		&incident.Environment,
+		&incident.Severity,
+		&state,
+		&incident.CreatedAt,
+		&incident.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Incident{}, ErrNotFound
+		}
+		return domain.Incident{}, err
+	}
+
+	incident.State = domain.IncidentState(state)
+	return incident, nil
+}
+
 func (s *PostgresStore) ListIncidents(ctx context.Context) ([]domain.Incident, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, external_alert_id, alert_source, title, service_name, environment, severity, state, created_at, updated_at

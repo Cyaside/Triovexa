@@ -1551,6 +1551,81 @@ func TestServerRuntimeModeEndpointRejectsInvalidModes(t *testing.T) {
 		t.Fatalf("reasoning mode changed unexpectedly to %q", snapshot.Reasoning)
 	}
 }
+func TestServerGrafanaWebhookDeduplicatesActiveIncident(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	incidentService := incident.NewService(repository, nil, nil, nil, nil, nil)
+	server := NewServer(config.Config{
+		ServiceName:     "triovexa",
+		Environment:     "test",
+		HTTPPort:        "0",
+		DatabaseURL:     "memory",
+		ReadTimeout:     5 * time.Second,
+		WriteTimeout:    5 * time.Second,
+		IdleTimeout:     5 * time.Second,
+		ShutdownTimeout: 5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, incidentService, nil, nil)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	payload := map[string]any{
+		"title": "checkout timeout alert",
+		"state": "firing",
+		"alerts": []map[string]any{{
+			"status":      "firing",
+			"fingerprint": "alert-dedup-001",
+			"startsAt":    time.Now().UTC().Format(time.RFC3339),
+			"labels": map[string]string{
+				"service":     "checkout-service",
+				"environment": "staging",
+				"severity":    "critical",
+			},
+		}},
+	}
+	body, _ := json.Marshal(payload)
+
+	responseA, err := http.Post(api.URL+"/webhooks/grafana", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post first webhook: %v", err)
+	}
+	defer responseA.Body.Close()
+	var first map[string]any
+	if err := json.NewDecoder(responseA.Body).Decode(&first); err != nil {
+		t.Fatalf("decode first webhook response: %v", err)
+	}
+
+	responseB, err := http.Post(api.URL+"/webhooks/grafana", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post duplicate webhook: %v", err)
+	}
+	defer responseB.Body.Close()
+	var second map[string]any
+	if err := json.NewDecoder(responseB.Body).Decode(&second); err != nil {
+		t.Fatalf("decode duplicate webhook response: %v", err)
+	}
+
+	if first["incident_id"] != second["incident_id"] {
+		t.Fatalf("duplicate webhook created a new incident: first=%v second=%v", first["incident_id"], second["incident_id"])
+	}
+
+	listResponse, err := http.Get(api.URL + "/incidents")
+	if err != nil {
+		t.Fatalf("get incidents: %v", err)
+	}
+	defer listResponse.Body.Close()
+	var listPayload struct {
+		Incidents []map[string]any `json:"incidents"`
+	}
+	if err := json.NewDecoder(listResponse.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode incidents response: %v", err)
+	}
+	if len(listPayload.Incidents) != 1 {
+		t.Fatalf("incident count = %d, want 1 after duplicate webhook", len(listPayload.Incidents))
+	}
+}
+
 func waitForTriageResult(t *testing.T, baseURL string, incidentID string) {
 	t.Helper()
 

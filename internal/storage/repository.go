@@ -14,6 +14,7 @@ type Repository interface {
 	CreateIncident(context.Context, domain.Incident) error
 	UpdateIncidentState(context.Context, string, domain.IncidentState) error
 	GetIncident(context.Context, string) (domain.Incident, error)
+	GetLatestIncidentByExternalAlertID(context.Context, string) (domain.Incident, error)
 	ListIncidents(context.Context) ([]domain.Incident, error)
 	AddAuditEvent(context.Context, domain.AuditEvent) error
 	ListAuditEvents(context.Context, string) ([]domain.AuditEvent, error)
