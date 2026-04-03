@@ -22,6 +22,10 @@ func NewHeuristicGenerator(catalog execution.Catalog) *HeuristicGenerator {
 	return &HeuristicGenerator{catalog: catalog}
 }
 
+func (g *HeuristicGenerator) CatalogMode() string {
+	return "heuristic-constrained"
+}
+
 func (g *HeuristicGenerator) Generate(
 	ctx context.Context,
 	incident domain.Incident,

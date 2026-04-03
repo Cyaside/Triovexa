@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,6 +45,10 @@ type TriageGenerator interface {
 
 type ActionGenerator interface {
 	Generate(context.Context, domain.Incident, domain.TriageResult, []domain.EvidenceItem, []domain.DocumentReference) ([]domain.CandidateAction, error)
+}
+
+type actionGeneratorCatalogModeProvider interface {
+	CatalogMode() string
 }
 
 type PolicyWorkflow interface {
@@ -232,7 +237,7 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 
 	startedAt := s.now()
 	if err := s.audit(ctx, incident.ID, "action_generation", "started", map[string]any{
-		"catalog_mode": "heuristic-constrained",
+		"catalog_mode": actionCatalogMode(s.actions),
 	}, startedAt, startedAt); err != nil {
 		return domain.Incident{}, fmt.Errorf("audit action generation start: %w", err)
 	}
@@ -325,6 +330,16 @@ func countCandidateActions(actions []domain.CandidateAction) (valid int, invalid
 	}
 
 	return valid, invalid
+}
+
+func actionCatalogMode(generator ActionGenerator) string {
+	if provider, ok := generator.(actionGeneratorCatalogModeProvider); ok {
+		if modeLabel := strings.TrimSpace(provider.CatalogMode()); modeLabel != "" {
+			return modeLabel
+		}
+	}
+
+	return "heuristic-constrained"
 }
 
 func (s *Service) audit(

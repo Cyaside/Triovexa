@@ -32,6 +32,10 @@ func NewMistralGenerator(catalog execution.Catalog, client ai.JSONCompleter) *Mi
 	}
 }
 
+func (g *MistralGenerator) CatalogMode() string {
+	return "mistral-constrained"
+}
+
 func (g *MistralGenerator) Generate(
 	ctx context.Context,
 	incident domain.Incident,
@@ -150,6 +154,14 @@ func (g *SwitchingGenerator) Generate(
 	}
 
 	return g.heuristic.Generate(ctx, incident, triage, evidence, documents)
+}
+
+func (g *SwitchingGenerator) CatalogMode() string {
+	if g.modes != nil && g.modes.Snapshot().Reasoning == mode.ReasoningMistral {
+		return "mistral-constrained"
+	}
+
+	return "heuristic-constrained"
 }
 
 func buildActionPrompt(

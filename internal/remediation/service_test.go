@@ -8,6 +8,7 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
+	"github.com/Cyaside/Triovexa/internal/mode"
 )
 
 func TestHeuristicGeneratorWorkerStallProducesControlledRiskActions(t *testing.T) {
@@ -113,5 +114,25 @@ func newEvidence(id string, itemType string, snippet string, metadata map[string
 		Snippet:      snippet,
 		Timestamp:    time.Now().UTC(),
 		MetadataJSON: string(body),
+	}
+}
+func TestGeneratorCatalogModesReflectReasoningSource(t *testing.T) {
+	t.Parallel()
+
+	heuristic := NewHeuristicGenerator(execution.DefaultCatalog())
+	if heuristic.CatalogMode() != "heuristic-constrained" {
+		t.Fatalf("heuristic CatalogMode() = %q, want %q", heuristic.CatalogMode(), "heuristic-constrained")
+	}
+
+	switching := &SwitchingGenerator{
+		modes: mode.NewManager("heuristic", "demo"),
+	}
+	if switching.CatalogMode() != "heuristic-constrained" {
+		t.Fatalf("switching CatalogMode() = %q, want %q", switching.CatalogMode(), "heuristic-constrained")
+	}
+
+	switching.modes.SetReasoning("mistral")
+	if switching.CatalogMode() != "mistral-constrained" {
+		t.Fatalf("switching CatalogMode() after mistral = %q, want %q", switching.CatalogMode(), "mistral-constrained")
 	}
 }
