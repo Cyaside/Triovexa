@@ -388,6 +388,20 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 	}
 
 	if validCount == 0 {
+		escalatedAt := s.now()
+		if err := s.audit(ctx, incident.ID, "action_follow_up", "escalated", map[string]any{
+			"reason":          "no valid candidate actions generated",
+			"invalid_count":   invalidCount,
+			"candidate_count": len(actions),
+		}, escalatedAt, escalatedAt); err != nil {
+			return domain.Incident{}, fmt.Errorf("audit missing valid candidate actions: %w", err)
+		}
+
+		incident, err = s.transitionIncidentState(ctx, incident, domain.IncidentStateEscalated)
+		if err != nil {
+			return domain.Incident{}, fmt.Errorf("move incident to escalated after empty action set: %w", err)
+		}
+
 		return incident, nil
 	}
 
