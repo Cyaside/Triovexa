@@ -103,7 +103,7 @@ func triggerDemoScenario(ctx context.Context, demoBaseURL string, incidentServic
 		return domain.Incident{}, err
 	}
 
-	return incidentService.IngestGrafanaWebhook(ctx, buildDemoScenarioWebhook(scenario))
+	return incidentService.IngestGrafanaWebhookAsync(ctx, buildDemoScenarioWebhook(scenario))
 }
 
 func lookupDemoScenario(key string) (demoScenarioDefinition, bool) {

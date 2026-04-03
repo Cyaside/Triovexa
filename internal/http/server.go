@@ -215,7 +215,7 @@ func NewServerWithTelemetry(
 			return
 		}
 
-		record, err := incidentService.IngestGrafanaWebhook(r.Context(), payload)
+		record, err := incidentService.IngestGrafanaWebhookAsync(r.Context(), payload)
 		if err != nil {
 			logger.Error("failed to ingest grafana webhook", slog.String("error", err.Error()))
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

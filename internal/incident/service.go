@@ -77,9 +77,53 @@ func NewService(
 }
 
 func (s *Service) IngestGrafanaWebhook(ctx context.Context, payload alerting.GrafanaWebhookPayload) (domain.Incident, error) {
+	incident, shouldRunTriage, err := s.acceptGrafanaWebhook(ctx, payload)
+	if err != nil {
+		return domain.Incident{}, err
+	}
+	if !shouldRunTriage {
+		return incident, nil
+	}
+
+	if _, err := s.runReadOnlyTriage(ctx, incident); err != nil {
+		return incident, err
+	}
+
+	latest, err := s.repository.GetIncident(ctx, incident.ID)
+	if err != nil {
+		return domain.Incident{}, fmt.Errorf("reload incident after triage: %w", err)
+	}
+
+	return latest, nil
+}
+
+func (s *Service) IngestGrafanaWebhookAsync(ctx context.Context, payload alerting.GrafanaWebhookPayload) (domain.Incident, error) {
+	incident, shouldRunTriage, err := s.acceptGrafanaWebhook(ctx, payload)
+	if err != nil {
+		return domain.Incident{}, err
+	}
+	if !shouldRunTriage {
+		return incident, nil
+	}
+
+	incident, err = s.transitionIncidentState(ctx, incident, domain.IncidentStateTriaging)
+	if err != nil {
+		return domain.Incident{}, fmt.Errorf("move incident to triaging: %w", err)
+	}
+	if err := s.audit(ctx, incident.ID, "background_triage_dispatch", "completed", map[string]any{
+		"mode": "async",
+	}, s.now(), s.now()); err != nil {
+		return domain.Incident{}, fmt.Errorf("audit background triage dispatch: %w", err)
+	}
+
+	s.runReadOnlyTriageInBackground(incident)
+	return incident, nil
+}
+
+func (s *Service) acceptGrafanaWebhook(ctx context.Context, payload alerting.GrafanaWebhookPayload) (domain.Incident, bool, error) {
 	normalized, err := alerting.NormalizeGrafanaPayload(payload)
 	if err != nil {
-		return domain.Incident{}, fmt.Errorf("normalize grafana payload: %w", err)
+		return domain.Incident{}, false, fmt.Errorf("normalize grafana payload: %w", err)
 	}
 
 	now := s.now()
@@ -97,7 +141,7 @@ func (s *Service) IngestGrafanaWebhook(ctx context.Context, payload alerting.Gra
 	}
 
 	if err := s.repository.CreateIncident(ctx, incident); err != nil {
-		return domain.Incident{}, fmt.Errorf("create incident: %w", err)
+		return domain.Incident{}, false, fmt.Errorf("create incident: %w", err)
 	}
 	if s.metrics != nil {
 		s.metrics.IncIncidentIngested()
@@ -112,7 +156,7 @@ func (s *Service) IngestGrafanaWebhook(ctx context.Context, payload alerting.Gra
 		"labels":            normalized.Labels,
 	})
 	if err != nil {
-		return domain.Incident{}, fmt.Errorf("marshal intake audit details: %w", err)
+		return domain.Incident{}, false, fmt.Errorf("marshal intake audit details: %w", err)
 	}
 
 	auditEvent := domain.AuditEvent{
@@ -126,22 +170,36 @@ func (s *Service) IngestGrafanaWebhook(ctx context.Context, payload alerting.Gra
 	}
 
 	if err := s.repository.AddAuditEvent(ctx, auditEvent); err != nil {
-		return domain.Incident{}, fmt.Errorf("create intake audit event: %w", err)
+		return domain.Incident{}, false, fmt.Errorf("create intake audit event: %w", err)
 	}
 
-	if s.collector != nil && s.retriever != nil && s.generator != nil {
-		if _, err := s.runReadOnlyTriage(ctx, incident); err != nil {
-			return incident, err
-		}
+	return incident, s.isReadOnlyTriageConfigured(), nil
+}
 
-		latest, err := s.repository.GetIncident(ctx, incident.ID)
-		if err != nil {
-			return domain.Incident{}, fmt.Errorf("reload incident after triage: %w", err)
-		}
-		incident = latest
-	}
+func (s *Service) isReadOnlyTriageConfigured() bool {
+	return s.collector != nil && s.retriever != nil && s.generator != nil
+}
 
-	return incident, nil
+func (s *Service) runReadOnlyTriageInBackground(incident domain.Incident) {
+	go func() {
+		backgroundCtx := context.Background()
+		if _, err := s.runReadOnlyTriage(backgroundCtx, incident); err != nil {
+			failedAt := s.now()
+			_ = s.audit(backgroundCtx, incident.ID, "background_triage", "failed", map[string]any{
+				"error": err.Error(),
+			}, failedAt, failedAt)
+
+			latest, getErr := s.repository.GetIncident(backgroundCtx, incident.ID)
+			if getErr == nil {
+				if _, transitionErr := s.transitionIncidentState(backgroundCtx, latest, domain.IncidentStateEscalated); transitionErr == nil {
+					escalatedAt := s.now()
+					_ = s.audit(backgroundCtx, incident.ID, "background_triage", "escalated", map[string]any{
+						"reason": "background triage failed",
+					}, escalatedAt, escalatedAt)
+				}
+			}
+		}
+	}()
 }
 
 func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Incident) (domain.Incident, error) {

@@ -174,9 +174,12 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	}
 
 	state, ok := webhookPayload["state"].(string)
-	if !ok || state != "awaiting_approval" {
-		t.Fatalf("webhook state = %v, want %q", webhookPayload["state"], "awaiting_approval")
+	if !ok || state != "triaging" {
+		t.Fatalf("webhook state = %v, want %q", webhookPayload["state"], "triaging")
 	}
+
+	waitForTriageResult(t, api.URL, incidentID)
+	waitForCandidateActionsReady(t, api.URL, incidentID, 1)
 
 	triageResponse, err := http.Get(api.URL + "/incidents/" + incidentID + "/triage")
 	if err != nil {
@@ -667,6 +670,8 @@ func TestServerEndToEndMediumRiskRollback(t *testing.T) {
 		t.Fatalf("incident id missing from webhook response")
 	}
 
+	waitForCandidateActionsReady(t, api.URL, incidentID, 1)
+
 	actionsResponse, err := http.Get(api.URL + "/incidents/" + incidentID + "/actions")
 	if err != nil {
 		t.Fatalf("get candidate actions: %v", err)
@@ -933,6 +938,8 @@ func TestServerMetricsEndpointExposesWorkflowMetrics(t *testing.T) {
 	if err := json.NewDecoder(webhookResponse.Body).Decode(&webhookPayload); err != nil {
 		t.Fatalf("decode webhook response: %v", err)
 	}
+
+	waitForCandidateActionsReady(t, api.URL, webhookPayload["incident_id"].(string), 1)
 
 	actionResponse, err := http.Get(api.URL + "/incidents/" + webhookPayload["incident_id"].(string) + "/actions")
 	if err != nil {
@@ -1543,4 +1550,43 @@ func TestServerRuntimeModeEndpointRejectsInvalidModes(t *testing.T) {
 	if snapshot.Reasoning != mode.ReasoningHeuristic {
 		t.Fatalf("reasoning mode changed unexpectedly to %q", snapshot.Reasoning)
 	}
+}
+func waitForTriageResult(t *testing.T, baseURL string, incidentID string) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		response, err := http.Get(baseURL + "/incidents/" + incidentID + "/triage")
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	t.Fatalf("triage result for incident %s did not become ready in time", incidentID)
+}
+
+func waitForCandidateActionsReady(t *testing.T, baseURL string, incidentID string, minimum int) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		response, err := http.Get(baseURL + "/incidents/" + incidentID + "/actions")
+		if err == nil {
+			var payload struct {
+				Actions []map[string]any `json:"actions"`
+			}
+			decodeErr := json.NewDecoder(response.Body).Decode(&payload)
+			response.Body.Close()
+			if decodeErr == nil && len(payload.Actions) >= minimum {
+				return
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	t.Fatalf("candidate actions for incident %s did not become ready in time", incidentID)
 }
