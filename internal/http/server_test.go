@@ -1626,6 +1626,152 @@ func TestServerGrafanaWebhookDeduplicatesActiveIncident(t *testing.T) {
 	}
 }
 
+func TestServerGrafanaWebhookIgnoresResolvedAlertWithoutActiveIncident(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	incidentService := incident.NewService(repository, nil, nil, nil, nil, nil)
+	server := NewServer(config.Config{
+		ServiceName:     "triovexa",
+		Environment:     "test",
+		HTTPPort:        "0",
+		DatabaseURL:     "memory",
+		ReadTimeout:     5 * time.Second,
+		WriteTimeout:    5 * time.Second,
+		IdleTimeout:     5 * time.Second,
+		ShutdownTimeout: 5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, incidentService, nil, nil)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	payload := map[string]any{
+		"title": "checkout timeout alert",
+		"state": "resolved",
+		"alerts": []map[string]any{{
+			"status":      "resolved",
+			"fingerprint": "alert-resolved-001",
+			"startsAt":    time.Now().UTC().Format(time.RFC3339),
+			"labels": map[string]string{
+				"service":     "checkout-service",
+				"environment": "staging",
+				"severity":    "critical",
+			},
+		}},
+	}
+	body, _ := json.Marshal(payload)
+
+	response, err := http.Post(api.URL+"/webhooks/grafana", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post resolved webhook: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("resolved webhook status = %d, want %d", response.StatusCode, http.StatusAccepted)
+	}
+
+	var result map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatalf("decode resolved webhook response: %v", err)
+	}
+	if ignored, _ := result["ignored"].(bool); !ignored {
+		t.Fatalf("resolved webhook should be ignored, got %v", result)
+	}
+
+	listResponse, err := http.Get(api.URL + "/incidents")
+	if err != nil {
+		t.Fatalf("get incidents: %v", err)
+	}
+	defer listResponse.Body.Close()
+	var listPayload struct {
+		Incidents []map[string]any `json:"incidents"`
+	}
+	if err := json.NewDecoder(listResponse.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode incidents response: %v", err)
+	}
+	if len(listPayload.Incidents) != 0 {
+		t.Fatalf("incident count = %d, want 0 for ignored resolved alert", len(listPayload.Incidents))
+	}
+}
+
+func TestServerGrafanaWebhookClosesActiveIncidentOnResolvedAlert(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	incidentService := incident.NewService(repository, nil, nil, nil, nil, nil)
+	server := NewServer(config.Config{
+		ServiceName:     "triovexa",
+		Environment:     "test",
+		HTTPPort:        "0",
+		DatabaseURL:     "memory",
+		ReadTimeout:     5 * time.Second,
+		WriteTimeout:    5 * time.Second,
+		IdleTimeout:     5 * time.Second,
+		ShutdownTimeout: 5 * time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, incidentService, nil, nil)
+
+	api := httptest.NewServer(server.Handler)
+	defer api.Close()
+
+	firingPayload := map[string]any{
+		"title": "checkout timeout alert",
+		"state": "firing",
+		"alerts": []map[string]any{{
+			"status":      "firing",
+			"fingerprint": "alert-resolved-002",
+			"startsAt":    time.Now().UTC().Format(time.RFC3339),
+			"labels": map[string]string{
+				"service":     "checkout-service",
+				"environment": "staging",
+				"severity":    "critical",
+			},
+		}},
+	}
+	body, _ := json.Marshal(firingPayload)
+	response, err := http.Post(api.URL+"/webhooks/grafana", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post firing webhook: %v", err)
+	}
+	defer response.Body.Close()
+	var firingResult map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&firingResult); err != nil {
+		t.Fatalf("decode firing response: %v", err)
+	}
+	incidentID, _ := firingResult["incident_id"].(string)
+
+	resolvedPayload := map[string]any{
+		"title": "checkout timeout alert",
+		"state": "resolved",
+		"alerts": []map[string]any{{
+			"status":      "resolved",
+			"fingerprint": "alert-resolved-002",
+			"startsAt":    time.Now().UTC().Format(time.RFC3339),
+			"labels": map[string]string{
+				"service":     "checkout-service",
+				"environment": "staging",
+				"severity":    "critical",
+			},
+		}},
+	}
+	resolvedBody, _ := json.Marshal(resolvedPayload)
+	resolvedResponse, err := http.Post(api.URL+"/webhooks/grafana", "application/json", bytes.NewReader(resolvedBody))
+	if err != nil {
+		t.Fatalf("post resolved webhook: %v", err)
+	}
+	defer resolvedResponse.Body.Close()
+	var resolvedResult map[string]any
+	if err := json.NewDecoder(resolvedResponse.Body).Decode(&resolvedResult); err != nil {
+		t.Fatalf("decode resolved response: %v", err)
+	}
+	if resolvedResult["incident_id"] != incidentID {
+		t.Fatalf("resolved webhook should reuse active incident id, got %v want %v", resolvedResult["incident_id"], incidentID)
+	}
+	if resolvedResult["state"] != string(domain.IncidentStateClosed) {
+		t.Fatalf("resolved webhook state = %v, want %q", resolvedResult["state"], domain.IncidentStateClosed)
+	}
+}
+
 func waitForTriageResult(t *testing.T, baseURL string, incidentID string) {
 	t.Helper()
 

@@ -135,6 +135,33 @@ func (s *Service) acceptGrafanaWebhook(ctx context.Context, payload alerting.Gra
 	}
 	latestFound := err == nil
 
+	if strings.EqualFold(normalized.Status, "resolved") {
+		if !latestFound || isTerminalIncidentState(latest.State) {
+			return domain.Incident{}, false, ErrResolvedAlertIgnored
+		}
+
+		nextState, ok := nextStateForResolvedAlert(latest.State)
+		if !ok {
+			return latest, false, nil
+		}
+		if nextState != latest.State {
+			latest, err = s.transitionIncidentState(ctx, latest, nextState)
+			if err != nil {
+				return domain.Incident{}, false, fmt.Errorf("transition incident after resolved alert: %w", err)
+			}
+		}
+		resolvedAt := s.now()
+		if auditErr := s.audit(ctx, latest.ID, "external_alert_resolved", "completed", map[string]any{
+			"external_alert_id": normalized.ExternalAlertID,
+			"status":            normalized.Status,
+			"next_state":        latest.State,
+		}, resolvedAt, resolvedAt); auditErr != nil {
+			return domain.Incident{}, false, fmt.Errorf("audit resolved alert: %w", auditErr)
+		}
+
+		return latest, false, nil
+	}
+
 	if latestFound && !isTerminalIncidentState(latest.State) {
 		dedupedAt := s.now()
 		if auditErr := s.audit(ctx, latest.ID, "webhook_deduplicated", "completed", map[string]any{
@@ -428,6 +455,16 @@ func isTerminalIncidentState(state domain.IncidentState) bool {
 	default:
 		return false
 	}
+}
+
+func nextStateForResolvedAlert(state domain.IncidentState) (domain.IncidentState, bool) {
+	if CanTransition(state, domain.IncidentStateResolved) {
+		return domain.IncidentStateResolved, true
+	}
+	if CanTransition(state, domain.IncidentStateClosed) {
+		return domain.IncidentStateClosed, true
+	}
+	return "", false
 }
 
 func (s *Service) audit(
