@@ -15,6 +15,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/approval"
 	"github.com/Cyaside/Triovexa/internal/auth"
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
+	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	apphttp "github.com/Cyaside/Triovexa/internal/http"
 	"github.com/Cyaside/Triovexa/internal/incident"
@@ -67,8 +68,9 @@ func main() {
 	llmClient, err := ai.NewOpenAICompatibleClient(ai.ProviderConfig{
 		Name: llmProvider, BaseURL: llmBaseURL, APIKey: llmAPIKey, Model: llmModel,
 		JSONMode: cfg.LLMJSONMode, Timeout: cfg.LLMTimeout,
-		AllowHTTP:  strings.EqualFold(cfg.Environment, "local") || strings.EqualFold(cfg.Environment, "local-demo"),
-		AllowHosts: cfg.LLMAllowHosts,
+		AllowHTTP:        strings.EqualFold(cfg.Environment, "local") || strings.EqualFold(cfg.Environment, "local-demo"),
+		AllowHosts:       cfg.LLMAllowHosts,
+		RequireAllowlist: cfg.InternalMode() && strings.TrimSpace(llmAPIKey) != "",
 	})
 	if err != nil {
 		logger.Error("invalid LLM provider configuration", slog.String("error", err.Error()))
@@ -89,9 +91,15 @@ func main() {
 		DeployLogsQuery: cfg.GrafanaDeployLogsQuery,
 		Lookback:        cfg.GrafanaQueryLookback,
 	}
+	var localCollector interface {
+		Collect(context.Context, domain.Incident) ([]domain.EvidenceItem, error)
+	} = observability.NewDemoCollector(cfg.DemoServiceBaseURL)
+	if strings.TrimSpace(cfg.WorkloadControlBaseURL) != "" {
+		localCollector = observability.NewWorkloadCollector(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken)
+	}
 	collector := observability.NewSwitchingCollector(
 		runtimeModes,
-		observability.NewDemoCollector(cfg.DemoServiceBaseURL),
+		localCollector,
 		observability.NewGrafanaCollector(grafanaClient, grafanaSignals),
 	)
 	generator := triage.NewSwitchingGenerator(
@@ -108,11 +116,12 @@ func main() {
 	recorder.RecordKillSwitchState(cfg.KillSwitchEnabled)
 	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch).WithTelemetry(recorder)
 	actionAdapter := execution.Adapter(execution.NewDemoAdapter(cfg.DemoServiceBaseURL))
-	snapshotFetcher := verification.SnapshotFetcher(verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL))
+	localSnapshotFetcher := verification.SnapshotFetcher(verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL))
 	if strings.TrimSpace(cfg.WorkloadControlBaseURL) != "" {
 		actionAdapter = execution.NewControlAdapter(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken)
-		snapshotFetcher = verification.NewWorkloadSnapshotFetcher(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken)
+		localSnapshotFetcher = verification.NewWorkloadSnapshotFetcher(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken)
 	}
+	snapshotFetcher := observability.NewSwitchingSnapshotFetcher(runtimeModes, localSnapshotFetcher, observability.NewGrafanaSnapshotFetcher(grafanaClient, grafanaSignals))
 	rollbackService := execution.NewRollbackService(repository, catalog, actionAdapter, cfg.ActionExecutionTimeout)
 	verificationService := verification.NewService(
 		repository,

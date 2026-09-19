@@ -74,6 +74,18 @@ func TestServiceEvaluateActionsMovesIncidentToAwaitingApproval(t *testing.T) {
 	}
 }
 
+func TestKillSwitchStatePersistsAcrossServiceRestart(t *testing.T) {
+	repository := storage.NewMemoryStore()
+	first := NewService(repository, policy.NewEvaluator(execution.DefaultCatalog()), NewKillSwitch(false))
+	if state := first.SetKillSwitch(true); !state.Enabled {
+		t.Fatal("kill switch was not enabled")
+	}
+	second := NewService(repository, policy.NewEvaluator(execution.DefaultCatalog()), NewKillSwitch(false))
+	if !second.KillSwitchState().Enabled {
+		t.Fatal("persisted kill switch state was not restored")
+	}
+}
+
 func TestServiceApproveActionPersistsApprovalRecord(t *testing.T) {
 	t.Parallel()
 

@@ -2,6 +2,7 @@ package workload
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -194,12 +195,14 @@ func (s *Supervisor) Handler(ctx context.Context) http.Handler {
 			return
 		}
 		status := "succeeded"
+		statusCode := http.StatusOK
 		if err != nil {
 			status = "failed"
+			statusCode = http.StatusInternalServerError
 		}
 		result, _ := json.Marshal(map[string]any{"operation_id": request.OperationID, "operation": request.Operation, "target": request.Target, "status": status, "finished_at": time.Now().UTC(), "error": errorText(err)})
 		_ = s.client.Set(r.Context(), key, result, 24*time.Hour).Err()
-		writeRawJSON(w, 200, result)
+		writeRawJSON(w, statusCode, result)
 	})
 	mux.HandleFunc("/faults", func(w http.ResponseWriter, r *http.Request) {
 		if !s.authorized(r) {
@@ -226,7 +229,12 @@ func (s *Supervisor) Handler(ctx context.Context) http.Handler {
 }
 
 func (s *Supervisor) authorized(r *http.Request) bool {
-	return s.token != "" && strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) == s.token
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if s.token == "" || len(header) < 8 || !strings.EqualFold(header[:7], "Bearer ") {
+		return false
+	}
+	provided := strings.TrimSpace(header[7:])
+	return len(provided) == len(s.token) && subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) == 1
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	body, _ := json.Marshal(value)

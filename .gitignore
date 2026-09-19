@@ -5,6 +5,10 @@ prd.md
 # Build outputs
 bin/
 dist/
+ui/node_modules/
+ui/*.tsbuildinfo
+ui/test-results/
+ui/playwright-report/
 *.exe
 *.dll
 *.so

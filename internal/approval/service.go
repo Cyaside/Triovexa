@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +70,7 @@ type Service struct {
 	killSwitch *KillSwitch
 	metrics    *telemetry.Recorder
 	now        func() time.Time
+	settings   storage.SettingsStore
 }
 
 func NewService(repository storage.Repository, evaluator policy.Evaluator, killSwitch *KillSwitch) *Service {
@@ -76,7 +78,7 @@ func NewService(repository storage.Repository, evaluator policy.Evaluator, killS
 		killSwitch = NewKillSwitch(false)
 	}
 
-	return &Service{
+	service := &Service{
 		repository: repository,
 		evaluator:  evaluator,
 		killSwitch: killSwitch,
@@ -84,6 +86,15 @@ func NewService(repository storage.Repository, evaluator policy.Evaluator, killS
 			return time.Now().UTC()
 		},
 	}
+	if settings, ok := repository.(storage.SettingsStore); ok {
+		service.settings = settings
+		if persisted, err := settings.GetSetting(context.Background(), "safety.kill_switch"); err == nil {
+			if enabled, parseErr := strconv.ParseBool(persisted); parseErr == nil {
+				service.killSwitch.Set(enabled)
+			}
+		}
+	}
+	return service
 }
 
 func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
@@ -279,6 +290,11 @@ func (s *Service) RejectAction(ctx context.Context, actionID string, approvedBy 
 
 func (s *Service) SetKillSwitch(enabled bool) KillSwitchState {
 	state := s.killSwitch.Set(enabled)
+	if s.settings != nil {
+		if err := s.settings.PutSetting(context.Background(), "safety.kill_switch", strconv.FormatBool(enabled)); err != nil {
+			state = s.killSwitch.Set(true)
+		}
+	}
 	if s.metrics != nil {
 		s.metrics.RecordKillSwitchState(state.Enabled)
 	}

@@ -15,14 +15,15 @@ import (
 const maxProviderResponseBytes = 2 << 20
 
 type ProviderConfig struct {
-	Name       string
-	BaseURL    string
-	APIKey     string
-	Model      string
-	JSONMode   bool
-	Timeout    time.Duration
-	AllowHTTP  bool
-	AllowHosts []string
+	Name             string
+	BaseURL          string
+	APIKey           string
+	Model            string
+	JSONMode         bool
+	Timeout          time.Duration
+	AllowHTTP        bool
+	AllowHosts       []string
+	RequireAllowlist bool
 }
 
 type CompletionUsage struct {
@@ -180,6 +181,9 @@ func normalizeProviderConfig(config ProviderConfig) (ProviderConfig, error) {
 		if parsed.Scheme != "http" || !config.AllowHTTP || !isLoopbackHost(parsed.Hostname()) {
 			return ProviderConfig{}, fmt.Errorf("provider base URL must use HTTPS; HTTP is only allowed for loopback local mode")
 		}
+	}
+	if config.RequireAllowlist && len(config.AllowHosts) == 0 {
+		return ProviderConfig{}, fmt.Errorf("provider host allowlist is required")
 	}
 	if len(config.AllowHosts) > 0 && !containsFold(config.AllowHosts, parsed.Hostname()) {
 		return ProviderConfig{}, fmt.Errorf("provider host %q is not allowlisted", parsed.Hostname())

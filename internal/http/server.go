@@ -12,6 +12,7 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/alerting"
 	"github.com/Cyaside/Triovexa/internal/approval"
+	"github.com/Cyaside/Triovexa/internal/auth"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
@@ -62,6 +63,12 @@ func NewServerWithTelemetry(
 	if len(runtimeControls) > 0 {
 		runtimeControl = runtimeControls[0]
 	}
+	var authService = (*auth.Service)(nil)
+	if runtimeControl != nil {
+		authService = runtimeControl.Auth
+	}
+	registerSessionRoutes(mux, cfg, authService)
+	registerAPIV1(mux, cfg, repository, approvalService, executionService, runtimeControl)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -82,6 +89,7 @@ func NewServerWithTelemetry(
 
 	mux.Handle("/metrics", serverMetrics)
 	mux.Handle("/ui/assets/", uiAssetHandler)
+	mux.HandleFunc("/ui/", serveUIApp)
 
 	mux.HandleFunc("/debug/tools", func(w http.ResponseWriter, r *http.Request) {
 		killSwitchState := approval.KillSwitchState{
@@ -215,25 +223,34 @@ func NewServerWithTelemetry(
 			return
 		}
 
-		record, err := incidentService.IngestGrafanaWebhookAsync(r.Context(), payload)
-		if err != nil {
-			if errors.Is(err, incident.ErrResolvedAlertIgnored) {
-				writeJSON(w, http.StatusAccepted, map[string]any{
-					"ignored": true,
-					"reason":  err.Error(),
-				})
+		results := make([]map[string]any, 0, len(payload.Alerts))
+		var first domain.Incident
+		var firstSet bool
+		for _, grafanaAlert := range payload.Alerts {
+			single := payload
+			single.Alerts = []alerting.GrafanaAlert{grafanaAlert}
+			record, ingestErr := incidentService.IngestGrafanaWebhookAsync(r.Context(), single)
+			if ingestErr != nil {
+				if errors.Is(ingestErr, incident.ErrResolvedAlertIgnored) {
+					results = append(results, map[string]any{"ignored": true, "reason": ingestErr.Error(), "fingerprint": grafanaAlert.Fingerprint})
+					continue
+				}
+				logger.Error("failed to ingest grafana webhook alert", slog.String("fingerprint", grafanaAlert.Fingerprint), slog.String("error", ingestErr.Error()))
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": ingestErr.Error()})
 				return
 			}
-			logger.Error("failed to ingest grafana webhook", slog.String("error", err.Error()))
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			if !firstSet {
+				first, firstSet = record, true
+			}
+			results = append(results, map[string]any{"incident_id": record.ID, "external_alert_id": record.ExternalAlertID, "state": record.State, "title": record.Title})
+		}
+		if !firstSet {
+			writeJSON(w, http.StatusAccepted, map[string]any{"ignored": true, "results": results})
 			return
 		}
-
 		writeJSON(w, http.StatusAccepted, map[string]any{
-			"incident_id":       record.ID,
-			"external_alert_id": record.ExternalAlertID,
-			"state":             record.State,
-			"title":             record.Title,
+			"incident_id": first.ID, "external_alert_id": first.ExternalAlertID,
+			"state": first.State, "title": first.Title, "results": results,
 		})
 	})
 
@@ -315,6 +332,7 @@ func NewServerWithTelemetry(
 				return
 			}
 
+			approvedBy = actorFromRequest(r, approvedBy)
 			action, err := approvalService.ApproveAction(r.Context(), actionID, approvedBy, note)
 			if err != nil {
 				logger.Error("failed to approve action", slog.String("error", err.Error()))
@@ -344,6 +362,7 @@ func NewServerWithTelemetry(
 				return
 			}
 
+			approvedBy = actorFromRequest(r, approvedBy)
 			action, err := approvalService.RejectAction(r.Context(), actionID, approvedBy, note)
 			if err != nil {
 				logger.Error("failed to reject action", slog.String("error", err.Error()))
@@ -384,6 +403,7 @@ func NewServerWithTelemetry(
 				return
 			}
 
+			initiatedBy = actorFromRequest(r, initiatedBy)
 			record, err := executionService.ExecuteAction(r.Context(), actionID, initiatedBy)
 			if err != nil {
 				logger.Error("failed to execute action", slog.String("error", err.Error()))
@@ -564,6 +584,10 @@ func NewServerWithTelemetry(
 	mux.HandleFunc("/ui/incidents", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if uiAppAvailable() {
+			serveUIApp(w, r)
 			return
 		}
 
@@ -804,6 +828,10 @@ func NewServerWithTelemetry(
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if uiAppAvailable() {
+			serveUIApp(w, r)
+			return
+		}
 
 		incidentID := strings.TrimPrefix(r.URL.Path, "/ui/incidents/")
 		if incidentID == "" {
@@ -906,7 +934,7 @@ func NewServerWithTelemetry(
 
 	return &http.Server{
 		Addr:         cfg.HTTPAddress(),
-		Handler:      withLogging(logger, serverMetrics, mux),
+		Handler:      withLogging(logger, serverMetrics, securityMiddleware(cfg, authService, mux)),
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -985,6 +1013,7 @@ func parseApprovalRequest(r *http.Request) (approvedBy string, note string, want
 	if approvedBy == "" {
 		approvedBy = strings.TrimSpace(r.Header.Get("X-Operator-Name"))
 	}
+	approvedBy = actorFromRequest(r, approvedBy)
 	if approvedBy == "" {
 		return "", "", wantsHTML, errors.New("approved_by is required")
 	}
@@ -1045,6 +1074,7 @@ func parseExecutionRequest(r *http.Request) (initiatedBy string, note string, wa
 	if initiatedBy == "" {
 		initiatedBy = strings.TrimSpace(r.Header.Get("X-Operator-Name"))
 	}
+	initiatedBy = actorFromRequest(r, initiatedBy)
 	if initiatedBy == "" {
 		return "", "", wantsHTML, errors.New("initiated_by is required")
 	}

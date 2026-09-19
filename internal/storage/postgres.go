@@ -174,6 +174,11 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS sessions_expiry_lookup ON sessions(expires_at);`,
+		`CREATE TABLE IF NOT EXISTS application_settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		);`,
 		`CREATE TABLE IF NOT EXISTS verification_results (
 			id TEXT PRIMARY KEY,
 			execution_record_id TEXT NOT NULL UNIQUE REFERENCES execution_records(id) ON DELETE CASCADE,
@@ -207,6 +212,23 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 func (s *PostgresStore) CreateUser(ctx context.Context, user domain.User) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO users (id, username, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5)`,
 		user.ID, user.Username, user.PasswordHash, user.Role, user.CreatedAt.UTC())
+	return err
+}
+
+func (s *PostgresStore) GetSetting(ctx context.Context, key string) (string, error) {
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM application_settings WHERE key = $1`, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return value, err
+}
+
+func (s *PostgresStore) PutSetting(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO application_settings (key, value, updated_at) VALUES ($1, $2, now())
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+	`, key, value)
 	return err
 }
 
@@ -1000,7 +1022,7 @@ func (s *PostgresStore) CreateApprovalRecord(ctx context.Context, record domain.
 
 func (s *PostgresStore) ListApprovalRecords(ctx context.Context, incidentID string) ([]domain.ApprovalRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT ar.id, ar.candidate_action_id, ar.approved_by, ar.decision, ar.note, ar.action_digest, ar.policy_version, ar.expires_at, ar.created_at
+		SELECT ar.id, ar.candidate_action_id, ar.approved_by, ar.decision, ar.note, ar.action_digest, ar.policy_version, COALESCE(ar.expires_at, ar.created_at), ar.created_at
 		FROM approval_records ar
 		INNER JOIN candidate_actions ca ON ca.id = ar.candidate_action_id
 		WHERE ca.incident_id = $1
@@ -1073,14 +1095,30 @@ func (s *PostgresStore) ClaimExecution(ctx context.Context, incidentID string, a
 	}
 	defer tx.Rollback()
 
-	var actionStatus string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM candidate_actions WHERE id = $1 AND incident_id = $2 FOR UPDATE`, actionID, incidentID).Scan(&actionStatus); err != nil {
+	var actionStatus, targetResource string
+	if err := tx.QueryRowContext(ctx, `SELECT status, target_resource FROM candidate_actions WHERE id = $1 AND incident_id = $2 FOR UPDATE`, actionID, incidentID).Scan(&actionStatus, &targetResource); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, ErrNotFound
 		}
 		return false, err
 	}
 	if actionStatus != string(domain.CandidateActionStatusApproved) && actionStatus != string(domain.CandidateActionStatusAllowed) {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, targetResource); err != nil {
+		return false, err
+	}
+	var targetBusy bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM execution_records er
+			JOIN candidate_actions ca ON ca.id = er.candidate_action_id
+			WHERE ca.target_resource = $1 AND er.status = 'started'
+		)
+	`, targetResource).Scan(&targetBusy); err != nil {
+		return false, err
+	}
+	if targetBusy {
 		return false, nil
 	}
 

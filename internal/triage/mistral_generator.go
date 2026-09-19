@@ -47,10 +47,23 @@ func (g *MistralGenerator) Generate(
 	systemPrompt := "Anda adalah AI incident triage operator. Kembalikan HANYA JSON valid dalam Bahasa Indonesia tanpa markdown."
 	userPrompt := buildTriagePrompt(incident, evidence, documents)
 
-	content, err := g.client.CompleteJSON(ctx, []ai.ChatMessage{
+	messages := []ai.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
-	})
+	}
+	var content string
+	var providerMetadata string
+	var err error
+	if detailed, ok := g.client.(ai.DetailedJSONCompleter); ok {
+		completion, completionErr := detailed.CompleteJSONDetailed(ctx, messages)
+		err = completionErr
+		content = completion.Content
+		if completionErr == nil {
+			providerMetadata = fmt.Sprintf("provider=%s model=%s latency_ms=%d prompt_tokens=%d completion_tokens=%d", completion.Provider, completion.Model, completion.Latency.Milliseconds(), completion.Usage.PromptTokens, completion.Usage.CompletionTokens)
+		}
+	} else {
+		content, err = g.client.CompleteJSON(ctx, messages)
+	}
 	if err != nil {
 		return domain.TriageResult{}, err
 	}
@@ -83,6 +96,9 @@ func (g *MistralGenerator) Generate(
 	}
 	if result.ConfidenceNotes == "" {
 		result.ConfidenceNotes = "confidence tidak diberikan model; gunakan evidence dan dokumen untuk validasi manual"
+	}
+	if providerMetadata != "" {
+		result.ConfidenceNotes = strings.TrimSpace(result.ConfidenceNotes + "; " + providerMetadata + "; prompt_version=triage-v1")
 	}
 
 	return result, nil
@@ -125,9 +141,32 @@ func (g *SwitchingGenerator) Generate(
 		if err == nil {
 			return result, nil
 		}
+		fallback, fallbackErr := g.heuristic.Generate(ctx, incident, evidence, documents)
+		if fallbackErr != nil {
+			return domain.TriageResult{}, fallbackErr
+		}
+		fallback.ConfidenceNotes = strings.TrimSpace(fallback.ConfidenceNotes + "; llm_fallback=true; fallback_reason=" + classifyFallback(err))
+		return fallback, nil
 	}
 
 	return g.heuristic.Generate(ctx, incident, evidence, documents)
+}
+
+func classifyFallback(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "timeout"), strings.Contains(message, "deadline"):
+		return "timeout"
+	case strings.Contains(message, "json"), strings.Contains(message, "decode"):
+		return "invalid_response"
+	case strings.Contains(message, "configured"), strings.Contains(message, "credential"):
+		return "not_configured"
+	default:
+		return "provider_error"
+	}
 }
 
 func isLLMReasoning(reasoning mode.Reasoning) bool {

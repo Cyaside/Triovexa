@@ -117,11 +117,8 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 		t.Fatalf("read list body: %v", err)
 	}
 
-	if !strings.Contains(string(listBody), "Demo Scenarios") {
-		t.Fatalf("list body does not contain demo scenario section")
-	}
-	if !strings.Contains(string(listBody), "Trigger Scenario") {
-		t.Fatalf("list body does not contain scenario trigger control")
+	if !strings.Contains(string(listBody), "Triovexa Operator Console") || !strings.Contains(string(listBody), `id="root"`) {
+		t.Fatalf("list body does not contain the React operator console shell")
 	}
 
 	payload := map[string]any{
@@ -231,12 +228,20 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 		t.Fatalf("read ui body: %v", err)
 	}
 
-	if !strings.Contains(string(uiBody), "checkout timeout after deploy") {
-		t.Fatalf("ui body does not contain incident title")
+	if !strings.Contains(string(uiBody), "Triovexa Operator Console") {
+		t.Fatalf("ui body does not contain operator console shell")
 	}
-
-	if !strings.Contains(string(uiBody), "Action Lane") {
-		t.Fatalf("ui body does not contain action lane section")
+	uiDetailResponse, err := http.Get(api.URL + "/api/v1/incidents/" + incidentID)
+	if err != nil {
+		t.Fatalf("get ui incident data: %v", err)
+	}
+	defer uiDetailResponse.Body.Close()
+	uiDetailBody, err := io.ReadAll(uiDetailResponse.Body)
+	if err != nil {
+		t.Fatalf("read ui incident data: %v", err)
+	}
+	if !strings.Contains(string(uiDetailBody), "checkout timeout after deploy") || !strings.Contains(string(uiDetailBody), "candidate_actions") {
+		t.Fatalf("ui incident data is incomplete")
 	}
 
 	actionID, ok := actionsPayload.Actions[0]["ID"].(string)
@@ -493,11 +498,21 @@ func TestServerUIDemoScenarioTriggerRedirectsToIncidentDetail(t *testing.T) {
 		t.Fatalf("read redirected ui body: %v", err)
 	}
 
-	if !strings.Contains(string(body), "checkout timeout after deploy") {
-		t.Fatalf("redirected ui body does not contain incident title")
+	if !strings.Contains(string(body), "Triovexa Operator Console") {
+		t.Fatalf("redirected ui body does not contain the operator console shell")
 	}
-	if !strings.Contains(string(body), "Operator Step") {
-		t.Fatalf("redirected ui body does not contain operator guidance")
+	incidentID := strings.TrimPrefix(strings.Split(location, "?")[0], "/ui/incidents/")
+	detailResponse, err := http.Get(api.URL + "/api/v1/incidents/" + incidentID)
+	if err != nil {
+		t.Fatalf("get redirected incident API: %v", err)
+	}
+	defer detailResponse.Body.Close()
+	detailBody, err := io.ReadAll(detailResponse.Body)
+	if err != nil {
+		t.Fatalf("read redirected incident API: %v", err)
+	}
+	if !strings.Contains(string(detailBody), "checkout timeout after deploy") {
+		t.Fatalf("incident API does not contain incident title")
 	}
 }
 
@@ -1153,15 +1168,21 @@ func TestServerIncidentWorkbenchShowsRuntimeControls(t *testing.T) {
 		t.Fatalf("read workbench body: %v", err)
 	}
 
-	text := string(body)
-	for _, expected := range []string{
-		"Switch Reasoning to heuristic",
-		"Switch Observability to demo",
-		"metrics UID grafanacloud-prom",
-		"logs UID grafanacloud-logs",
-	} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("workbench body missing %q", expected)
+	if !strings.Contains(string(body), "Triovexa Operator Console") {
+		t.Fatalf("workbench body missing React operator console shell")
+	}
+	connections, err := http.Get(api.URL + "/api/v1/connections")
+	if err != nil {
+		t.Fatalf("get connection status: %v", err)
+	}
+	defer connections.Body.Close()
+	connectionBody, err := io.ReadAll(connections.Body)
+	if err != nil {
+		t.Fatalf("read connection status: %v", err)
+	}
+	for _, expected := range []string{"grafanacloud-prom", "grafanacloud-logs"} {
+		if !strings.Contains(string(connectionBody), expected) {
+			t.Fatalf("connection status missing %q", expected)
 		}
 	}
 }

@@ -26,6 +26,7 @@ type MemoryStore struct {
 	triageByID map[string]domain.TriageResult
 	users      map[string]domain.User
 	sessions   map[string]domain.Session
+	settings   map[string]string
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -43,7 +44,25 @@ func NewMemoryStore() *MemoryStore {
 		triageByID: make(map[string]domain.TriageResult),
 		users:      make(map[string]domain.User),
 		sessions:   make(map[string]domain.Session),
+		settings:   make(map[string]string),
 	}
+}
+
+func (s *MemoryStore) GetSetting(_ context.Context, key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.settings[key]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *MemoryStore) PutSetting(_ context.Context, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings[key] = value
+	return nil
 }
 
 func (s *MemoryStore) CreateUser(_ context.Context, user domain.User) error {
@@ -423,6 +442,19 @@ func (s *MemoryStore) ClaimExecution(_ context.Context, incidentID string, actio
 	for _, existing := range s.executions[incidentID] {
 		if existing.CandidateActionID == actionID {
 			return false, nil
+		}
+	}
+	target := actions[actionIndex].TargetResource
+	for candidateIncidentID, records := range s.executions {
+		for _, existing := range records {
+			if existing.Status != "started" {
+				continue
+			}
+			for _, candidate := range s.actions[candidateIncidentID] {
+				if candidate.ID == existing.CandidateActionID && candidate.TargetResource == target {
+					return false, nil
+				}
+			}
 		}
 	}
 	actions[actionIndex].Status = domain.CandidateActionStatusExecuting
