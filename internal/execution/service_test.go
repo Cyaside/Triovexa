@@ -176,6 +176,7 @@ func TestServiceExecuteActionAllowsApprovedMediumRisk(t *testing.T) {
 	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
 		t.Fatalf("save candidate action: %v", err)
 	}
+	seedExecutionApproval(t, repository, action)
 
 	service := NewService(repository, DefaultCatalog(), &fakeAdapter{
 		exec: func(ctx context.Context, action domain.CandidateAction, request AdapterRequest) (AdapterResult, error) {
@@ -247,6 +248,7 @@ func TestServiceExecuteActionRevalidatesScopeBeforeExecution(t *testing.T) {
 			if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
 				t.Fatalf("save candidate action: %v", err)
 			}
+			seedExecutionApproval(t, repository, action)
 
 			adapter := &fakeAdapter{
 				exec: func(ctx context.Context, action domain.CandidateAction, request AdapterRequest) (AdapterResult, error) {
@@ -307,6 +309,35 @@ func seedApprovedExecutionFixture(t *testing.T, repository storage.Repository) (
 	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
 		t.Fatalf("save candidate action: %v", err)
 	}
+	seedExecutionApproval(t, repository, action)
 
 	return incidentRecord, action
+}
+
+func seedExecutionApproval(t *testing.T, repository storage.Repository, action domain.CandidateAction) {
+	t.Helper()
+	now := time.Now().UTC()
+	policyVersion := "test-policy-v1"
+	if err := repository.SavePolicyDecisions(context.Background(), []domain.PolicyDecision{{
+		ID:                uuid.NewString(),
+		CandidateActionID: action.ID,
+		Decision:          domain.PolicyDecisionApprovalRequired,
+		ApprovalRequired:  true,
+		PolicyRuleRef:     policyVersion,
+		DecidedAt:         now,
+	}}); err != nil {
+		t.Fatalf("save policy decision: %v", err)
+	}
+	if err := repository.CreateApprovalRecord(context.Background(), domain.ApprovalRecord{
+		ID:                uuid.NewString(),
+		CandidateActionID: action.ID,
+		ApprovedBy:        "operator-a",
+		Decision:          "approved",
+		ActionDigest:      domain.ActionApprovalDigest(action, policyVersion),
+		PolicyVersion:     policyVersion,
+		ExpiresAt:         now.Add(15 * time.Minute),
+		CreatedAt:         now,
+	}); err != nil {
+		t.Fatalf("create approval record: %v", err)
+	}
 }

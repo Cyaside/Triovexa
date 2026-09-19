@@ -2,7 +2,9 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +24,8 @@ type MemoryStore struct {
 	verify     map[string][]domain.VerificationResult
 	rollbacks  map[string][]domain.RollbackRecord
 	triageByID map[string]domain.TriageResult
+	users      map[string]domain.User
+	sessions   map[string]domain.Session
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -37,7 +41,66 @@ func NewMemoryStore() *MemoryStore {
 		verify:     make(map[string][]domain.VerificationResult),
 		rollbacks:  make(map[string][]domain.RollbackRecord),
 		triageByID: make(map[string]domain.TriageResult),
+		users:      make(map[string]domain.User),
+		sessions:   make(map[string]domain.Session),
 	}
+}
+
+func (s *MemoryStore) CreateUser(_ context.Context, user domain.User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.users {
+		if strings.EqualFold(existing.Username, user.Username) {
+			return errors.New("username already exists")
+		}
+	}
+	s.users[user.ID] = user
+	return nil
+}
+
+func (s *MemoryStore) GetUserByUsername(_ context.Context, username string) (domain.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, user := range s.users {
+		if strings.EqualFold(user.Username, username) {
+			return user, nil
+		}
+	}
+	return domain.User{}, ErrNotFound
+}
+
+func (s *MemoryStore) GetUser(_ context.Context, id string) (domain.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	user, ok := s.users[id]
+	if !ok {
+		return domain.User{}, ErrNotFound
+	}
+	return user, nil
+}
+
+func (s *MemoryStore) CreateSession(_ context.Context, session domain.Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[session.TokenHash] = session
+	return nil
+}
+
+func (s *MemoryStore) GetSession(_ context.Context, tokenHash string) (domain.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := s.sessions[tokenHash]
+	if !ok || !session.ExpiresAt.After(time.Now()) {
+		return domain.Session{}, ErrNotFound
+	}
+	return session, nil
+}
+
+func (s *MemoryStore) DeleteSession(_ context.Context, tokenHash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, tokenHash)
+	return nil
 }
 
 func (s *MemoryStore) Close() error { return nil }
@@ -333,6 +396,42 @@ func (s *MemoryStore) SaveExecutionRecord(_ context.Context, record domain.Execu
 
 	s.executions[incidentID] = append(records, record)
 	return nil
+}
+
+func (s *MemoryStore) ClaimExecution(_ context.Context, incidentID string, actionID string, record domain.ExecutionRecord) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	incident, ok := s.incidents[incidentID]
+	if !ok {
+		return false, ErrNotFound
+	}
+	actions := s.actions[incidentID]
+	actionIndex := -1
+	for index, action := range actions {
+		if action.ID == actionID {
+			actionIndex = index
+			break
+		}
+	}
+	if actionIndex < 0 {
+		return false, ErrNotFound
+	}
+	status := actions[actionIndex].Status
+	if status != domain.CandidateActionStatusApproved && status != domain.CandidateActionStatusAllowed {
+		return false, nil
+	}
+	for _, existing := range s.executions[incidentID] {
+		if existing.CandidateActionID == actionID {
+			return false, nil
+		}
+	}
+	actions[actionIndex].Status = domain.CandidateActionStatusExecuting
+	s.actions[incidentID] = actions
+	incident.State = domain.IncidentStateExecutingAction
+	incident.UpdatedAt = time.Now().UTC()
+	s.incidents[incidentID] = incident
+	s.executions[incidentID] = append(s.executions[incidentID], record)
+	return true, nil
 }
 
 func (s *MemoryStore) ListExecutionRecords(_ context.Context, incidentID string) ([]domain.ExecutionRecord, error) {

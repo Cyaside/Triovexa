@@ -125,6 +125,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			note TEXT NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL
 		);`,
+		`ALTER TABLE approval_records ADD COLUMN IF NOT EXISTS action_digest TEXT NOT NULL DEFAULT '';`,
+		`ALTER TABLE approval_records ADD COLUMN IF NOT EXISTS policy_version TEXT NOT NULL DEFAULT '';`,
+		`ALTER TABLE approval_records ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;`,
 		`CREATE TABLE IF NOT EXISTS execution_records (
 			id TEXT PRIMARY KEY,
 			candidate_action_id TEXT NOT NULL REFERENCES candidate_actions(id) ON DELETE CASCADE,
@@ -136,6 +139,41 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			finished_at TIMESTAMPTZ NOT NULL,
 			result_json JSONB NOT NULL
 		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS execution_records_candidate_action_unique ON execution_records(candidate_action_id);`,
+		`CREATE INDEX IF NOT EXISTS incidents_external_alert_lookup ON incidents(alert_source, external_alert_id, created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS audit_events_incident_lookup ON audit_events(incident_id, started_at);`,
+		`CREATE INDEX IF NOT EXISTS candidate_actions_incident_lookup ON candidate_actions(incident_id, created_at);`,
+		`CREATE TABLE IF NOT EXISTS workflow_jobs (
+			id TEXT PRIMARY KEY,
+			type TEXT NOT NULL,
+			dedup_key TEXT NOT NULL UNIQUE,
+			payload_json JSONB NOT NULL,
+			status TEXT NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			max_attempts INTEGER NOT NULL DEFAULT 3,
+			available_at TIMESTAMPTZ NOT NULL,
+			lease_owner TEXT NOT NULL DEFAULT '',
+			lease_until TIMESTAMPTZ,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS workflow_jobs_claim_lookup ON workflow_jobs(status, available_at, lease_until);`,
+		`CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			username TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			role TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS sessions (
+			token_hash TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			csrf_hash TEXT NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS sessions_expiry_lookup ON sessions(expires_at);`,
 		`CREATE TABLE IF NOT EXISTS verification_results (
 			id TEXT PRIMARY KEY,
 			execution_record_id TEXT NOT NULL UNIQUE REFERENCES execution_records(id) ON DELETE CASCADE,
@@ -164,6 +202,145 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *PostgresStore) CreateUser(ctx context.Context, user domain.User) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO users (id, username, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5)`,
+		user.ID, user.Username, user.PasswordHash, user.Role, user.CreatedAt.UTC())
+	return err
+}
+
+func (s *PostgresStore) GetUserByUsername(ctx context.Context, username string) (domain.User, error) {
+	return s.scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, password_hash, role, created_at FROM users WHERE lower(username) = lower($1)`, username))
+}
+
+func (s *PostgresStore) GetUser(ctx context.Context, id string) (domain.User, error) {
+	return s.scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, password_hash, role, created_at FROM users WHERE id = $1`, id))
+}
+
+func (s *PostgresStore) scanUser(row *sql.Row) (domain.User, error) {
+	var user domain.User
+	if err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.User{}, ErrNotFound
+		}
+		return domain.User{}, err
+	}
+	return user, nil
+}
+
+func (s *PostgresStore) CreateSession(ctx context.Context, session domain.Session) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions (token_hash, user_id, csrf_hash, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)`,
+		session.TokenHash, session.UserID, session.CSRFHash, session.ExpiresAt.UTC(), session.CreatedAt.UTC())
+	return err
+}
+
+func (s *PostgresStore) GetSession(ctx context.Context, tokenHash string) (domain.Session, error) {
+	var session domain.Session
+	err := s.db.QueryRowContext(ctx, `SELECT token_hash, user_id, csrf_hash, expires_at, created_at FROM sessions WHERE token_hash = $1 AND expires_at > now()`, tokenHash).
+		Scan(&session.TokenHash, &session.UserID, &session.CSRFHash, &session.ExpiresAt, &session.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Session{}, ErrNotFound
+	}
+	return session, err
+}
+
+func (s *PostgresStore) DeleteSession(ctx context.Context, tokenHash string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = $1`, tokenHash)
+	return err
+}
+
+func (s *PostgresStore) EnqueueJob(ctx context.Context, job domain.WorkflowJob) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO workflow_jobs (id, type, dedup_key, payload_json, status, attempts, max_attempts, available_at, lease_owner, lease_until, last_error, created_at, updated_at)
+		VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, '', NULL, '', $9, $9)
+		ON CONFLICT(dedup_key) DO NOTHING
+	`, job.ID, job.Type, job.DedupKey, job.PayloadJSON, domain.JobQueued, job.Attempts, job.MaxAttempts, job.AvailableAt.UTC(), job.CreatedAt.UTC())
+	return err
+}
+
+func (s *PostgresStore) ClaimJob(ctx context.Context, workerID string, leaseUntil time.Time) (domain.WorkflowJob, error) {
+	row := s.db.QueryRowContext(ctx, `
+		WITH candidate AS (
+			SELECT id FROM workflow_jobs
+			WHERE attempts < max_attempts
+			  AND available_at <= now()
+			  AND (status = 'queued' OR (status = 'running' AND lease_until < now()))
+			ORDER BY available_at, created_at
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		)
+		UPDATE workflow_jobs j
+		SET status = 'running', attempts = attempts + 1, lease_owner = $1, lease_until = $2, updated_at = now()
+		FROM candidate
+		WHERE j.id = candidate.id
+		RETURNING j.id, j.type, j.dedup_key, j.payload_json::text, j.status, j.attempts, j.max_attempts,
+		          j.available_at, j.lease_owner, j.lease_until, j.last_error, j.created_at, j.updated_at
+	`, workerID, leaseUntil.UTC())
+	var job domain.WorkflowJob
+	if err := row.Scan(&job.ID, &job.Type, &job.DedupKey, &job.PayloadJSON, &job.Status, &job.Attempts, &job.MaxAttempts,
+		&job.AvailableAt, &job.LeaseOwner, &job.LeaseUntil, &job.LastError, &job.CreatedAt, &job.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.WorkflowJob{}, ErrNoJobAvailable
+		}
+		return domain.WorkflowJob{}, err
+	}
+	return job, nil
+}
+
+func (s *PostgresStore) CompleteJob(ctx context.Context, jobID string, workerID string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE workflow_jobs SET status = 'succeeded', lease_owner = '', lease_until = NULL, updated_at = now()
+		WHERE id = $1 AND status = 'running' AND lease_owner = $2
+	`, jobID, workerID)
+	if err != nil {
+		return err
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows == 0 {
+		if rowsErr != nil {
+			return rowsErr
+		}
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) FailJob(ctx context.Context, jobID string, workerID string, message string, retryAt time.Time, terminal bool) error {
+	status := domain.JobQueued
+	if terminal {
+		status = domain.JobDeadLetter
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE workflow_jobs
+		SET status = $1, available_at = $2, lease_owner = '', lease_until = NULL, last_error = $3, updated_at = now()
+		WHERE id = $4 AND status = 'running' AND lease_owner = $5
+	`, status, retryAt.UTC(), message, jobID, workerID)
+	if err != nil {
+		return err
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows == 0 {
+		if rowsErr != nil {
+			return rowsErr
+		}
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) RecoverTriageJobs(ctx context.Context) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO workflow_jobs (id, type, dedup_key, payload_json, status, attempts, max_attempts, available_at, lease_owner, last_error, created_at, updated_at)
+		SELECT gen_random_uuid()::text, 'triage', 'triage:' || i.id,
+		       jsonb_build_object('incident_id', i.id), 'queued', 0, 3, now(), '', '', now(), now()
+		FROM incidents i
+		WHERE i.state = 'triaging'
+		ON CONFLICT(dedup_key) DO NOTHING
+	`)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := result.RowsAffected()
+	return int(rows), err
 }
 
 func (s *PostgresStore) CreateIncident(ctx context.Context, incident domain.Incident) error {
@@ -805,14 +982,17 @@ func (s *PostgresStore) ListPolicyDecisions(ctx context.Context, incidentID stri
 
 func (s *PostgresStore) CreateApprovalRecord(ctx context.Context, record domain.ApprovalRecord) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO approval_records (id, candidate_action_id, approved_by, decision, note, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO approval_records (id, candidate_action_id, approved_by, decision, note, action_digest, policy_version, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`,
 		record.ID,
 		record.CandidateActionID,
 		record.ApprovedBy,
 		record.Decision,
 		record.Note,
+		record.ActionDigest,
+		record.PolicyVersion,
+		nullableTime(record.ExpiresAt),
 		record.CreatedAt.UTC(),
 	)
 	return err
@@ -820,7 +1000,7 @@ func (s *PostgresStore) CreateApprovalRecord(ctx context.Context, record domain.
 
 func (s *PostgresStore) ListApprovalRecords(ctx context.Context, incidentID string) ([]domain.ApprovalRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT ar.id, ar.candidate_action_id, ar.approved_by, ar.decision, ar.note, ar.created_at
+		SELECT ar.id, ar.candidate_action_id, ar.approved_by, ar.decision, ar.note, ar.action_digest, ar.policy_version, ar.expires_at, ar.created_at
 		FROM approval_records ar
 		INNER JOIN candidate_actions ca ON ca.id = ar.candidate_action_id
 		WHERE ca.incident_id = $1
@@ -840,6 +1020,9 @@ func (s *PostgresStore) ListApprovalRecords(ctx context.Context, incidentID stri
 			&record.ApprovedBy,
 			&record.Decision,
 			&record.Note,
+			&record.ActionDigest,
+			&record.PolicyVersion,
+			&record.ExpiresAt,
 			&record.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -848,6 +1031,13 @@ func (s *PostgresStore) ListApprovalRecords(ctx context.Context, incidentID stri
 	}
 
 	return records, rows.Err()
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC()
 }
 
 func (s *PostgresStore) SaveExecutionRecord(ctx context.Context, record domain.ExecutionRecord) error {
@@ -874,6 +1064,55 @@ func (s *PostgresStore) SaveExecutionRecord(ctx context.Context, record domain.E
 		record.ResultJSON,
 	)
 	return err
+}
+
+func (s *PostgresStore) ClaimExecution(ctx context.Context, incidentID string, actionID string, record domain.ExecutionRecord) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	var actionStatus string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM candidate_actions WHERE id = $1 AND incident_id = $2 FOR UPDATE`, actionID, incidentID).Scan(&actionStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, err
+	}
+	if actionStatus != string(domain.CandidateActionStatusApproved) && actionStatus != string(domain.CandidateActionStatusAllowed) {
+		return false, nil
+	}
+
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO execution_records (id, candidate_action_id, idempotency_key, initiated_by, executor_type, status, started_at, finished_at, result_json)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+		ON CONFLICT(candidate_action_id) DO NOTHING
+	`, record.ID, record.CandidateActionID, record.IdempotencyKey, record.InitiatedBy, record.ExecutorType, record.Status, record.StartedAt.UTC(), record.FinishedAt.UTC(), record.ResultJSON)
+	if err != nil {
+		return false, err
+	}
+	inserted, err := result.RowsAffected()
+	if err != nil || inserted == 0 {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE candidate_actions SET status = $1 WHERE id = $2`, string(domain.CandidateActionStatusExecuting), actionID); err != nil {
+		return false, err
+	}
+	incidentResult, err := tx.ExecContext(ctx, `UPDATE incidents SET state = $1, updated_at = $2 WHERE id = $3`, string(domain.IncidentStateExecutingAction), time.Now().UTC(), incidentID)
+	if err != nil {
+		return false, err
+	}
+	if rows, rowsErr := incidentResult.RowsAffected(); rowsErr != nil || rows == 0 {
+		if rowsErr != nil {
+			return false, rowsErr
+		}
+		return false, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *PostgresStore) ListExecutionRecords(ctx context.Context, incidentID string) ([]domain.ExecutionRecord, error) {

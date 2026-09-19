@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 
+	"github.com/Cyaside/Triovexa/internal/auth"
 	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/observability"
 )
@@ -10,12 +11,16 @@ import (
 type RuntimeControls struct {
 	Modes     *mode.Manager
 	Providers ProviderStatus
+	Auth      *auth.Service
 }
 
 type ProviderStatus struct {
 	MistralConfigured  bool
 	GrafanaConfigured  bool
 	MistralModel       string
+	LLMConfigured      bool
+	LLMProvider        string
+	LLMModel           string
 	MetricsSourceUID   string
 	LogsSourceUID      string
 	GrafanaDatasources interface {
@@ -29,6 +34,9 @@ type runtimeViewData struct {
 	MistralConfigured bool
 	GrafanaConfigured bool
 	MistralModel      string
+	LLMConfigured     bool
+	LLMProvider       string
+	LLMModel          string
 	MetricsSourceUID  string
 	LogsSourceUID     string
 	DatasourceCount   int
@@ -50,6 +58,9 @@ func buildRuntimeViewData(ctx context.Context, controls *RuntimeControls) runtim
 	view.MistralConfigured = controls.Providers.MistralConfigured
 	view.GrafanaConfigured = controls.Providers.GrafanaConfigured
 	view.MistralModel = controls.Providers.MistralModel
+	view.LLMConfigured = controls.Providers.LLMConfigured
+	view.LLMProvider = controls.Providers.LLMProvider
+	view.LLMModel = controls.Providers.LLMModel
 	view.MetricsSourceUID = controls.Providers.MetricsSourceUID
 	view.LogsSourceUID = controls.Providers.LogsSourceUID
 	if controls.Providers.GrafanaDatasources != nil {

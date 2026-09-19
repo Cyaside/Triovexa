@@ -39,6 +39,9 @@ type ApprovalRecord struct {
 	ApprovedBy        string
 	Decision          string
 	Note              string
+	ActionDigest      string
+	PolicyVersion     string
+	ExpiresAt         time.Time
 	CreatedAt         time.Time
 }
 

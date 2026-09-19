@@ -19,6 +19,8 @@ type MistralGenerator struct {
 	now    func() time.Time
 }
 
+type LLMGenerator = MistralGenerator
+
 func NewMistralGenerator(client ai.JSONCompleter) *MistralGenerator {
 	return &MistralGenerator{
 		client: client,
@@ -28,6 +30,10 @@ func NewMistralGenerator(client ai.JSONCompleter) *MistralGenerator {
 	}
 }
 
+func NewLLMGenerator(client ai.JSONCompleter) *LLMGenerator {
+	return NewMistralGenerator(client)
+}
+
 func (g *MistralGenerator) Generate(
 	ctx context.Context,
 	incident domain.Incident,
@@ -35,7 +41,7 @@ func (g *MistralGenerator) Generate(
 	documents []domain.DocumentReference,
 ) (domain.TriageResult, error) {
 	if g.client == nil {
-		return domain.TriageResult{}, fmt.Errorf("mistral triage client is not configured")
+		return domain.TriageResult{}, fmt.Errorf("llm triage client is not configured")
 	}
 
 	systemPrompt := "Anda adalah AI incident triage operator. Kembalikan HANYA JSON valid dalam Bahasa Indonesia tanpa markdown."
@@ -51,7 +57,7 @@ func (g *MistralGenerator) Generate(
 
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(content), &payload); err != nil {
-		return domain.TriageResult{}, fmt.Errorf("decode mistral triage payload: %w", err)
+		return domain.TriageResult{}, fmt.Errorf("decode llm triage payload: %w", err)
 	}
 
 	result := domain.TriageResult{
@@ -67,7 +73,7 @@ func (g *MistralGenerator) Generate(
 	}
 
 	if result.Summary == "" {
-		return domain.TriageResult{}, fmt.Errorf("mistral triage payload did not include summary")
+		return domain.TriageResult{}, fmt.Errorf("llm triage payload did not include summary")
 	}
 	if result.DraftStatusUpdate == "" {
 		result.DraftStatusUpdate = fmt.Sprintf("[%s] %s", strings.ToUpper(incident.Severity), result.Summary)
@@ -87,7 +93,7 @@ type SwitchingGenerator struct {
 	heuristic interface {
 		Generate(context.Context, domain.Incident, []domain.EvidenceItem, []domain.DocumentReference) (domain.TriageResult, error)
 	}
-	mistral interface {
+	llm interface {
 		Generate(context.Context, domain.Incident, []domain.EvidenceItem, []domain.DocumentReference) (domain.TriageResult, error)
 	}
 }
@@ -97,14 +103,14 @@ func NewSwitchingGenerator(
 	heuristic interface {
 		Generate(context.Context, domain.Incident, []domain.EvidenceItem, []domain.DocumentReference) (domain.TriageResult, error)
 	},
-	mistral interface {
+	llm interface {
 		Generate(context.Context, domain.Incident, []domain.EvidenceItem, []domain.DocumentReference) (domain.TriageResult, error)
 	},
 ) *SwitchingGenerator {
 	return &SwitchingGenerator{
 		modes:     modes,
 		heuristic: heuristic,
-		mistral:   mistral,
+		llm:       llm,
 	}
 }
 
@@ -114,11 +120,18 @@ func (g *SwitchingGenerator) Generate(
 	evidence []domain.EvidenceItem,
 	documents []domain.DocumentReference,
 ) (domain.TriageResult, error) {
-	if g.modes != nil && g.modes.Snapshot().Reasoning == mode.ReasoningMistral && g.mistral != nil {
-		return g.mistral.Generate(ctx, incident, evidence, documents)
+	if g.modes != nil && isLLMReasoning(g.modes.Snapshot().Reasoning) && g.llm != nil {
+		result, err := g.llm.Generate(ctx, incident, evidence, documents)
+		if err == nil {
+			return result, nil
+		}
 	}
 
 	return g.heuristic.Generate(ctx, incident, evidence, documents)
+}
+
+func isLLMReasoning(reasoning mode.Reasoning) bool {
+	return reasoning == mode.ReasoningLLM || reasoning == mode.ReasoningMistral
 }
 
 func buildTriagePrompt(

@@ -33,6 +33,7 @@ type Repository interface {
 	ListPolicyDecisions(context.Context, string) ([]domain.PolicyDecision, error)
 	CreateApprovalRecord(context.Context, domain.ApprovalRecord) error
 	ListApprovalRecords(context.Context, string) ([]domain.ApprovalRecord, error)
+	ClaimExecution(context.Context, string, string, domain.ExecutionRecord) (bool, error)
 	SaveExecutionRecord(context.Context, domain.ExecutionRecord) error
 	ListExecutionRecords(context.Context, string) ([]domain.ExecutionRecord, error)
 	ListExecutionRecordsByAction(context.Context, string) ([]domain.ExecutionRecord, error)
@@ -43,4 +44,10 @@ type Repository interface {
 	SaveRollbackRecord(context.Context, domain.RollbackRecord) error
 	ListRollbackRecords(context.Context, string) ([]domain.RollbackRecord, error)
 	ListRollbackRecordsByAction(context.Context, string) ([]domain.RollbackRecord, error)
+	CreateUser(context.Context, domain.User) error
+	GetUserByUsername(context.Context, string) (domain.User, error)
+	GetUser(context.Context, string) (domain.User, error)
+	CreateSession(context.Context, domain.Session) error
+	GetSession(context.Context, string) (domain.Session, error)
+	DeleteSession(context.Context, string) error
 }

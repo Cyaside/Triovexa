@@ -12,6 +12,7 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/approval"
+	"github.com/Cyaside/Triovexa/internal/auth"
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	apphttp "github.com/Cyaside/Triovexa/internal/http"
@@ -25,6 +26,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/telemetry"
 	"github.com/Cyaside/Triovexa/internal/triage"
 	"github.com/Cyaside/Triovexa/internal/verification"
+	"github.com/Cyaside/Triovexa/internal/workflow"
 )
 
 func main() {
@@ -37,6 +39,10 @@ func main() {
 	var repository storage.Repository
 	var err error
 	if strings.EqualFold(strings.TrimSpace(cfg.DatabaseURL), "memory") {
+		if cfg.InternalMode() {
+			logger.Error("internal deployment mode requires PostgreSQL")
+			os.Exit(1)
+		}
 		logger.Warn("starting with in-memory repository; data will be lost on shutdown")
 		repository = storage.NewMemoryStore()
 	} else {
@@ -56,7 +62,17 @@ func main() {
 	catalog := execution.DefaultCatalog()
 	recorder := telemetry.NewRecorder()
 	runtimeModes := mode.NewManager(cfg.ReasoningMode, cfg.ObservabilityMode)
-	mistralClient := ai.NewMistralClient(cfg.MistralAPIKey, cfg.MistralModel)
+	llmProvider, llmBaseURL, llmAPIKey, llmModel := cfg.EffectiveLLM()
+	llmClient, err := ai.NewOpenAICompatibleClient(ai.ProviderConfig{
+		Name: llmProvider, BaseURL: llmBaseURL, APIKey: llmAPIKey, Model: llmModel,
+		JSONMode: cfg.LLMJSONMode, Timeout: cfg.LLMTimeout,
+		AllowHTTP:  strings.EqualFold(cfg.Environment, "local") || strings.EqualFold(cfg.Environment, "local-demo"),
+		AllowHosts: cfg.LLMAllowHosts,
+	})
+	if err != nil {
+		logger.Error("invalid LLM provider configuration", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 	grafanaClient := observability.NewGrafanaClient(
 		cfg.GrafanaBaseURL,
 		cfg.GrafanaAPIToken,
@@ -80,12 +96,12 @@ func main() {
 	generator := triage.NewSwitchingGenerator(
 		runtimeModes,
 		triage.NewHeuristicGenerator(),
-		triage.NewMistralGenerator(mistralClient),
+		triage.NewLLMGenerator(llmClient),
 	)
 	actionGenerator := remediation.NewSwitchingGenerator(
 		runtimeModes,
 		remediation.NewHeuristicGenerator(catalog),
-		remediation.NewMistralGenerator(catalog, mistralClient),
+		remediation.NewLLMGenerator(catalog, llmClient),
 	)
 	killSwitch := approval.NewKillSwitch(cfg.KillSwitchEnabled)
 	recorder.RecordKillSwitchState(cfg.KillSwitchEnabled)
@@ -112,6 +128,18 @@ func main() {
 		cfg.ActionExecutionCooldown,
 	).WithTelemetry(recorder)
 	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService).WithTelemetry(recorder)
+	authService := auth.NewService(repository, cfg.SessionTTL)
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+	if jobStore, ok := repository.(storage.DurableJobStore); ok {
+		if recovered, recoverErr := jobStore.RecoverTriageJobs(appCtx); recoverErr != nil {
+			logger.Error("recover triage jobs", slog.String("error", recoverErr.Error()))
+			os.Exit(1)
+		} else if recovered > 0 {
+			logger.Info("recovered triage jobs", slog.Int("count", recovered))
+		}
+		workflow.NewRunner(jobStore, incidentService.ProcessWorkflowJob, logger, 2).Start(appCtx)
+	}
 	server := apphttp.NewServerWithTelemetry(
 		cfg,
 		logger,
@@ -123,13 +151,17 @@ func main() {
 		&apphttp.RuntimeControls{
 			Modes: runtimeModes,
 			Providers: apphttp.ProviderStatus{
-				MistralConfigured:  mistralClient.Configured(),
+				MistralConfigured:  llmClient.Configured() && llmProvider == "mistral",
 				GrafanaConfigured:  grafanaClient.Configured(),
-				MistralModel:       cfg.MistralModel,
+				MistralModel:       llmModel,
+				LLMConfigured:      llmClient.Configured(),
+				LLMProvider:        llmProvider,
+				LLMModel:           llmModel,
 				MetricsSourceUID:   cfg.GrafanaMetricsSourceUID,
 				LogsSourceUID:      cfg.GrafanaLogsSourceUID,
 				GrafanaDatasources: grafanaClient,
 			},
+			Auth: authService,
 		},
 	)
 
@@ -159,6 +191,7 @@ func main() {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received")
 	}
+	appCancel()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()

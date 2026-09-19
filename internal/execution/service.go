@@ -169,6 +169,11 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 	if definition.RiskLevel == domain.RiskLevelMedium && action.Status != domain.CandidateActionStatusApproved {
 		return domain.ExecutionRecord{}, errors.New("medium-risk action must be explicitly approved before execution")
 	}
+	if action.Status == domain.CandidateActionStatusApproved {
+		if err := s.validateApproval(ctx, action); err != nil {
+			return domain.ExecutionRecord{}, err
+		}
+	}
 	if s.killSwitch != nil && s.killSwitch.Enabled() {
 		if auditErr := s.audit(ctx, action.IncidentID, "execution_blocked_by_kill_switch", "completed", map[string]any{
 			"candidate_action_id": action.ID,
@@ -191,15 +196,6 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 		}
 		return domain.ExecutionRecord{}, err
 	}
-	incidentRecord, err = s.transitionIncidentState(ctx, incidentRecord, domain.IncidentStateExecutingAction)
-	if err != nil {
-		return domain.ExecutionRecord{}, fmt.Errorf("move incident to executing_action: %w", err)
-	}
-
-	if err := s.repository.UpdateCandidateActionStatus(ctx, action.ID, domain.CandidateActionStatusExecuting); err != nil {
-		return domain.ExecutionRecord{}, fmt.Errorf("update action status to executing: %w", err)
-	}
-
 	record := domain.ExecutionRecord{
 		ID:                uuid.NewString(),
 		CandidateActionID: action.ID,
@@ -211,9 +207,22 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 		FinishedAt:        s.now(),
 		ResultJSON:        `{"status":"execution_requested"}`,
 	}
-	if err := s.repository.SaveExecutionRecord(ctx, record); err != nil {
-		return domain.ExecutionRecord{}, fmt.Errorf("create execution record: %w", err)
+	claimed, err := s.repository.ClaimExecution(ctx, incidentRecord.ID, action.ID, record)
+	if err != nil {
+		return domain.ExecutionRecord{}, fmt.Errorf("claim execution atomically: %w", err)
 	}
+	if !claimed {
+		existing, listErr := s.repository.ListExecutionRecordsByAction(ctx, action.ID)
+		if listErr != nil {
+			return domain.ExecutionRecord{}, fmt.Errorf("load conflicting execution: %w", listErr)
+		}
+		if len(existing) > 0 {
+			return existing[len(existing)-1], errors.New("duplicate execution prevented by atomic claim")
+		}
+		return domain.ExecutionRecord{}, errors.New("candidate action is no longer executable")
+	}
+	incidentRecord.State = domain.IncidentStateExecutingAction
+	incidentRecord.UpdatedAt = s.now()
 
 	if err := s.audit(ctx, action.IncidentID, "execution_requested", "completed", map[string]any{
 		"candidate_action_id": action.ID,
@@ -295,6 +304,32 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 	}
 
 	return record, nil
+}
+
+func (s *Service) validateApproval(ctx context.Context, action domain.CandidateAction) error {
+	decision, err := s.repository.GetPolicyDecision(ctx, action.ID)
+	if err != nil {
+		return fmt.Errorf("load policy decision for approval validation: %w", err)
+	}
+	records, err := s.repository.ListApprovalRecords(ctx, action.IncidentID)
+	if err != nil {
+		return fmt.Errorf("load approval records: %w", err)
+	}
+	expected := domain.ActionApprovalDigest(action, decision.PolicyRuleRef)
+	for index := len(records) - 1; index >= 0; index-- {
+		record := records[index]
+		if record.CandidateActionID != action.ID || record.Decision != "approved" {
+			continue
+		}
+		if record.ExpiresAt.IsZero() || !record.ExpiresAt.After(s.now()) {
+			return errors.New("approval expired; approve the action again")
+		}
+		if record.ActionDigest != expected || record.PolicyVersion != decision.PolicyRuleRef {
+			return errors.New("approval no longer matches the action or policy")
+		}
+		return nil
+	}
+	return errors.New("approved action has no valid approval record")
 }
 
 func (s *Service) executeWithRetry(ctx context.Context, action domain.CandidateAction, request AdapterRequest) (AdapterResult, error) {

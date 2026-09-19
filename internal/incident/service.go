@@ -119,8 +119,41 @@ func (s *Service) IngestGrafanaWebhookAsync(ctx context.Context, payload alertin
 		return domain.Incident{}, fmt.Errorf("audit background triage dispatch: %w", err)
 	}
 
-	s.runReadOnlyTriageInBackground(incident)
+	if jobs, ok := s.repository.(storage.DurableJobStore); ok {
+		now := s.now()
+		job := domain.WorkflowJob{
+			ID: uuid.NewString(), Type: domain.JobTypeTriage, DedupKey: "triage:" + incident.ID,
+			PayloadJSON: fmt.Sprintf(`{"incident_id":%q}`, incident.ID), Status: domain.JobQueued,
+			MaxAttempts: 3, AvailableAt: now, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := jobs.EnqueueJob(ctx, job); err != nil {
+			return domain.Incident{}, fmt.Errorf("enqueue background triage: %w", err)
+		}
+	} else {
+		s.runReadOnlyTriageInBackground(incident)
+	}
 	return incident, nil
+}
+
+func (s *Service) ProcessWorkflowJob(ctx context.Context, job domain.WorkflowJob) error {
+	if job.Type != domain.JobTypeTriage {
+		return fmt.Errorf("unsupported workflow job type %q", job.Type)
+	}
+	var payload struct {
+		IncidentID string `json:"incident_id"`
+	}
+	if err := json.Unmarshal([]byte(job.PayloadJSON), &payload); err != nil {
+		return fmt.Errorf("decode triage job: %w", err)
+	}
+	incidentRecord, err := s.repository.GetIncident(ctx, payload.IncidentID)
+	if err != nil {
+		return err
+	}
+	if isTerminalIncidentState(incidentRecord.State) {
+		return nil
+	}
+	_, err = s.runReadOnlyTriage(ctx, incidentRecord)
+	return err
 }
 
 func (s *Service) acceptGrafanaWebhook(ctx context.Context, payload alerting.GrafanaWebhookPayload) (domain.Incident, bool, error) {

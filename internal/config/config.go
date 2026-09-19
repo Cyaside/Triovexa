@@ -11,6 +11,7 @@ import (
 
 const (
 	defaultHTTPPort        = "8080"
+	defaultHTTPHost        = "127.0.0.1"
 	defaultEnvironment     = "local"
 	defaultReadTimeout     = 5 * time.Second
 	defaultWriteTimeout    = 30 * time.Second
@@ -22,6 +23,11 @@ type Config struct {
 	ServiceName                     string
 	Environment                     string
 	HTTPPort                        string
+	HTTPHost                        string
+	DeploymentMode                  string
+	SessionSecure                   bool
+	SessionTTL                      time.Duration
+	GrafanaWebhookSecret            string
 	DatabaseURL                     string
 	DocsRoot                        string
 	DemoServiceBaseURL              string
@@ -29,6 +35,13 @@ type Config struct {
 	ObservabilityMode               string
 	MistralAPIKey                   string
 	MistralModel                    string
+	LLMProvider                     string
+	LLMBaseURL                      string
+	LLMAPIKey                       string
+	LLMModel                        string
+	LLMJSONMode                     bool
+	LLMTimeout                      time.Duration
+	LLMAllowHosts                   []string
 	GrafanaBaseURL                  string
 	GrafanaAPIToken                 string
 	GrafanaMetricsSourceUID         string
@@ -66,6 +79,11 @@ func Load() Config {
 		ServiceName:                     getEnv("APP_NAME", "triovexa"),
 		Environment:                     getEnv("APP_ENV", defaultEnvironment),
 		HTTPPort:                        getEnv("HTTP_PORT", defaultHTTPPort),
+		HTTPHost:                        getEnv("HTTP_HOST", defaultHTTPHost),
+		DeploymentMode:                  getEnv("DEPLOYMENT_MODE", "local-demo"),
+		SessionSecure:                   getBoolEnv("SESSION_SECURE", false),
+		SessionTTL:                      getDurationEnv("SESSION_TTL", 12*time.Hour),
+		GrafanaWebhookSecret:            getEnv("GRAFANA_WEBHOOK_SECRET", ""),
 		DatabaseURL:                     getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disable"),
 		DocsRoot:                        getEnv("DOCS_ROOT", "docs"),
 		DemoServiceBaseURL:              getEnv("DEMO_SERVICE_BASE_URL", "http://localhost:8090"),
@@ -73,6 +91,13 @@ func Load() Config {
 		ObservabilityMode:               getEnv("OBSERVABILITY_MODE", "demo"),
 		MistralAPIKey:                   getEnv("MISTRAL_API_KEY", ""),
 		MistralModel:                    getEnv("MISTRAL_MODEL", "mistral-small-latest"),
+		LLMProvider:                     getEnv("LLM_PROVIDER", ""),
+		LLMBaseURL:                      getEnv("LLM_BASE_URL", ""),
+		LLMAPIKey:                       getEnv("LLM_API_KEY", ""),
+		LLMModel:                        getEnv("LLM_MODEL", ""),
+		LLMJSONMode:                     getBoolEnv("LLM_JSON_MODE", true),
+		LLMTimeout:                      getDurationEnv("LLM_TIMEOUT", 20*time.Second),
+		LLMAllowHosts:                   splitCSVEnv("LLM_ALLOW_HOSTS"),
 		GrafanaBaseURL:                  getEnvOrValue("GRAFANA_BASE_URL", profile.BaseURL, ""),
 		GrafanaAPIToken:                 getEnvOrValue("GRAFANA_API_TOKEN", profile.APIToken, ""),
 		GrafanaMetricsSourceUID:         getEnvOrValue("GRAFANA_METRICS_DATASOURCE_UID", profile.MetricsSourceUID, "grafanacloud-prom"),
@@ -99,8 +124,26 @@ func Load() Config {
 	}
 }
 
+func (c Config) EffectiveLLM() (provider string, baseURL string, apiKey string, model string) {
+	provider = strings.ToLower(strings.TrimSpace(c.LLMProvider))
+	baseURL = strings.TrimSpace(c.LLMBaseURL)
+	apiKey = strings.TrimSpace(c.LLMAPIKey)
+	model = strings.TrimSpace(c.LLMModel)
+	if provider != "" || baseURL != "" || apiKey != "" || model != "" {
+		if provider == "" {
+			provider = "openai-compatible"
+		}
+		return provider, baseURL, apiKey, model
+	}
+	return "mistral", "https://api.mistral.ai", strings.TrimSpace(c.MistralAPIKey), strings.TrimSpace(c.MistralModel)
+}
+
 func (c Config) HTTPAddress() string {
-	return ":" + c.HTTPPort
+	return strings.TrimSpace(c.HTTPHost) + ":" + c.HTTPPort
+}
+
+func (c Config) InternalMode() bool {
+	return strings.EqualFold(strings.TrimSpace(c.DeploymentMode), "internal")
 }
 
 func (c Config) DatabaseTarget() string {
@@ -137,6 +180,21 @@ func getEnv(key, fallback string) string {
 	}
 
 	return fallback
+}
+
+func splitCSVEnv(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func getEnvOrValue(key string, preferred string, fallback string) string {

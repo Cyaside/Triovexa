@@ -10,7 +10,9 @@ type Reasoning string
 
 const (
 	ReasoningHeuristic Reasoning = "heuristic"
-	ReasoningMistral   Reasoning = "mistral"
+	ReasoningLLM       Reasoning = "llm"
+	// ReasoningMistral is retained for compatibility with older configs and API clients.
+	ReasoningMistral Reasoning = "mistral"
 )
 
 type Observability string
@@ -76,6 +78,8 @@ func ParseReasoning(value string) (Reasoning, error) {
 		return ReasoningHeuristic, nil
 	case string(ReasoningMistral):
 		return ReasoningMistral, nil
+	case string(ReasoningLLM):
+		return ReasoningLLM, nil
 	default:
 		return "", fmt.Errorf("unsupported reasoning mode %q", value)
 	}

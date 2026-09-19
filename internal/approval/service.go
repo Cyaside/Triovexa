@@ -182,17 +182,21 @@ func (s *Service) ApproveAction(ctx context.Context, actionID string, approvedBy
 		return domain.CandidateAction{}, fmt.Errorf("candidate action %q is not awaiting approval", actionID)
 	}
 
-	if _, err := s.repository.GetPolicyDecision(ctx, actionID); err != nil {
+	decision, err := s.repository.GetPolicyDecision(ctx, actionID)
+	if err != nil {
 		return domain.CandidateAction{}, fmt.Errorf("get policy decision: %w", err)
 	}
-
+	now := s.now()
 	record := domain.ApprovalRecord{
 		ID:                uuid.NewString(),
 		CandidateActionID: actionID,
 		ApprovedBy:        approvedBy,
 		Decision:          "approved",
 		Note:              note,
-		CreatedAt:         s.now(),
+		ActionDigest:      domain.ActionApprovalDigest(action, decision.PolicyRuleRef),
+		PolicyVersion:     decision.PolicyRuleRef,
+		ExpiresAt:         now.Add(15 * time.Minute),
+		CreatedAt:         now,
 	}
 	if err := s.repository.CreateApprovalRecord(ctx, record); err != nil {
 		return domain.CandidateAction{}, fmt.Errorf("create approval record: %w", err)

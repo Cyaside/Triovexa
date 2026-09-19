@@ -22,6 +22,8 @@ type MistralGenerator struct {
 	now     func() time.Time
 }
 
+type LLMGenerator = MistralGenerator
+
 func NewMistralGenerator(catalog execution.Catalog, client ai.JSONCompleter) *MistralGenerator {
 	return &MistralGenerator{
 		catalog: catalog,
@@ -32,8 +34,12 @@ func NewMistralGenerator(catalog execution.Catalog, client ai.JSONCompleter) *Mi
 	}
 }
 
+func NewLLMGenerator(catalog execution.Catalog, client ai.JSONCompleter) *LLMGenerator {
+	return NewMistralGenerator(catalog, client)
+}
+
 func (g *MistralGenerator) CatalogMode() string {
-	return "mistral-constrained"
+	return "llm-constrained"
 }
 
 func (g *MistralGenerator) Generate(
@@ -44,7 +50,7 @@ func (g *MistralGenerator) Generate(
 	documents []domain.DocumentReference,
 ) ([]domain.CandidateAction, error) {
 	if g.client == nil {
-		return nil, fmt.Errorf("mistral remediation client is not configured")
+		return nil, fmt.Errorf("llm remediation client is not configured")
 	}
 
 	systemPrompt := "Anda memilih candidate action incident response. Pilih HANYA action dari catalog yang diberikan. Kembalikan HANYA JSON valid tanpa markdown."
@@ -68,7 +74,7 @@ func (g *MistralGenerator) Generate(
 		} `json:"actions"`
 	}
 	if err := json.Unmarshal([]byte(content), &payload); err != nil {
-		return nil, fmt.Errorf("decode mistral action payload: %w", err)
+		return nil, fmt.Errorf("decode llm action payload: %w", err)
 	}
 
 	helper := &HeuristicGenerator{catalog: g.catalog}
@@ -121,7 +127,7 @@ type SwitchingGenerator struct {
 	heuristic interface {
 		Generate(context.Context, domain.Incident, domain.TriageResult, []domain.EvidenceItem, []domain.DocumentReference) ([]domain.CandidateAction, error)
 	}
-	mistral interface {
+	llm interface {
 		Generate(context.Context, domain.Incident, domain.TriageResult, []domain.EvidenceItem, []domain.DocumentReference) ([]domain.CandidateAction, error)
 	}
 }
@@ -131,14 +137,14 @@ func NewSwitchingGenerator(
 	heuristic interface {
 		Generate(context.Context, domain.Incident, domain.TriageResult, []domain.EvidenceItem, []domain.DocumentReference) ([]domain.CandidateAction, error)
 	},
-	mistral interface {
+	llm interface {
 		Generate(context.Context, domain.Incident, domain.TriageResult, []domain.EvidenceItem, []domain.DocumentReference) ([]domain.CandidateAction, error)
 	},
 ) *SwitchingGenerator {
 	return &SwitchingGenerator{
 		modes:     modes,
 		heuristic: heuristic,
-		mistral:   mistral,
+		llm:       llm,
 	}
 }
 
@@ -149,19 +155,29 @@ func (g *SwitchingGenerator) Generate(
 	evidence []domain.EvidenceItem,
 	documents []domain.DocumentReference,
 ) ([]domain.CandidateAction, error) {
-	if g.modes != nil && g.modes.Snapshot().Reasoning == mode.ReasoningMistral && g.mistral != nil {
-		return g.mistral.Generate(ctx, incident, triage, evidence, documents)
+	if g.modes != nil && isLLMReasoning(g.modes.Snapshot().Reasoning) && g.llm != nil {
+		actions, err := g.llm.Generate(ctx, incident, triage, evidence, documents)
+		if err == nil {
+			return actions, nil
+		}
 	}
 
 	return g.heuristic.Generate(ctx, incident, triage, evidence, documents)
 }
 
 func (g *SwitchingGenerator) CatalogMode() string {
+	if g.modes != nil && g.modes.Snapshot().Reasoning == mode.ReasoningLLM {
+		return "llm-constrained"
+	}
 	if g.modes != nil && g.modes.Snapshot().Reasoning == mode.ReasoningMistral {
 		return "mistral-constrained"
 	}
 
 	return "heuristic-constrained"
+}
+
+func isLLMReasoning(reasoning mode.Reasoning) bool {
+	return reasoning == mode.ReasoningLLM || reasoning == mode.ReasoningMistral
 }
 
 func buildActionPrompt(
