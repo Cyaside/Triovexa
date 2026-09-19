@@ -33,6 +33,62 @@ type DemoSnapshotFetcher struct {
 	client  *http.Client
 }
 
+type WorkloadSnapshotFetcher struct {
+	baseURL string
+	token   string
+	client  *http.Client
+}
+
+func NewWorkloadSnapshotFetcher(baseURL, token string) *WorkloadSnapshotFetcher {
+	return &WorkloadSnapshotFetcher{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		token:   strings.TrimSpace(token),
+		client:  &http.Client{Timeout: 5 * time.Second},
+	}
+}
+
+func (f *WorkloadSnapshotFetcher) Snapshot(ctx context.Context) (demo.Snapshot, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, f.baseURL+"/state", nil)
+	if err != nil {
+		return demo.Snapshot{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+f.token)
+	response, err := f.client.Do(request)
+	if err != nil {
+		return demo.Snapshot{}, fmt.Errorf("request workload state: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= http.StatusBadRequest {
+		return demo.Snapshot{}, fmt.Errorf("workload state returned %d", response.StatusCode)
+	}
+	var state struct {
+		WorkerHealthy  bool      `json:"worker_healthy"`
+		ConsumerPaused bool      `json:"consumer_paused"`
+		QueueBacklog   int       `json:"queue_backlog"`
+		Errors         int       `json:"errors"`
+		Timestamp      time.Time `json:"timestamp"`
+		Complete       bool      `json:"complete"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&state); err != nil {
+		return demo.Snapshot{}, fmt.Errorf("decode workload state: %w", err)
+	}
+	if !state.Complete || state.Timestamp.IsZero() || time.Since(state.Timestamp) > time.Minute {
+		return demo.Snapshot{}, fmt.Errorf("workload state is incomplete or stale")
+	}
+	mode := demo.ModeWorkerStall
+	if state.WorkerHealthy && !state.ConsumerPaused {
+		mode = demo.ModeHealthy
+	}
+	return demo.Snapshot{
+		Mode:           mode,
+		WorkerHealthy:  state.WorkerHealthy,
+		ConsumerPaused: state.ConsumerPaused,
+		QueueBacklog:   state.QueueBacklog,
+		ErrorRate:      float64(state.Errors),
+		LastUpdatedUTC: state.Timestamp,
+	}, nil
+}
+
 func NewDemoSnapshotFetcher(baseURL string) *DemoSnapshotFetcher {
 	return &DemoSnapshotFetcher{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -75,6 +131,11 @@ type Service struct {
 	}
 	metrics *telemetry.Recorder
 	now     func() time.Time
+
+	observationInterval  time.Duration
+	observationTimeout   time.Duration
+	requiredObservations int
+	baselineMaxAge       time.Duration
 }
 
 func NewService(
@@ -98,6 +159,24 @@ func NewService(
 
 func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
 	s.metrics = recorder
+	return s
+}
+
+func (s *Service) WithRecoveryWindow(interval, timeout time.Duration, required int) *Service {
+	if interval > 0 {
+		s.observationInterval = interval
+	}
+	if timeout > 0 {
+		s.observationTimeout = timeout
+	}
+	if required > 0 {
+		s.requiredObservations = required
+	}
+	return s
+}
+
+func (s *Service) WithBaselineMaxAge(maxAge time.Duration) *Service {
+	s.baselineMaxAge = maxAge
 	return s
 }
 
@@ -299,6 +378,9 @@ func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (
 	}
 
 	before, baselineErr := deriveBaselineSnapshot(evidence)
+	if baselineErr == nil && s.baselineMaxAge > 0 && (before.LastUpdatedUTC.IsZero() || s.now().Sub(before.LastUpdatedUTC) > s.baselineMaxAge) {
+		baselineErr = fmt.Errorf("baseline evidence is stale")
+	}
 	after, afterErr := s.fetchAfterSnapshot(ctx)
 
 	checks := map[string]bool{}
@@ -316,6 +398,33 @@ func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (
 	}
 
 	checks = buildChecks(before, after)
+	if s.requiredObservations > 1 && recoveryChecksPassed(checks) {
+		deadline := s.now().Add(s.observationTimeout)
+		consecutive := 1
+		for consecutive < s.requiredObservations && s.now().Before(deadline) {
+			timer := time.NewTimer(s.observationInterval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return before, after, checks, StatusInconclusive, "verification cancelled before recovery was stable", nil
+			case <-timer.C:
+			}
+			next, fetchErr := s.fetchAfterSnapshot(ctx)
+			if fetchErr != nil {
+				return before, after, checks, StatusInconclusive, "verification inconclusive: recovery telemetry became unavailable", nil
+			}
+			after = next
+			checks = buildChecks(before, after)
+			if recoveryChecksPassed(checks) {
+				consecutive++
+			} else {
+				consecutive = 0
+			}
+		}
+		if consecutive < s.requiredObservations {
+			return before, after, checks, StatusInconclusive, "verification inconclusive: recovery was not stable for the required observations", nil
+		}
+	}
 	improvementCount := countTrue(
 		checks["error_rate_improved"],
 		checks["latency_improved"],
@@ -335,6 +444,10 @@ func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (
 	default:
 		return before, after, checks, StatusInconclusive, "verification inconclusive: partial improvement observed but signals are not strong enough to auto-resolve", nil
 	}
+}
+
+func recoveryChecksPassed(checks map[string]bool) bool {
+	return checks["alert_cleared"] && checks["health_check_normal"] && checks["queue_backlog_improved"] && !checks["error_rate_worsened"]
 }
 
 func (s *Service) fetchAfterSnapshot(ctx context.Context) (demo.Snapshot, error) {

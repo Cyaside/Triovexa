@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: triovexa
+    static_configs:
+      - targets: ["triovexa:8080"]
+  - job_name: queue-workload
+    static_configs:
+      - targets: ["workload-supervisor:8091"]

@@ -31,6 +31,8 @@ type Config struct {
 	DatabaseURL                     string
 	DocsRoot                        string
 	DemoServiceBaseURL              string
+	WorkloadControlBaseURL          string
+	WorkloadControlToken            string
 	ReasoningMode                   string
 	ObservabilityMode               string
 	MistralAPIKey                   string
@@ -87,6 +89,8 @@ func Load() Config {
 		DatabaseURL:                     getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disable"),
 		DocsRoot:                        getEnv("DOCS_ROOT", "docs"),
 		DemoServiceBaseURL:              getEnv("DEMO_SERVICE_BASE_URL", "http://localhost:8090"),
+		WorkloadControlBaseURL:          getEnv("WORKLOAD_CONTROL_BASE_URL", ""),
+		WorkloadControlToken:            getEnv("WORKLOAD_CONTROL_TOKEN", ""),
 		ReasoningMode:                   getEnv("REASONING_MODE", "heuristic"),
 		ObservabilityMode:               getEnv("OBSERVABILITY_MODE", "demo"),
 		MistralAPIKey:                   getEnv("MISTRAL_API_KEY", ""),

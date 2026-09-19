@@ -1,0 +1,8 @@
+.git
+.env*
+bin
+dist
+ui/node_modules
+ui/.vite
+guide
+prd.md

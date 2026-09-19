@@ -18,5 +18,94 @@ services:
       retries: 10
       start_period: 5s
 
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - triovexa-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  workload-supervisor:
+    build: .
+    restart: unless-stopped
+    entrypoint: ["triovexa-workload", "supervisor"]
+    environment:
+      REDIS_ADDRESS: redis:6379
+      CONTROL_PORT: "8091"
+      CONTROL_API_TOKEN: ${WORKLOAD_CONTROL_TOKEN:-local-control-token}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  producer:
+    build: .
+    restart: unless-stopped
+    entrypoint: ["triovexa-workload", "producer"]
+    environment:
+      REDIS_ADDRESS: redis:6379
+      PRODUCER_INTERVAL: 1s
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  triovexa:
+    build: .
+    restart: unless-stopped
+    environment:
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: "8080"
+      APP_ENV: local
+      DEPLOYMENT_MODE: local-demo
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/triovexa?sslmode=disable
+      DOCS_ROOT: /app/docs
+      WORKLOAD_CONTROL_BASE_URL: http://workload-supervisor:8091
+      WORKLOAD_CONTROL_TOKEN: ${WORKLOAD_CONTROL_TOKEN:-local-control-token}
+      REASONING_MODE: heuristic
+      OBSERVABILITY_MODE: demo
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      workload-supervisor:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./deployments/playground/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - workload-supervisor
+
+  loki:
+    image: grafana/loki:3.5.3
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deployments/playground/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - triovexa-grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+
 volumes:
   triovexa-postgres-data:
+  triovexa-redis-data:
+  triovexa-grafana-data:

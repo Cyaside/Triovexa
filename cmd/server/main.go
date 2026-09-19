@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/approval"
@@ -106,21 +107,23 @@ func main() {
 	killSwitch := approval.NewKillSwitch(cfg.KillSwitchEnabled)
 	recorder.RecordKillSwitchState(cfg.KillSwitchEnabled)
 	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch).WithTelemetry(recorder)
-	rollbackService := execution.NewRollbackService(repository, catalog, execution.NewDemoAdapter(cfg.DemoServiceBaseURL), cfg.ActionExecutionTimeout)
+	actionAdapter := execution.Adapter(execution.NewDemoAdapter(cfg.DemoServiceBaseURL))
+	snapshotFetcher := verification.SnapshotFetcher(verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL))
+	if strings.TrimSpace(cfg.WorkloadControlBaseURL) != "" {
+		actionAdapter = execution.NewControlAdapter(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken)
+		snapshotFetcher = verification.NewWorkloadSnapshotFetcher(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken)
+	}
+	rollbackService := execution.NewRollbackService(repository, catalog, actionAdapter, cfg.ActionExecutionTimeout)
 	verificationService := verification.NewService(
 		repository,
-		observability.NewSwitchingSnapshotFetcher(
-			runtimeModes,
-			verification.NewDemoSnapshotFetcher(cfg.DemoServiceBaseURL),
-			observability.NewGrafanaSnapshotFetcher(grafanaClient, grafanaSignals),
-		),
+		snapshotFetcher,
 		catalog,
 		rollbackService,
-	).WithTelemetry(recorder)
+	).WithTelemetry(recorder).WithRecoveryWindow(10*time.Second, 2*time.Minute, 3).WithBaselineMaxAge(time.Minute)
 	executionService := execution.NewService(
 		repository,
 		catalog,
-		execution.NewDemoAdapter(cfg.DemoServiceBaseURL),
+		actionAdapter,
 		killSwitch,
 		verificationService,
 		cfg.ActionExecutionTimeout,
