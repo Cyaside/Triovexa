@@ -124,6 +124,8 @@ func (s *MemoryStore) DeleteSession(_ context.Context, tokenHash string) error {
 
 func (s *MemoryStore) Close() error { return nil }
 
+func (s *MemoryStore) Ping(context.Context) error { return nil }
+
 func (s *MemoryStore) CreateIncident(_ context.Context, incident domain.Incident) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

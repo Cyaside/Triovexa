@@ -23,15 +23,17 @@ type GrafanaSignalConfig struct {
 }
 
 type GrafanaCollector struct {
-	client  *GrafanaClient
-	signals GrafanaSignalConfig
+	client   *GrafanaClient
+	signals  GrafanaSignalConfig
+	renderer *QueryRenderer
 }
 
-func NewGrafanaCollector(client *GrafanaClient, signals GrafanaSignalConfig) *GrafanaCollector {
-	return &GrafanaCollector{
-		client:  client,
-		signals: signals,
+func NewGrafanaCollector(client *GrafanaClient, signals GrafanaSignalConfig, renderers ...*QueryRenderer) *GrafanaCollector {
+	renderer := NewQueryRenderer()
+	if len(renderers) > 0 && renderers[0] != nil {
+		renderer = renderers[0]
 	}
+	return &GrafanaCollector{client: client, signals: signals, renderer: renderer}
 }
 
 func (c *GrafanaCollector) Collect(ctx context.Context, incident domain.Incident) ([]domain.EvidenceItem, error) {
@@ -59,7 +61,7 @@ func (c *GrafanaCollector) Collect(ctx context.Context, incident domain.Incident
 		{key: "queue_backlog", template: c.signals.QueueQuery, label: "queue_backlog"},
 		{key: "replica_count", template: c.signals.ReplicaQuery, label: "replica_count"},
 	} {
-		rendered := renderQueryTemplate(query.template, incident)
+		rendered := c.renderer.Render(query.template, incident)
 		if rendered == "" {
 			continue
 		}
@@ -83,7 +85,7 @@ func (c *GrafanaCollector) Collect(ctx context.Context, incident domain.Incident
 		lookback = 15 * time.Minute
 	}
 
-	if rendered := renderQueryTemplate(c.signals.LogsQuery, incident); rendered != "" {
+	if rendered := c.renderer.Render(c.signals.LogsQuery, incident); rendered != "" {
 		lines, err := c.client.LokiLines(ctx, rendered, observedAt.Add(-lookback), observedAt, 5)
 		if err == nil && len(lines) > 0 {
 			items = append(items, newEvidenceItem(incident.ID, "log", "grafana-loki", lines[0], observedAt, map[string]any{
@@ -93,7 +95,7 @@ func (c *GrafanaCollector) Collect(ctx context.Context, incident domain.Incident
 		}
 	}
 
-	if rendered := renderQueryTemplate(c.signals.DeployLogsQuery, incident); rendered != "" {
+	if rendered := c.renderer.Render(c.signals.DeployLogsQuery, incident); rendered != "" {
 		lines, err := c.client.LokiLines(ctx, rendered, observedAt.Add(-lookback), observedAt, 5)
 		if err == nil && len(lines) > 0 {
 			items = append(items, newEvidenceItem(incident.ID, "deploy", "grafana-loki", lines[0], observedAt, map[string]any{
@@ -114,40 +116,46 @@ func (c *GrafanaCollector) Collect(ctx context.Context, incident domain.Incident
 }
 
 type GrafanaSnapshotFetcher struct {
-	client  *GrafanaClient
-	signals GrafanaSignalConfig
+	client   *GrafanaClient
+	signals  GrafanaSignalConfig
+	renderer *QueryRenderer
 }
 
-func NewGrafanaSnapshotFetcher(client *GrafanaClient, signals GrafanaSignalConfig) *GrafanaSnapshotFetcher {
-	return &GrafanaSnapshotFetcher{
-		client:  client,
-		signals: signals,
+func NewGrafanaSnapshotFetcher(client *GrafanaClient, signals GrafanaSignalConfig, renderers ...*QueryRenderer) *GrafanaSnapshotFetcher {
+	renderer := NewQueryRenderer()
+	if len(renderers) > 0 && renderers[0] != nil {
+		renderer = renderers[0]
 	}
+	return &GrafanaSnapshotFetcher{client: client, signals: signals, renderer: renderer}
 }
 
 func (f *GrafanaSnapshotFetcher) Snapshot(ctx context.Context) (demo.Snapshot, error) {
+	return f.SnapshotForIncident(ctx, domain.Incident{})
+}
+
+func (f *GrafanaSnapshotFetcher) SnapshotForIncident(ctx context.Context, incident domain.Incident) (demo.Snapshot, error) {
 	if f.client == nil || !f.client.Configured() {
 		return demo.Snapshot{}, fmt.Errorf("grafana snapshot fetcher is not configured")
 	}
 
 	observedAt := time.Now().UTC()
-	errorRate, err := f.client.PrometheusInstantValue(ctx, f.signals.ErrorRateQuery, observedAt)
+	errorRate, err := f.client.PrometheusInstantValue(ctx, f.renderer.Render(f.signals.ErrorRateQuery, incident), observedAt)
 	if err != nil {
 		return demo.Snapshot{}, err
 	}
 
-	latencyMs, err := f.client.PrometheusInstantValue(ctx, f.signals.LatencyQuery, observedAt)
+	latencyMs, err := f.client.PrometheusInstantValue(ctx, f.renderer.Render(f.signals.LatencyQuery, incident), observedAt)
 	if err != nil {
 		return demo.Snapshot{}, err
 	}
 
-	queueBacklog, err := f.client.PrometheusInstantValue(ctx, f.signals.QueueQuery, observedAt)
+	queueBacklog, err := f.client.PrometheusInstantValue(ctx, f.renderer.Render(f.signals.QueueQuery, incident), observedAt)
 	if err != nil {
 		return demo.Snapshot{}, err
 	}
 
 	replicaCount := 0
-	if rendered := strings.TrimSpace(f.signals.ReplicaQuery); rendered != "" {
+	if rendered := f.renderer.Render(f.signals.ReplicaQuery, incident); rendered != "" {
 		value, err := f.client.PrometheusInstantValue(ctx, rendered, observedAt)
 		if err == nil {
 			replicaCount = int(value)
@@ -165,7 +173,7 @@ func (f *GrafanaSnapshotFetcher) Snapshot(ctx context.Context) (demo.Snapshot, e
 		LastUpdatedUTC: observedAt,
 	}
 
-	if rendered := strings.TrimSpace(f.signals.DeployLogsQuery); rendered != "" {
+	if rendered := f.renderer.Render(f.signals.DeployLogsQuery, incident); rendered != "" {
 		lines, err := f.client.LokiLines(ctx, rendered, observedAt.Add(-f.lookback()), observedAt, 3)
 		if err == nil && len(lines) > 0 {
 			snapshot.LastDeploy = extractDeploymentVersion(lines)
@@ -196,16 +204,6 @@ func classifyGrafanaSnapshot(errorRate float64, latencyMs float64, queueBacklog 
 	default:
 		return demo.ModeHealthy
 	}
-}
-
-func renderQueryTemplate(template string, incident domain.Incident) string {
-	replacer := strings.NewReplacer(
-		"{{service}}", incident.ServiceName,
-		"{{environment}}", incident.Environment,
-		"{{severity}}", incident.Severity,
-		"{{title}}", incident.Title,
-	)
-	return strings.TrimSpace(replacer.Replace(template))
 }
 
 var deployVersionPattern = regexp.MustCompile(`v[0-9]+(?:\.[0-9]+){1,3}`)

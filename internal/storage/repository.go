@@ -11,6 +11,7 @@ var ErrNotFound = errors.New("storage: not found")
 
 type Repository interface {
 	Close() error
+	Ping(context.Context) error
 	CreateIncident(context.Context, domain.Incident) error
 	UpdateIncidentState(context.Context, string, domain.IncidentState) error
 	GetIncident(context.Context, string) (domain.Incident, error)

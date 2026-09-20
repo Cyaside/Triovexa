@@ -51,6 +51,8 @@ func (s *PostgresStore) Close() error {
 	return s.db.Close()
 }
 
+func (s *PostgresStore) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
+
 func (s *PostgresStore) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version TEXT PRIMARY KEY,

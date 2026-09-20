@@ -80,6 +80,15 @@ func NewServerWithTelemetry(
 	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeControl != nil && runtimeControl.Readiness != nil {
+			report := runtimeControl.Readiness.Check(r.Context())
+			status := http.StatusOK
+			if report.Status != "ok" {
+				status = http.StatusServiceUnavailable
+			}
+			writeJSON(w, status, report)
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{
 			"status":      "ok",
 			"service":     cfg.ServiceName,

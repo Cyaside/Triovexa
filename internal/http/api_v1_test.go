@@ -59,6 +59,7 @@ func TestConnectionsExposeAndProbeConfiguredMonitoringServices(t *testing.T) {
 		DeploymentMode:      "local-demo",
 		PrometheusBaseURL:   ready.URL,
 		AlertmanagerBaseURL: ready.URL,
+		LokiBaseURL:         ready.URL,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, nil, nil, nil)
 	apiServer := httptest.NewServer(server.Handler)
 	defer apiServer.Close()
@@ -72,7 +73,7 @@ func TestConnectionsExposeAndProbeConfiguredMonitoringServices(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"prometheus", "alertmanager"} {
+	for _, name := range []string{"prometheus", "alertmanager", "loki"} {
 		if payload[name]["configured"] != true || payload[name]["endpoint"] != ready.URL {
 			t.Fatalf("%s status = %#v", name, payload[name])
 		}

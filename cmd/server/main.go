@@ -22,6 +22,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/observability"
 	"github.com/Cyaside/Triovexa/internal/policy"
+	"github.com/Cyaside/Triovexa/internal/readiness"
 	"github.com/Cyaside/Triovexa/internal/remediation"
 	"github.com/Cyaside/Triovexa/internal/retrieval"
 	securitylog "github.com/Cyaside/Triovexa/internal/security"
@@ -92,6 +93,7 @@ func main() {
 		DeployLogsQuery: cfg.GrafanaDeployLogsQuery,
 		Lookback:        cfg.GrafanaQueryLookback,
 	}
+	queryRenderer := observability.NewQueryRenderer()
 	var localCollector interface {
 		Collect(context.Context, domain.Incident) ([]domain.EvidenceItem, error)
 	} = observability.NewDemoCollector(cfg.DemoServiceBaseURL)
@@ -101,7 +103,7 @@ func main() {
 	collector := observability.NewSwitchingCollector(
 		runtimeModes,
 		localCollector,
-		observability.NewGrafanaCollector(grafanaClient, grafanaSignals),
+		observability.NewGrafanaCollector(grafanaClient, grafanaSignals, queryRenderer),
 	)
 	generator := triage.NewSwitchingGenerator(
 		runtimeModes,
@@ -122,7 +124,7 @@ func main() {
 		actionAdapter = execution.NewControlAdapter(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken)
 		localSnapshotFetcher = verification.NewWorkloadSnapshotFetcher(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken)
 	}
-	snapshotFetcher := observability.NewSwitchingSnapshotFetcher(runtimeModes, localSnapshotFetcher, observability.NewGrafanaSnapshotFetcher(grafanaClient, grafanaSignals))
+	snapshotFetcher := observability.NewSwitchingSnapshotFetcher(runtimeModes, localSnapshotFetcher, observability.NewGrafanaSnapshotFetcher(grafanaClient, grafanaSignals, queryRenderer))
 	rollbackService := execution.NewRollbackService(repository, catalog, actionAdapter, cfg.ActionExecutionTimeout)
 	verificationService := verification.NewService(
 		repository,
@@ -148,6 +150,8 @@ func main() {
 	}
 	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService).WithTelemetry(recorder)
 	authService := auth.NewService(repository, cfg.SessionTTL)
+	readinessChecker := readiness.NewChecker(repository, cfg.RedisAddress, cfg.WorkloadControlBaseURL)
+	defer readinessChecker.Close()
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
 	if jobStore, ok := repository.(storage.DurableJobStore); ok {
@@ -180,7 +184,8 @@ func main() {
 				LogsSourceUID:      cfg.GrafanaLogsSourceUID,
 				GrafanaDatasources: grafanaClient,
 			},
-			Auth: authService,
+			Auth:      authService,
+			Readiness: readinessChecker,
 		},
 	)
 

@@ -28,6 +28,10 @@ type SnapshotFetcher interface {
 	Snapshot(context.Context) (demo.Snapshot, error)
 }
 
+type ContextualSnapshotFetcher interface {
+	SnapshotForIncident(context.Context, domain.Incident) (demo.Snapshot, error)
+}
+
 type DemoSnapshotFetcher struct {
 	baseURL string
 	client  *http.Client
@@ -372,6 +376,10 @@ func (s *Service) updateVerificationResult(ctx context.Context, result *domain.V
 }
 
 func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (demo.Snapshot, demo.Snapshot, map[string]bool, string, string, error) {
+	incidentRecord, err := s.repository.GetIncident(ctx, action.IncidentID)
+	if err != nil {
+		return demo.Snapshot{}, demo.Snapshot{}, nil, "", "", fmt.Errorf("get incident for verification queries: %w", err)
+	}
 	evidence, err := s.repository.ListEvidenceItems(ctx, action.IncidentID)
 	if err != nil {
 		return demo.Snapshot{}, demo.Snapshot{}, nil, "", "", fmt.Errorf("list evidence for verification: %w", err)
@@ -381,7 +389,7 @@ func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (
 	if baselineErr == nil && s.baselineMaxAge > 0 && (before.LastUpdatedUTC.IsZero() || s.now().Sub(before.LastUpdatedUTC) > s.baselineMaxAge) {
 		baselineErr = fmt.Errorf("baseline evidence is stale")
 	}
-	after, afterErr := s.fetchAfterSnapshot(ctx)
+	after, afterErr := s.fetchAfterSnapshot(ctx, incidentRecord)
 
 	checks := map[string]bool{}
 	if baselineErr != nil || afterErr != nil {
@@ -409,7 +417,7 @@ func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (
 				return before, after, checks, StatusInconclusive, "verification cancelled before recovery was stable", nil
 			case <-timer.C:
 			}
-			next, fetchErr := s.fetchAfterSnapshot(ctx)
+			next, fetchErr := s.fetchAfterSnapshot(ctx, incidentRecord)
 			if fetchErr != nil {
 				return before, after, checks, StatusInconclusive, "verification inconclusive: recovery telemetry became unavailable", nil
 			}
@@ -450,11 +458,14 @@ func recoveryChecksPassed(checks map[string]bool) bool {
 	return checks["alert_cleared"] && checks["health_check_normal"] && checks["queue_backlog_improved"] && !checks["error_rate_worsened"]
 }
 
-func (s *Service) fetchAfterSnapshot(ctx context.Context) (demo.Snapshot, error) {
+func (s *Service) fetchAfterSnapshot(ctx context.Context, incidentRecord domain.Incident) (demo.Snapshot, error) {
 	if s.fetcher == nil {
 		return demo.Snapshot{}, fmt.Errorf("verification snapshot fetcher is not configured")
 	}
 
+	if contextual, ok := s.fetcher.(ContextualSnapshotFetcher); ok {
+		return contextual.SnapshotForIncident(ctx, incidentRecord)
+	}
 	return s.fetcher.Snapshot(ctx)
 }
 

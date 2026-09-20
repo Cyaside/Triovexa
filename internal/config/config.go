@@ -36,6 +36,7 @@ type Config struct {
 	DemoServiceBaseURL              string
 	WorkloadControlBaseURL          string
 	WorkloadControlToken            string
+	RedisAddress                    string
 	ReasoningMode                   string
 	ObservabilityMode               string
 	MistralAPIKey                   string
@@ -60,6 +61,7 @@ type Config struct {
 	GrafanaQueryLookback            time.Duration
 	PrometheusBaseURL               string
 	AlertmanagerBaseURL             string
+	LokiBaseURL                     string
 	LocalObservabilityProfilePath   string
 	LocalObservabilityProfileLoaded bool
 	LocalObservabilityProfileError  string
@@ -99,6 +101,7 @@ func Load() Config {
 		DemoServiceBaseURL:              getEnv("DEMO_SERVICE_BASE_URL", "http://localhost:8090"),
 		WorkloadControlBaseURL:          getEnv("WORKLOAD_CONTROL_BASE_URL", ""),
 		WorkloadControlToken:            getEnv("WORKLOAD_CONTROL_TOKEN", ""),
+		RedisAddress:                    getEnv("REDIS_ADDRESS", ""),
 		ReasoningMode:                   getEnv("REASONING_MODE", "heuristic"),
 		ObservabilityMode:               getEnv("OBSERVABILITY_MODE", "demo"),
 		MistralAPIKey:                   getEnv("MISTRAL_API_KEY", ""),
@@ -123,6 +126,7 @@ func Load() Config {
 		GrafanaQueryLookback:            getDurationEnv("GRAFANA_QUERY_LOOKBACK", 15*time.Minute),
 		PrometheusBaseURL:               getEnv("PROMETHEUS_BASE_URL", ""),
 		AlertmanagerBaseURL:             getEnv("ALERTMANAGER_BASE_URL", ""),
+		LokiBaseURL:                     getEnv("LOKI_BASE_URL", ""),
 		LocalObservabilityProfilePath:   profilePath,
 		LocalObservabilityProfileLoaded: profileLoaded,
 		LocalObservabilityProfileError:  profileError,

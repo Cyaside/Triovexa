@@ -75,3 +75,15 @@ func (f *SwitchingSnapshotFetcher) Snapshot(ctx context.Context) (demo.Snapshot,
 
 	return f.demo.Snapshot(ctx)
 }
+
+func (f *SwitchingSnapshotFetcher) SnapshotForIncident(ctx context.Context, incident domain.Incident) (demo.Snapshot, error) {
+	if f.modes != nil && f.modes.Snapshot().Observability == mode.ObservabilityGrafana && f.grafana != nil {
+		if contextual, ok := f.grafana.(interface {
+			SnapshotForIncident(context.Context, domain.Incident) (demo.Snapshot, error)
+		}); ok {
+			return contextual.SnapshotForIncident(ctx, incident)
+		}
+		return f.grafana.Snapshot(ctx)
+	}
+	return f.demo.Snapshot(ctx)
+}

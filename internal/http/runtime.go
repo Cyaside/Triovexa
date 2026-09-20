@@ -6,12 +6,16 @@ import (
 	"github.com/Cyaside/Triovexa/internal/auth"
 	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/observability"
+	"github.com/Cyaside/Triovexa/internal/readiness"
 )
 
 type RuntimeControls struct {
 	Modes     *mode.Manager
 	Providers ProviderStatus
 	Auth      *auth.Service
+	Readiness interface {
+		Check(context.Context) readiness.Report
+	}
 }
 
 type ProviderStatus struct {

@@ -180,6 +180,7 @@ func registerAPIV1(
 			"grafana":      map[string]any{"configured": provider.GrafanaConfigured, "metrics_source_uid": provider.MetricsSourceUID, "logs_source_uid": provider.LogsSourceUID},
 			"prometheus":   serviceConnectionStatus(cfg.PrometheusBaseURL),
 			"alertmanager": serviceConnectionStatus(cfg.AlertmanagerBaseURL),
+			"loki":         serviceConnectionStatus(cfg.LokiBaseURL),
 		})
 	})
 
@@ -211,6 +212,7 @@ func registerAPIV1(
 
 	registerReadinessConnectionTest(mux, "/api/v1/connections/prometheus/test", "Prometheus", cfg.PrometheusBaseURL)
 	registerReadinessConnectionTest(mux, "/api/v1/connections/alertmanager/test", "Alertmanager", cfg.AlertmanagerBaseURL)
+	registerReadinessConnectionTest(mux, "/api/v1/connections/loki/test", "Loki", cfg.LokiBaseURL)
 
 	mux.HandleFunc("/api/v1/settings", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPatch {
