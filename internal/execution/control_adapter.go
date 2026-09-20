@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -58,6 +59,40 @@ func (a *ControlAdapter) Execute(ctx context.Context, action domain.CandidateAct
 		return AdapterResult{ExecutorType: "workload-control-api"}, fmt.Errorf("control API returned %d", response.StatusCode)
 	}
 	return AdapterResult{ExecutorType: "workload-control-api", Payload: result}, nil
+}
+
+func (a *ControlAdapter) Reconcile(ctx context.Context, _ domain.CandidateAction, request AdapterRequest) (AdapterResult, ReconciliationStatus, error) {
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/operations/"+url.PathEscape(request.IdempotencyKey), nil)
+	if err != nil {
+		return AdapterResult{ExecutorType: "workload-control-api"}, ReconciliationUnknown, err
+	}
+	httpRequest.Header.Set("Authorization", "Bearer "+a.token)
+	response, err := a.client.Do(httpRequest)
+	if err != nil {
+		return AdapterResult{ExecutorType: "workload-control-api"}, ReconciliationUnknown, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return AdapterResult{ExecutorType: "workload-control-api", Payload: map[string]any{"operation_id": request.IdempotencyKey}}, ReconciliationUnknown, nil
+	}
+	if response.StatusCode >= http.StatusBadRequest {
+		return AdapterResult{ExecutorType: "workload-control-api"}, ReconciliationUnknown, fmt.Errorf("control operation status returned %d", response.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&payload); err != nil {
+		return AdapterResult{ExecutorType: "workload-control-api"}, ReconciliationUnknown, fmt.Errorf("decode control operation status: %w", err)
+	}
+	status, _ := payload["status"].(string)
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "succeeded":
+		return AdapterResult{ExecutorType: "workload-control-api", Payload: payload}, ReconciliationSucceeded, nil
+	case "failed":
+		return AdapterResult{ExecutorType: "workload-control-api", Payload: payload}, ReconciliationFailed, nil
+	case "pending", "running", "started":
+		return AdapterResult{ExecutorType: "workload-control-api", Payload: payload}, ReconciliationPending, nil
+	default:
+		return AdapterResult{ExecutorType: "workload-control-api", Payload: payload}, ReconciliationUnknown, nil
+	}
 }
 
 func controlOperation(actionType string) (string, error) {

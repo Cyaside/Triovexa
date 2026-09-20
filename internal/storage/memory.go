@@ -514,6 +514,21 @@ func (s *MemoryStore) ListExecutionRecordsByAction(_ context.Context, actionID s
 	return records, nil
 }
 
+func (s *MemoryStore) ListExecutionRecordsByStatus(_ context.Context, status string) ([]domain.ExecutionRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var records []domain.ExecutionRecord
+	for _, incidentRecords := range s.executions {
+		for _, record := range incidentRecords {
+			if record.Status == status {
+				records = append(records, record)
+			}
+		}
+	}
+	sort.SliceStable(records, func(i, j int) bool { return records[i].StartedAt.Before(records[j].StartedAt) })
+	return records, nil
+}
+
 func (s *MemoryStore) SaveVerificationResult(_ context.Context, result domain.VerificationResult) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

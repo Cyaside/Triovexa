@@ -29,3 +29,7 @@ type AtomicIntakeStore interface {
 type ConditionalStateStore interface {
 	CompareAndSwapIncidentState(context.Context, string, domain.IncidentState, domain.IncidentState) (bool, error)
 }
+
+type ExecutionRecoveryStore interface {
+	ListExecutionRecordsByStatus(context.Context, string) ([]domain.ExecutionRecord, error)
+}

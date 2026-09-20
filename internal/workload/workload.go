@@ -204,6 +204,31 @@ func (s *Supervisor) Handler(ctx context.Context) http.Handler {
 		_ = s.client.Set(r.Context(), key, result, 24*time.Hour).Err()
 		writeRawJSON(w, statusCode, result)
 	})
+	mux.HandleFunc("/operations/", func(w http.ResponseWriter, r *http.Request) {
+		if !s.authorized(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		operationID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/operations/"))
+		if operationID == "" {
+			http.Error(w, "operation id is required", http.StatusBadRequest)
+			return
+		}
+		result, err := s.client.Get(r.Context(), "triovexa:operation:"+operationID).Bytes()
+		if errors.Is(err, redis.Nil) {
+			http.Error(w, "operation not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "operation status unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeRawJSON(w, http.StatusOK, result)
+	})
 	mux.HandleFunc("/faults", func(w http.ResponseWriter, r *http.Request) {
 		if !s.authorized(r) {
 			http.Error(w, "unauthorized", 401)

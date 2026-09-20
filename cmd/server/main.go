@@ -139,6 +139,12 @@ func main() {
 		cfg.ActionExecutionRetries,
 		cfg.ActionExecutionCooldown,
 	).WithTelemetry(recorder)
+	if recovered, recoverErr := executionService.RecoverStartedExecutions(context.Background()); recoverErr != nil {
+		logger.Error("recover started executions", slog.String("error", recoverErr.Error()))
+		os.Exit(1)
+	} else if recovered > 0 {
+		logger.Info("reconciled started executions", slog.Int("count", recovered))
+	}
 	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService).WithTelemetry(recorder)
 	authService := auth.NewService(repository, cfg.SessionTTL)
 	appCtx, appCancel := context.WithCancel(context.Background())

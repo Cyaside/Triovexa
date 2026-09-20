@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	ExecutionStatusStarted   = "started"
-	ExecutionStatusSucceeded = "succeeded"
-	ExecutionStatusFailed    = "failed"
-	ExecutionStatusTimedOut  = "timed_out"
+	ExecutionStatusStarted      = "started"
+	ExecutionStatusSucceeded    = "succeeded"
+	ExecutionStatusFailed       = "failed"
+	ExecutionStatusTimedOut     = "timed_out"
+	ExecutionStatusInconclusive = "inconclusive"
 )
 
 type KillSwitchReader interface {
@@ -44,6 +45,19 @@ type AdapterResult struct {
 
 type Adapter interface {
 	Execute(context.Context, domain.CandidateAction, AdapterRequest) (AdapterResult, error)
+}
+
+type ReconciliationStatus string
+
+const (
+	ReconciliationSucceeded ReconciliationStatus = "succeeded"
+	ReconciliationFailed    ReconciliationStatus = "failed"
+	ReconciliationPending   ReconciliationStatus = "pending"
+	ReconciliationUnknown   ReconciliationStatus = "unknown"
+)
+
+type OperationReconciler interface {
+	Reconcile(context.Context, domain.CandidateAction, AdapterRequest) (AdapterResult, ReconciliationStatus, error)
 }
 
 type RetryableError struct {
@@ -109,6 +123,96 @@ func NewService(
 func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
 	s.metrics = recorder
 	return s
+}
+
+// RecoverStartedExecutions reconciles records left in started after a process
+// exit. It never redispatches the external operation.
+func (s *Service) RecoverStartedExecutions(ctx context.Context) (int, error) {
+	store, ok := s.repository.(storage.ExecutionRecoveryStore)
+	if !ok {
+		return 0, nil
+	}
+	records, err := store.ListExecutionRecordsByStatus(ctx, ExecutionStatusStarted)
+	if err != nil {
+		return 0, fmt.Errorf("list started executions: %w", err)
+	}
+	reconciler, canReconcile := s.adapter.(OperationReconciler)
+	for _, record := range records {
+		action, loadErr := s.repository.GetCandidateAction(ctx, record.CandidateActionID)
+		if loadErr != nil {
+			return 0, fmt.Errorf("load action for execution %s: %w", record.ID, loadErr)
+		}
+		result := AdapterResult{ExecutorType: record.ExecutorType, Payload: map[string]any{}}
+		status := ReconciliationUnknown
+		if canReconcile {
+			var reconcileErr error
+			result, status, reconcileErr = reconciler.Reconcile(ctx, action, AdapterRequest{IdempotencyKey: record.IdempotencyKey, Timeout: s.timeout, InitiatedBy: record.InitiatedBy})
+			if reconcileErr != nil {
+				status = ReconciliationUnknown
+				result.Payload = map[string]any{"reconciliation_error": reconcileErr.Error()}
+			}
+		}
+		record.ExecutorType = result.ExecutorType
+		if record.ExecutorType == "" {
+			record.ExecutorType = "unknown"
+		}
+		record.FinishedAt = s.now()
+		incidentRecord, loadErr := s.repository.GetIncident(ctx, action.IncidentID)
+		if loadErr != nil {
+			return 0, loadErr
+		}
+		switch status {
+		case ReconciliationSucceeded:
+			record.Status = ExecutionStatusSucceeded
+			record.ResultJSON = marshalExecutionPayload(result.Payload)
+			if err := s.repository.SaveExecutionRecord(ctx, record); err != nil {
+				return 0, err
+			}
+			if err := s.repository.UpdateCandidateActionStatus(ctx, action.ID, domain.CandidateActionStatusSucceeded); err != nil {
+				return 0, err
+			}
+			if _, err := s.transitionIncidentState(ctx, incidentRecord, domain.IncidentStateVerifyingAction); err != nil {
+				return 0, err
+			}
+			if s.verifier != nil {
+				if _, err := s.verifier.VerifyExecution(ctx, action, record); err != nil {
+					return 0, err
+				}
+			}
+		case ReconciliationFailed:
+			record.Status = ExecutionStatusFailed
+			record.ResultJSON = marshalExecutionPayload(result.Payload)
+			if err := s.repository.SaveExecutionRecord(ctx, record); err != nil {
+				return 0, err
+			}
+			if err := s.repository.UpdateCandidateActionStatus(ctx, action.ID, domain.CandidateActionStatusFailed); err != nil {
+				return 0, err
+			}
+			if _, err := s.transitionIncidentState(ctx, incidentRecord, domain.IncidentStateFailedRemediation); err != nil {
+				return 0, err
+			}
+		default:
+			record.Status = ExecutionStatusInconclusive
+			if result.Payload == nil {
+				result.Payload = map[string]any{}
+			}
+			result.Payload["reconciliation_status"] = status
+			record.ResultJSON = marshalExecutionPayload(result.Payload)
+			if err := s.repository.SaveExecutionRecord(ctx, record); err != nil {
+				return 0, err
+			}
+			if err := s.repository.UpdateCandidateActionStatus(ctx, action.ID, domain.CandidateActionStatusFailed); err != nil {
+				return 0, err
+			}
+			if _, err := s.transitionIncidentState(ctx, incidentRecord, domain.IncidentStateEscalated); err != nil {
+				return 0, err
+			}
+		}
+		if err := s.audit(ctx, action.IncidentID, "execution_reconciled", "completed", map[string]any{"execution_record_id": record.ID, "status": record.Status}); err != nil {
+			return 0, err
+		}
+	}
+	return len(records), nil
 }
 
 func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedBy string) (domain.ExecutionRecord, error) {

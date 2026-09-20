@@ -1155,6 +1155,27 @@ func (s *PostgresStore) ListExecutionRecordsByAction(ctx context.Context, action
 	return records, rows.Err()
 }
 
+func (s *PostgresStore) ListExecutionRecordsByStatus(ctx context.Context, status string) ([]domain.ExecutionRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, candidate_action_id, idempotency_key, initiated_by, executor_type, status, started_at, finished_at, result_json
+		FROM execution_records WHERE status = $1 ORDER BY started_at ASC
+	`, status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []domain.ExecutionRecord
+	for rows.Next() {
+		var record domain.ExecutionRecord
+		if err := rows.Scan(&record.ID, &record.CandidateActionID, &record.IdempotencyKey, &record.InitiatedBy,
+			&record.ExecutorType, &record.Status, &record.StartedAt, &record.FinishedAt, &record.ResultJSON); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	return records, rows.Err()
+}
+
 func (s *PostgresStore) SaveVerificationResult(ctx context.Context, result domain.VerificationResult) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO verification_results (id, execution_record_id, status, evidence_json, notes, created_at)
