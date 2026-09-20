@@ -167,7 +167,12 @@ func (s *Supervisor) Handler(ctx context.Context) http.Handler {
 			http.Error(w, "method not allowed", 405)
 			return
 		}
-		var request struct{ OperationID, Operation, Target, RequestedBy string }
+		var request struct {
+			OperationID string `json:"operation_id"`
+			Operation   string `json:"operation"`
+			Target      string `json:"target"`
+			RequestedBy string `json:"requested_by"`
+		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request) != nil {
 			http.Error(w, "invalid request", 400)
 			return

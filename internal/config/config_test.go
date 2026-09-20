@@ -49,8 +49,8 @@ func TestLoadConfigIncludesProviderDefaults(t *testing.T) {
 	if cfg.GrafanaLogsSourceUID != "grafanacloud-logs" {
 		t.Fatalf("GrafanaLogsSourceUID = %q, want %q", cfg.GrafanaLogsSourceUID, "grafanacloud-logs")
 	}
-	if cfg.WriteTimeout != 30*time.Second {
-		t.Fatalf("WriteTimeout = %v, want %v", cfg.WriteTimeout, 30*time.Second)
+	if cfg.WriteTimeout != 150*time.Second {
+		t.Fatalf("WriteTimeout = %v, want %v", cfg.WriteTimeout, 150*time.Second)
 	}
 }
 

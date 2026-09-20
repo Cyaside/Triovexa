@@ -14,7 +14,7 @@ const (
 	defaultHTTPHost        = "127.0.0.1"
 	defaultEnvironment     = "local"
 	defaultReadTimeout     = 5 * time.Second
-	defaultWriteTimeout    = 30 * time.Second
+	defaultWriteTimeout    = 150 * time.Second
 	defaultIdleTimeout     = 30 * time.Second
 	defaultShutdownTimeout = 10 * time.Second
 )

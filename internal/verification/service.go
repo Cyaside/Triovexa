@@ -205,7 +205,7 @@ func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAc
 		return domain.VerificationResult{}, fmt.Errorf("audit verification start: %w", err)
 	}
 
-	before, after, checks, status, notes, err := s.evaluate(ctx, action)
+	before, after, observations, checks, status, notes, err := s.evaluate(ctx, action)
 	if err != nil {
 		return domain.VerificationResult{}, err
 	}
@@ -219,6 +219,8 @@ func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAc
 	evidenceJSON, err := marshalEvidence(map[string]any{
 		"before":                 before,
 		"after":                  after,
+		"observations":           observations,
+		"required_observations":  s.requiredObservations,
 		"checks":                 checks,
 		"draft_status_update":    s.buildDraftStatusUpdate(incidentRecord, action, record, status, checks),
 		"escalation_recommended": status != StatusSuccess,
@@ -286,6 +288,8 @@ func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAc
 					if err := s.updateVerificationResult(ctx, &result, map[string]any{
 						"before":                 before,
 						"after":                  after,
+						"observations":           observations,
+						"required_observations":  s.requiredObservations,
 						"checks":                 checks,
 						"draft_status_update":    fmt.Sprintf("Incident %q still requires escalation because verification failed and rollback %q also failed.", incidentRecord.Title, definition.RollbackActionKey),
 						"escalation_recommended": true,
@@ -308,6 +312,8 @@ func (s *Service) VerifyExecution(ctx context.Context, action domain.CandidateAc
 					if err := s.updateVerificationResult(ctx, &result, map[string]any{
 						"before":                 before,
 						"after":                  after,
+						"observations":           observations,
+						"required_observations":  s.requiredObservations,
 						"checks":                 checks,
 						"draft_status_update":    fmt.Sprintf("Incident %q was safely rolled back after action %s degraded the service.", incidentRecord.Title, action.ActionType),
 						"escalation_recommended": false,
@@ -375,14 +381,14 @@ func (s *Service) updateVerificationResult(ctx context.Context, result *domain.V
 	return nil
 }
 
-func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (demo.Snapshot, demo.Snapshot, map[string]bool, string, string, error) {
+func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (demo.Snapshot, demo.Snapshot, []demo.Snapshot, map[string]bool, string, string, error) {
 	incidentRecord, err := s.repository.GetIncident(ctx, action.IncidentID)
 	if err != nil {
-		return demo.Snapshot{}, demo.Snapshot{}, nil, "", "", fmt.Errorf("get incident for verification queries: %w", err)
+		return demo.Snapshot{}, demo.Snapshot{}, nil, nil, "", "", fmt.Errorf("get incident for verification queries: %w", err)
 	}
 	evidence, err := s.repository.ListEvidenceItems(ctx, action.IncidentID)
 	if err != nil {
-		return demo.Snapshot{}, demo.Snapshot{}, nil, "", "", fmt.Errorf("list evidence for verification: %w", err)
+		return demo.Snapshot{}, demo.Snapshot{}, nil, nil, "", "", fmt.Errorf("list evidence for verification: %w", err)
 	}
 
 	before, baselineErr := deriveBaselineSnapshot(evidence)
@@ -390,6 +396,10 @@ func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (
 		baselineErr = fmt.Errorf("baseline evidence is stale")
 	}
 	after, afterErr := s.fetchAfterSnapshot(ctx, incidentRecord)
+	observations := make([]demo.Snapshot, 0, max(s.requiredObservations, 1))
+	if afterErr == nil {
+		observations = append(observations, after)
+	}
 
 	checks := map[string]bool{}
 	if baselineErr != nil || afterErr != nil {
@@ -402,26 +412,30 @@ func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (
 		case afterErr != nil:
 			notes = notes + fmt.Sprintf(" (%s)", afterErr.Error())
 		}
-		return before, after, checks, StatusInconclusive, notes, nil
+		return before, after, observations, checks, StatusInconclusive, notes, nil
 	}
 
 	checks = buildChecks(before, after)
-	if s.requiredObservations > 1 && recoveryChecksPassed(checks) {
+	if s.requiredObservations > 1 {
 		deadline := s.now().Add(s.observationTimeout)
-		consecutive := 1
+		consecutive := 0
+		if recoveryChecksPassed(checks) {
+			consecutive = 1
+		}
 		for consecutive < s.requiredObservations && s.now().Before(deadline) {
 			timer := time.NewTimer(s.observationInterval)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return before, after, checks, StatusInconclusive, "verification cancelled before recovery was stable", nil
+				return before, after, observations, checks, StatusInconclusive, "verification cancelled before recovery was stable", nil
 			case <-timer.C:
 			}
 			next, fetchErr := s.fetchAfterSnapshot(ctx, incidentRecord)
 			if fetchErr != nil {
-				return before, after, checks, StatusInconclusive, "verification inconclusive: recovery telemetry became unavailable", nil
+				return before, after, observations, checks, StatusInconclusive, "verification inconclusive: recovery telemetry became unavailable", nil
 			}
 			after = next
+			observations = append(observations, next)
 			checks = buildChecks(before, after)
 			if recoveryChecksPassed(checks) {
 				consecutive++
@@ -430,7 +444,7 @@ func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (
 			}
 		}
 		if consecutive < s.requiredObservations {
-			return before, after, checks, StatusInconclusive, "verification inconclusive: recovery was not stable for the required observations", nil
+			return before, after, observations, checks, StatusInconclusive, "verification inconclusive: recovery was not stable for the required observations", nil
 		}
 	}
 	improvementCount := countTrue(
@@ -443,14 +457,15 @@ func (s *Service) evaluate(ctx context.Context, action domain.CandidateAction) (
 		checks["latency_worsened"],
 		checks["queue_backlog_worsened"],
 	)
+	workloadRecovered := before.Mode == demo.ModeWorkerStall && recoveryChecksPassed(checks)
 
 	switch {
-	case checks["alert_cleared"] && checks["health_check_normal"] && improvementCount >= 2 && worsenedCount == 0:
-		return before, after, checks, StatusSuccess, "verification passed: alert cleared and core signals improved after execution", nil
+	case workloadRecovered || checks["alert_cleared"] && checks["health_check_normal"] && improvementCount >= 2 && worsenedCount == 0:
+		return before, after, observations, checks, StatusSuccess, "verification passed: alert cleared and core signals improved after execution", nil
 	case !checks["alert_cleared"] || !checks["health_check_normal"] || worsenedCount >= 2:
-		return before, after, checks, StatusFailed, "verification failed: service is still degraded or key signals worsened after execution", nil
+		return before, after, observations, checks, StatusFailed, "verification failed: service is still degraded or key signals worsened after execution", nil
 	default:
-		return before, after, checks, StatusInconclusive, "verification inconclusive: partial improvement observed but signals are not strong enough to auto-resolve", nil
+		return before, after, observations, checks, StatusInconclusive, "verification inconclusive: partial improvement observed but signals are not strong enough to auto-resolve", nil
 	}
 }
 

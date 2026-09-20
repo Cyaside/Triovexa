@@ -32,6 +32,59 @@ type Catalog map[string]ActionDefinition
 
 func DefaultCatalog() Catalog {
 	return Catalog{
+		"restart_worker": {
+			Key:              "restart_worker",
+			Description:      "Restart the allowlisted Redis Streams worker through the workload supervisor.",
+			RiskLevel:        domain.RiskLevelLow,
+			ApprovalRequired: true,
+			Executable:       true,
+			AllowedEnvironments: []string{
+				"local",
+				"staging",
+			},
+			AllowedTargets: []string{
+				"queue-worker",
+			},
+			MaxExecutionAttempts: 2,
+			ExecutionCooldown:    time.Minute,
+			Parameters: []ParameterDefinition{
+				{Name: "worker_id", Type: "string", Required: true, Description: "Allowlisted workload worker identifier."},
+			},
+		},
+		"pause_consumer": {
+			Key:              "pause_consumer",
+			Description:      "Pause the allowlisted Redis Streams consumer as a bounded containment action.",
+			RiskLevel:        domain.RiskLevelMedium,
+			ApprovalRequired: true,
+			Executable:       true,
+			AllowedEnvironments: []string{
+				"local",
+				"staging",
+			},
+			AllowedTargets: []string{
+				"queue-worker",
+			},
+			SupportsRollback:     true,
+			RollbackActionKey:    "resume_consumer",
+			MaxExecutionAttempts: 1,
+			ExecutionCooldown:    5 * time.Minute,
+		},
+		"resume_consumer": {
+			Key:              "resume_consumer",
+			Description:      "Resume the allowlisted Redis Streams consumer after bounded containment.",
+			RiskLevel:        domain.RiskLevelLow,
+			ApprovalRequired: false,
+			Executable:       true,
+			AllowedEnvironments: []string{
+				"local",
+				"staging",
+			},
+			AllowedTargets: []string{
+				"queue-worker",
+			},
+			MaxExecutionAttempts: 2,
+			ExecutionCooldown:    time.Minute,
+		},
 		"restart_demo_worker": {
 			Key:              "restart_demo_worker",
 			Description:      "Restart one non-critical demo worker to restore background processing.",

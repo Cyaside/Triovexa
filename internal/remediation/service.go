@@ -46,15 +46,26 @@ func (g *HeuristicGenerator) Generate(
 
 	switch mode {
 	case "worker_stall":
-		action, err := g.newAction(incident, "restart_demo_worker", "demo-worker", map[string]any{
-			"worker_id": "worker-primary",
-		}, []string{metricEvidence, logEvidence}, fmt.Sprintf("A large backlog and unhealthy worker make a demo worker restart the safest candidate action. Triage summary: %s", triage.Summary))
+		actionType := "restart_demo_worker"
+		target := "demo-worker"
+		workerID := "worker-primary"
+		rationale := fmt.Sprintf("A large backlog and unhealthy worker make a demo worker restart the safest candidate action. Triage summary: %s", triage.Summary)
+		realWorkload := incident.ServiceName == "queue-worker"
+		if realWorkload {
+			actionType = "restart_worker"
+			target = "queue-worker"
+			workerID = "queue-worker"
+			rationale = fmt.Sprintf("The Redis Streams backlog and unhealthy consumer make an allowlisted worker restart the safest candidate action. Triage summary: %s", triage.Summary)
+		}
+		action, err := g.newAction(incident, actionType, target, map[string]any{
+			"worker_id": workerID,
+		}, []string{metricEvidence, logEvidence}, rationale)
 		if err != nil {
 			return nil, err
 		}
 		actions = append(actions, g.validateAction(incident, action))
 
-		if queueBacklog >= 80 {
+		if queueBacklog >= 80 && !realWorkload {
 			retryAction, err := g.newAction(incident, "retry_demo_background_job", "demo-job-runner", map[string]any{
 				"job_id": "backlog-drain-batch",
 			}, []string{metricEvidence, logEvidence}, "The accumulated backlog warrants a bounded batch-job retry to help drain the queue after the worker becomes healthy.")
@@ -65,7 +76,13 @@ func (g *HeuristicGenerator) Generate(
 		}
 
 		if queueBacklog >= 120 {
-			pauseAction, err := g.newAction(incident, "pause_demo_queue_consumer", "demo-queue-consumer", map[string]any{}, []string{metricEvidence, logEvidence}, "The extreme backlog and signs of a slow dependency make pausing the queue consumer a medium-risk containment option while the operator prepares a rollback.")
+			pauseActionType := "pause_demo_queue_consumer"
+			pauseTarget := "demo-queue-consumer"
+			if realWorkload {
+				pauseActionType = "pause_consumer"
+				pauseTarget = "queue-worker"
+			}
+			pauseAction, err := g.newAction(incident, pauseActionType, pauseTarget, map[string]any{}, []string{metricEvidence, logEvidence}, "The extreme backlog makes pausing the queue consumer a medium-risk containment option while the operator investigates downstream pressure.")
 			if err != nil {
 				return nil, err
 			}

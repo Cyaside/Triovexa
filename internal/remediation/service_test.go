@@ -67,6 +67,30 @@ func TestHeuristicGeneratorWorkerStallProducesControlledRiskActions(t *testing.T
 	}
 }
 
+func TestHeuristicGeneratorUsesRealWorkloadCatalogForQueueWorker(t *testing.T) {
+	t.Parallel()
+
+	generator := NewHeuristicGenerator(execution.DefaultCatalog())
+	incident := domain.Incident{ID: "inc-real", Environment: "staging", ServiceName: "queue-worker"}
+	evidence := []domain.EvidenceItem{
+		newEvidence("ev-metric", "metric", "worker stalled; queue backlog=42", map[string]any{"queue_backlog": 42}),
+		newEvidence("ev-log", "log", "worker stalled while queue backlog kept growing", map[string]any{"workerHealthy": false}),
+	}
+	actions, err := generator.Generate(context.Background(), incident, domain.TriageResult{Summary: "queue consumer stopped making progress"}, evidence, nil)
+	if err != nil {
+		t.Fatalf("generate candidate actions: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("candidate actions = %d, want 1", len(actions))
+	}
+	if actions[0].ActionType != "restart_worker" || actions[0].TargetResource != "queue-worker" {
+		t.Fatalf("action = %s/%s, want restart_worker/queue-worker", actions[0].ActionType, actions[0].TargetResource)
+	}
+	if actions[0].Status != domain.CandidateActionStatusProposed {
+		t.Fatalf("action status = %q, want proposed", actions[0].Status)
+	}
+}
+
 func TestHeuristicGeneratorMarksDisallowedEnvironmentInvalid(t *testing.T) {
 	t.Parallel()
 

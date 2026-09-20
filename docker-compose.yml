@@ -59,6 +59,7 @@ services:
     environment:
       HTTP_HOST: 0.0.0.0
       HTTP_PORT: "8080"
+      HTTP_WRITE_TIMEOUT: 150s
       APP_ENV: local
       DEPLOYMENT_MODE: local-demo
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/triovexa?sslmode=disable
@@ -124,7 +125,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_AUTH_ANONYMOUS_ENABLED: "false"
     ports:
-      - "3000:3000"
+      - "${GRAFANA_HOST_PORT:-3300}:3000"
     volumes:
       - ./deployments/playground/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
       - ./deployments/playground/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro

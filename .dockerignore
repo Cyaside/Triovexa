@@ -4,5 +4,12 @@ bin
 dist
 ui/node_modules
 ui/.vite
+ui/test-results
+ui/playwright-report
+artifacts
 guide
 prd.md
+.agents
+.kilo
+.tmp
+work

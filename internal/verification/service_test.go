@@ -61,6 +61,45 @@ func TestServiceVerifyExecutionSuccess(t *testing.T) {
 	}
 }
 
+func TestServiceVerifyExecutionAcceptsStableWorkloadRecovery(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	incidentRecord, action, executionRecord := seedVerificationFixture(t, repository)
+	action.ActionType = "restart_worker"
+	action.TargetResource = "queue-worker"
+	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
+		t.Fatal(err)
+	}
+	workloadBaseline, _ := json.Marshal(map[string]any{
+		"mode": string(demo.ModeWorkerStall), "error_rate": 0.12, "latency_ms": 430,
+		"queue_backlog": 42, "workerHealthy": false,
+	})
+	if err := repository.SaveEvidenceItems(context.Background(), []domain.EvidenceItem{{
+		ID: uuid.NewString(), IncidentID: incidentRecord.ID, Type: "metric", Source: "workload-control",
+		Timestamp: time.Now().UTC(), MetadataJSON: string(workloadBaseline),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewService(repository, stubFetcher{snapshot: demo.Snapshot{
+		Mode: demo.ModeHealthy, ErrorRate: 0.12, LatencyMs: 430, QueueBacklog: 4,
+		WorkerHealthy: true, LastUpdatedUTC: time.Now().UTC(),
+	}}, execution.DefaultCatalog(), nil)
+
+	result, err := service.VerifyExecution(context.Background(), action, executionRecord)
+	if err != nil {
+		t.Fatalf("verify execution: %v", err)
+	}
+	if result.Status != StatusSuccess {
+		t.Fatalf("verification status = %q, want %q", result.Status, StatusSuccess)
+	}
+	updated, err := repository.GetIncident(context.Background(), incidentRecord.ID)
+	if err != nil || updated.State != domain.IncidentStateResolved {
+		t.Fatalf("incident = %#v err=%v, want resolved", updated, err)
+	}
+}
+
 func TestServiceVerifyExecutionFailedEscalatesIncident(t *testing.T) {
 	t.Parallel()
 
@@ -266,6 +305,44 @@ func TestServiceVerifyExecutionFailedTriggersRollbackWhenAvailable(t *testing.T)
 	}
 }
 
+func TestServiceVerifyExecutionEscalatesWhenCompensationFails(t *testing.T) {
+	repository := storage.NewMemoryStore()
+	now := time.Now().UTC()
+	incidentRecord := domain.Incident{ID: "incident-compensation-failure", Title: "queue consumer backlog", ServiceName: "queue-worker", Environment: "staging", State: domain.IncidentStateVerifyingAction, CreatedAt: now, UpdatedAt: now}
+	if err := repository.CreateIncident(context.Background(), incidentRecord); err != nil {
+		t.Fatal(err)
+	}
+	action := domain.CandidateAction{ID: uuid.NewString(), IncidentID: incidentRecord.ID, ActionType: "pause_demo_queue_consumer", TargetResource: "demo-queue-consumer", ParametersJSON: `{}`, RiskLevel: domain.RiskLevelMedium, Status: domain.CandidateActionStatusSucceeded, CreatedAt: now}
+	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
+		t.Fatal(err)
+	}
+	metadata, _ := json.Marshal(map[string]any{"mode": string(demo.ModeWorkerStall), "error_rate": 0.12, "latency_ms": 430, "queue_backlog": 128, "workerHealthy": false, "complete": true})
+	if err := repository.SaveEvidenceItems(context.Background(), []domain.EvidenceItem{{ID: uuid.NewString(), IncidentID: incidentRecord.ID, Type: "metric", Source: "workload-control", Timestamp: now, MetadataJSON: string(metadata)}}); err != nil {
+		t.Fatal(err)
+	}
+	record := domain.ExecutionRecord{ID: uuid.NewString(), CandidateActionID: action.ID, IdempotencyKey: "execute:" + action.ID, InitiatedBy: "operator", ExecutorType: "fake", Status: "succeeded", StartedAt: now, FinishedAt: now, ResultJSON: `{}`}
+	if err := repository.SaveExecutionRecord(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	rollbacker := execution.NewRollbackService(repository, execution.DefaultCatalog(), &fakeRollbackAdapter{err: errors.New("resume operation rejected")})
+	service := NewService(repository, stubFetcher{snapshot: demo.Snapshot{Mode: demo.ModeWorkerStall, ErrorRate: 0.20, LatencyMs: 750, QueueBacklog: 160, ConsumerPaused: true, WorkerHealthy: false, LastUpdatedUTC: now}}, execution.DefaultCatalog(), rollbacker)
+	result, err := service.VerifyExecution(context.Background(), action, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StatusFailed || !strings.Contains(result.EvidenceJSON, `"rollback_succeeded":false`) {
+		t.Fatalf("unexpected verification result: %#v", result)
+	}
+	updated, _ := repository.GetIncident(context.Background(), incidentRecord.ID)
+	if updated.State != domain.IncidentStateEscalated {
+		t.Fatalf("incident state = %q, want escalated", updated.State)
+	}
+	rollbacks, _ := repository.ListRollbackRecordsByAction(context.Background(), action.ID)
+	if len(rollbacks) != 1 || rollbacks[0].Status != execution.RollbackStatusFailed {
+		t.Fatalf("rollback records = %#v", rollbacks)
+	}
+}
+
 func TestServiceVerifyExecutionTelemetryMarksErrorsExplicitly(t *testing.T) {
 	t.Parallel()
 
@@ -433,9 +510,12 @@ func seedVerificationFixture(t *testing.T, repository storage.Repository) (domai
 	return incidentRecord, action, executionRecord
 }
 
-type fakeRollbackAdapter struct{}
+type fakeRollbackAdapter struct{ err error }
 
 func (f *fakeRollbackAdapter) Execute(ctx context.Context, action domain.CandidateAction, request execution.AdapterRequest) (execution.AdapterResult, error) {
+	if f.err != nil {
+		return execution.AdapterResult{ExecutorType: "fake-rollback-adapter"}, f.err
+	}
 	return execution.AdapterResult{
 		ExecutorType: "fake-rollback-adapter",
 		Payload: map[string]any{
