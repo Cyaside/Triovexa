@@ -37,7 +37,7 @@ var demoScenarioCatalog = []demoScenarioDefinition{
 		Key:            "timeout-after-deploy",
 		Name:           "Timeout After Deploy",
 		Title:          "checkout timeout after deploy",
-		Summary:        "Mensimulasikan lonjakan latency dan timeout sesaat setelah deploy.",
+		Summary:        "Simulates a latency spike and request timeouts immediately after a deployment.",
 		SimulatePath:   "/simulate/timeout-after-deploy",
 		FingerprintKey: "ui-timeout-after-deploy",
 		ServiceName:    "checkout-service",
@@ -50,7 +50,7 @@ var demoScenarioCatalog = []demoScenarioDefinition{
 		Key:            "worker-stall",
 		Name:           "Worker Stall",
 		Title:          "worker stall on checkout consumer",
-		Summary:        "Mensimulasikan backlog worker yang menumpuk sampai memunculkan opsi medium-risk.",
+		Summary:        "Simulates a growing worker backlog that eventually produces a medium-risk containment option.",
 		SimulatePath:   "/simulate/worker-stall",
 		FingerprintKey: "ui-worker-stall",
 		ServiceName:    "checkout-service",
@@ -63,7 +63,7 @@ var demoScenarioCatalog = []demoScenarioDefinition{
 		Key:            "error-rate-spike",
 		Name:           "Error Rate Spike",
 		Title:          "checkout error rate spike",
-		Summary:        "Mensimulasikan error rate tinggi pada jalur utama tanpa menghancurkan seluruh service.",
+		Summary:        "Simulates a high error rate on the primary path without taking down the entire service.",
 		SimulatePath:   "/simulate/error-rate-spike",
 		FingerprintKey: "ui-error-rate-spike",
 		ServiceName:    "checkout-service",
@@ -260,22 +260,22 @@ func latestVerificationStatus(results []domain.VerificationResult) string {
 
 func describeNextOperatorStep(incidentRecord domain.Incident, killSwitchEnabled bool) string {
 	if killSwitchEnabled {
-		return "Kill switch aktif. Anda masih bisa memeriksa triage dan evidence, tetapi approval atau execution baru sebaiknya ditunda sampai kill switch dimatikan."
+		return "The kill switch is active. You can still inspect triage and evidence, but new approvals and executions remain blocked until it is disabled."
 	}
 
 	switch incidentRecord.State {
 	case domain.IncidentStateAwaitingApproval:
-		return "Review rationale heuristik dan policy decision, lalu approve atau reject candidate action yang paling aman."
+		return "Review the heuristic rationale and policy decision, then approve or reject the safest candidate action."
 	case domain.IncidentStateResolved:
-		return "Verification sudah sukses. Tinjau evidence before/after dan gunakan hasil ini untuk closure atau status update."
+		return "Verification succeeded. Review the before-and-after evidence and use the result for closure or a status update."
 	case domain.IncidentStateRolledBack:
-		return "Sistem sudah rollback otomatis. Tinjau verification failure dan rollback record sebelum menentukan apakah perlu eskalasi lanjutan."
+		return "The system completed an automatic rollback. Review the verification failure and rollback record before deciding whether to escalate."
 	case domain.IncidentStateEscalated, domain.IncidentStateFailedRemediation:
-		return "Heuristik tidak cukup untuk auto-close. Incident ini perlu handoff manusia dengan membawa audit trail dan evidence yang sudah terkumpul."
+		return "The heuristic result is insufficient for automatic closure. Hand the incident to an operator with its audit trail and collected evidence."
 	case domain.IncidentStateExecutingAction, domain.IncidentStateVerifyingAction:
-		return "Eksekusi atau verification sedang berjalan. Pantau action lane dan jangan kirim aksi duplikat sampai status final muncul."
+		return "Execution or verification is in progress. Monitor the action lane and do not submit duplicate actions before a final status appears."
 	default:
-		return "Gunakan halaman ini untuk membaca triage, mengecek candidate action, dan mengikuti outcome heuristik secara end-to-end."
+		return "Use this page to review triage, inspect candidate actions, and follow the heuristic workflow end to end."
 	}
 }
 

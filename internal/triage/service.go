@@ -69,51 +69,51 @@ func summarizeIncident(
 	lastDeploy string,
 	documents []domain.DocumentReference,
 ) (string, []string, string, []string, string) {
-	docHint := "Tidak ada dokumen kuat yang cocok."
+	docHint := "No strongly relevant document was found."
 	if len(documents) > 0 {
-		docHint = fmt.Sprintf("Dokumen paling relevan: %s.", documents[0].DocumentTitle)
+		docHint = fmt.Sprintf("Most relevant document: %s.", documents[0].DocumentTitle)
 	}
 
 	switch mode {
 	case "worker_stall":
-		return fmt.Sprintf("%s di %s menunjukkan backlog pekerjaan yang meningkat dan worker tidak sehat. %s", incident.ServiceName, incident.Environment, docHint),
+		return fmt.Sprintf("%s in %s has a growing job backlog and an unhealthy worker. %s", incident.ServiceName, incident.Environment, docHint),
 			[]string{
-				"worker demo mengalami stall atau crash loop sehingga antrean job tidak terproses",
-				"deploy terakhir mungkin memicu inkompatibilitas payload dengan worker",
+				"the demo worker is stalled or crash-looping, leaving queued jobs unprocessed",
+				"the latest deployment may have introduced a payload incompatibility in the worker",
 			},
-			"blast radius utama ada pada background processing, namun request synchronous bisa ikut terdampak jika backlog terus bertambah",
+			"the primary blast radius is background processing, but synchronous requests may also degrade if the backlog continues to grow",
 			[]string{
-				"cek health worker dan pola restart pada log",
-				"bandingkan backlog sebelum dan sesudah alert",
-				"review runbook restart worker atau retry background job yang cocok",
+				"check worker health and restart patterns in the logs",
+				"compare queue backlog before and after the alert",
+				"review the worker restart or background job retry runbook",
 			},
-			"confidence sedang ke tinggi karena backlog, health worker, dan dokumen retrieval mengarah ke pola yang konsisten"
+			"medium-to-high confidence because backlog, worker health, and retrieved documentation indicate a consistent failure pattern"
 	case "timeout_after_deploy":
-		return fmt.Sprintf("%s di %s mengalami timeout setelah deploy %s dengan lonjakan latency yang jelas. %s", incident.ServiceName, incident.Environment, lastDeploy, docHint),
+		return fmt.Sprintf("%s in %s is timing out after deployment %s, with a clear latency increase. %s", incident.ServiceName, incident.Environment, lastDeploy, docHint),
 			[]string{
-				"deploy terakhir memperkenalkan perubahan yang memperlambat dependency atau internal timeout budget",
-				"error rate naik sebagai dampak sekunder dari request yang menunggu terlalu lama",
+				"the latest deployment introduced a change that slowed a dependency or exhausted the internal timeout budget",
+				"the error rate increased as a secondary effect of requests waiting too long",
 			},
-			"jalur request utama kemungkinan terdampak, terutama operasi yang bergantung pada dependency lambat",
+			"the primary request path is likely affected, especially operations that depend on the slow dependency",
 			[]string{
-				"validasi apakah error meningkat tepat setelah deploy terakhir",
-				"cek log timeout dan dependency yang paling sering muncul",
-				"review postmortem timeout after deploy dan runbook rollback terkait",
+				"confirm whether errors increased immediately after the latest deployment",
+				"inspect timeout logs and identify the dependency that appears most often",
+				"review the timeout-after-deploy postmortem and related rollback runbook",
 			},
-			"confidence tinggi karena evidence deploy dan pola timeout saling menguatkan"
+			"high confidence because deployment evidence and timeout patterns reinforce each other"
 	default:
-		return fmt.Sprintf("%s di %s menunjukkan anomali error rate dan latency yang perlu ditriase lebih lanjut. %s", incident.ServiceName, incident.Environment, docHint),
+		return fmt.Sprintf("%s in %s shows error-rate and latency anomalies that require further triage. %s", incident.ServiceName, incident.Environment, docHint),
 			[]string{
-				"ada degradasi performa pada jalur request utama",
-				"anomali bisa terkait deploy terbaru atau kondisi dependency eksternal",
+				"the primary request path is experiencing performance degradation",
+				"the anomaly may be related to the latest deployment or an external dependency",
 			},
-			"kemungkinan berdampak pada pengguna service utama dan beberapa proses background terkait",
+			"users of the primary service and related background processes may be affected",
 			[]string{
-				"cek evidence metric dan log paling baru",
-				"bandingkan anomali dengan deploy context terbaru",
-				"review runbook atau postmortem dengan keyword yang sama",
+				"inspect the latest metric and log evidence",
+				"compare the anomaly with the latest deployment context",
+				"review runbooks or postmortems with matching keywords",
 			},
-			"confidence sedang karena evidence awal cukup kuat tetapi mode insiden belum terlalu spesifik"
+			"medium confidence because the initial evidence is meaningful, but the incident pattern is not yet specific"
 	}
 }
 

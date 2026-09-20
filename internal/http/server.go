@@ -628,9 +628,9 @@ func NewServerWithTelemetry(
 		incidentRecord, err := triggerDemoScenario(r.Context(), cfg.DemoServiceBaseURL, incidentService, scenarioKey)
 		if err != nil {
 			logger.Error("failed to trigger demo scenario", slog.String("scenario", scenarioKey), slog.String("error", err.Error()))
-			target := appendUIMessage("/ui/incidents", "error", "Gagal menjalankan demo scenario. Periksa log server untuk detail.")
+			target := appendUIMessage("/ui/incidents", "error", "Failed to run the demo scenario. Check the server logs for details.")
 			if errors.Is(err, errDemoScenarioNotFound) {
-				target = appendUIMessage("/ui/incidents", "error", "Demo scenario tidak dikenal.")
+				target = appendUIMessage("/ui/incidents", "error", "Unknown demo scenario.")
 			}
 			http.Redirect(w, r, target, http.StatusSeeOther)
 			return
@@ -639,7 +639,7 @@ func NewServerWithTelemetry(
 		target := appendUIMessage(
 			"/ui/incidents/"+incidentRecord.ID,
 			"notice",
-			"Demo scenario berhasil dijalankan. Incident baru dan hasil heuristiknya sudah siap ditinjau.",
+			"The demo scenario completed. The new incident and its heuristic results are ready for review.",
 		)
 		http.Redirect(w, r, target, http.StatusSeeOther)
 	})
@@ -667,9 +667,9 @@ func NewServerWithTelemetry(
 
 		state := approvalService.SetKillSwitch(enabled)
 		target := sanitizeUIRedirectTarget(r.FormValue("redirect"), "/ui/incidents")
-		message := "Kill switch dinonaktifkan. Approval dan execution manual kembali bisa dipakai."
+		message := "The kill switch is disabled. Manual approvals and executions are available again."
 		if state.Enabled {
-			message = "Kill switch diaktifkan. Flow triage tetap berjalan, tetapi action baru akan diblok."
+			message = "The kill switch is enabled. Triage continues, but new actions are blocked."
 		}
 		http.Redirect(w, r, appendUIMessage(target, "notice", message), http.StatusSeeOther)
 	})

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -174,8 +176,10 @@ func registerAPIV1(
 			provider = runtime.Providers
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"reasoning": map[string]any{"configured": provider.LLMConfigured, "provider": provider.LLMProvider, "model": provider.LLMModel},
-			"grafana":   map[string]any{"configured": provider.GrafanaConfigured, "metrics_source_uid": provider.MetricsSourceUID, "logs_source_uid": provider.LogsSourceUID},
+			"reasoning":    map[string]any{"configured": provider.LLMConfigured, "provider": provider.LLMProvider, "model": provider.LLMModel},
+			"grafana":      map[string]any{"configured": provider.GrafanaConfigured, "metrics_source_uid": provider.MetricsSourceUID, "logs_source_uid": provider.LogsSourceUID},
+			"prometheus":   serviceConnectionStatus(cfg.PrometheusBaseURL),
+			"alertmanager": serviceConnectionStatus(cfg.AlertmanagerBaseURL),
 		})
 	})
 
@@ -205,6 +209,9 @@ func registerAPIV1(
 		writeJSON(w, http.StatusOK, map[string]any{"status": "connected", "provider": provider, "model": model, "latency_ms": time.Since(started).Milliseconds()})
 	})
 
+	registerReadinessConnectionTest(mux, "/api/v1/connections/prometheus/test", "Prometheus", cfg.PrometheusBaseURL)
+	registerReadinessConnectionTest(mux, "/api/v1/connections/alertmanager/test", "Alertmanager", cfg.AlertmanagerBaseURL)
+
 	mux.HandleFunc("/api/v1/settings", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPatch {
 			if approvalService == nil {
@@ -232,6 +239,76 @@ func registerAPIV1(
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"deployment_mode": cfg.DeploymentMode, "environment": cfg.Environment, "kill_switch_enabled": killSwitch})
 	})
+}
+
+func serviceConnectionStatus(baseURL string) map[string]any {
+	endpoint := publicConnectionEndpoint(baseURL)
+	return map[string]any{
+		"configured": endpoint != "",
+		"endpoint":   endpoint,
+	}
+}
+
+func publicConnectionEndpoint(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/")
+}
+
+func registerReadinessConnectionTest(mux *http.ServeMux, path string, serviceName string, baseURL string) {
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		endpoint := publicConnectionEndpoint(baseURL)
+		if endpoint == "" {
+			writeAPIError(w, http.StatusBadRequest, "connection_not_configured", serviceName+" is not configured.")
+			return
+		}
+		started := time.Now()
+		testCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := probeReadiness(testCtx, baseURL); err != nil {
+			writeAPIError(w, http.StatusBadGateway, "connection_test_failed", serviceName+" did not pass its readiness check. Check the server logs and endpoint configuration.")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "connected", "service": strings.ToLower(serviceName), "endpoint": endpoint, "latency_ms": time.Since(started).Milliseconds()})
+	})
+}
+
+func probeReadiness(ctx context.Context, baseURL string) error {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("invalid readiness endpoint")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/-/ready"
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("readiness endpoint returned status %d", response.StatusCode)
+	}
+	return nil
 }
 
 func loadIncidentDetail(r *http.Request, repository storage.Repository, id string) (incidentDetailResponse, error) {
@@ -274,6 +351,33 @@ func loadIncidentDetail(r *http.Request, repository storage.Repository, id strin
 	audit, err := repository.ListAuditEvents(r.Context(), id)
 	if err != nil {
 		return incidentDetailResponse{}, err
+	}
+	if evidence == nil {
+		evidence = []domain.EvidenceItem{}
+	}
+	if documents == nil {
+		documents = []domain.DocumentReference{}
+	}
+	if actions == nil {
+		actions = []domain.CandidateAction{}
+	}
+	if policies == nil {
+		policies = []domain.PolicyDecision{}
+	}
+	if approvals == nil {
+		approvals = []domain.ApprovalRecord{}
+	}
+	if executions == nil {
+		executions = []domain.ExecutionRecord{}
+	}
+	if verifications == nil {
+		verifications = []domain.VerificationResult{}
+	}
+	if rollbacks == nil {
+		rollbacks = []domain.RollbackRecord{}
+	}
+	if audit == nil {
+		audit = []domain.AuditEvent{}
 	}
 	var triage *domain.TriageResult
 	if value, triageErr := repository.GetTriageResult(r.Context(), id); triageErr == nil {

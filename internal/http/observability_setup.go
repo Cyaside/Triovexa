@@ -521,7 +521,7 @@ var observabilitySetupTemplate = template.Must(template.New("observability-setup
 
       <article class="panel">
         <h2>Current Runtime Context</h2>
-        <p class="muted">Mode aktif saat ini tidak otomatis berubah dari halaman ini.</p>
+        <p class="muted">The active modes are not changed automatically from this page.</p>
         <p><span class="chip">Reasoning {{.Runtime.ReasoningMode}}</span> <span class="chip">Observability {{.Runtime.ObservabilityMode}}</span></p>
         <p class="muted">Configured metrics UID: {{if .Runtime.MetricsSourceUID}}{{.Runtime.MetricsSourceUID}}{{else}}-{{end}}</p>
         <p class="muted">Configured logs UID: {{if .Runtime.LogsSourceUID}}{{.Runtime.LogsSourceUID}}{{else}}-{{end}}</p>

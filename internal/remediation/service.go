@@ -48,7 +48,7 @@ func (g *HeuristicGenerator) Generate(
 	case "worker_stall":
 		action, err := g.newAction(incident, "restart_demo_worker", "demo-worker", map[string]any{
 			"worker_id": "worker-primary",
-		}, []string{metricEvidence, logEvidence}, fmt.Sprintf("Backlog tinggi dan worker tidak sehat membuat restart worker demo menjadi kandidat aksi teraman. Ringkasan triage: %s", triage.Summary))
+		}, []string{metricEvidence, logEvidence}, fmt.Sprintf("A large backlog and unhealthy worker make a demo worker restart the safest candidate action. Triage summary: %s", triage.Summary))
 		if err != nil {
 			return nil, err
 		}
@@ -57,7 +57,7 @@ func (g *HeuristicGenerator) Generate(
 		if queueBacklog >= 80 {
 			retryAction, err := g.newAction(incident, "retry_demo_background_job", "demo-job-runner", map[string]any{
 				"job_id": "backlog-drain-batch",
-			}, []string{metricEvidence, logEvidence}, "Backlog yang sudah menumpuk layak diikuti dengan retry batch job aman untuk membantu drain antrean setelah worker kembali sehat.")
+			}, []string{metricEvidence, logEvidence}, "The accumulated backlog warrants a bounded batch-job retry to help drain the queue after the worker becomes healthy.")
 			if err != nil {
 				return nil, err
 			}
@@ -65,7 +65,7 @@ func (g *HeuristicGenerator) Generate(
 		}
 
 		if queueBacklog >= 120 {
-			pauseAction, err := g.newAction(incident, "pause_demo_queue_consumer", "demo-queue-consumer", map[string]any{}, []string{metricEvidence, logEvidence}, "Backlog sangat tinggi dan indikasi dependency lambat membuat pause queue consumer menjadi opsi medium-risk untuk membatasi blast radius sambil operator menyiapkan rollback jika hasilnya buruk.")
+			pauseAction, err := g.newAction(incident, "pause_demo_queue_consumer", "demo-queue-consumer", map[string]any{}, []string{metricEvidence, logEvidence}, "The extreme backlog and signs of a slow dependency make pausing the queue consumer a medium-risk containment option while the operator prepares a rollback.")
 			if err != nil {
 				return nil, err
 			}
@@ -74,7 +74,7 @@ func (g *HeuristicGenerator) Generate(
 	case "timeout_after_deploy":
 		action, err := g.newAction(incident, "refresh_demo_cache", "demo-cache", map[string]any{
 			"cache_key": "checkout-session",
-		}, []string{metricEvidence, deployEvidence}, fmt.Sprintf("Timeout setelah deploy %s mengindikasikan cache non-critical bisa stale dan layak direfresh sebagai aksi low-risk pertama.", extractDeployVersion(evidence)))
+		}, []string{metricEvidence, deployEvidence}, fmt.Sprintf("Timeouts after deployment %s indicate that a non-critical cache may be stale, making a refresh a reasonable first low-risk action.", extractDeployVersion(evidence)))
 		if err != nil {
 			return nil, err
 		}
@@ -83,7 +83,7 @@ func (g *HeuristicGenerator) Generate(
 		if latencyMs >= 500 {
 			action, err := g.newAction(incident, "refresh_demo_cache", "demo-cache", map[string]any{
 				"cache_key": "hot-path",
-			}, []string{metricEvidence, logEvidence}, "Lonjakan error dan latency pada jalur utama masih cocok dengan cache refresh non-critical sebagai langkah aman untuk mengurangi tekanan awal.")
+			}, []string{metricEvidence, logEvidence}, "The error and latency spike on the primary path is consistent with a stale non-critical cache, so a refresh is a safe first step to reduce pressure.")
 			if err != nil {
 				return nil, err
 			}
@@ -131,25 +131,25 @@ func (g *HeuristicGenerator) validateAction(incident domain.Incident, action dom
 	definition, ok := g.catalog.Get(action.ActionType)
 	if !ok {
 		action.Status = domain.CandidateActionStatusInvalid
-		action.ApprovalHint = "validation failed: action tidak ada di catalog"
+		action.ApprovalHint = "validation failed: action is not present in the catalog"
 		return action
 	}
 
 	if action.RiskLevel != definition.RiskLevel {
 		action.Status = domain.CandidateActionStatusInvalid
-		action.ApprovalHint = "validation failed: risk level tidak sesuai catalog"
+		action.ApprovalHint = "validation failed: risk level does not match the catalog"
 		return action
 	}
 
 	if len(definition.AllowedEnvironments) > 0 && !slices.Contains(definition.AllowedEnvironments, incident.Environment) {
 		action.Status = domain.CandidateActionStatusInvalid
-		action.ApprovalHint = fmt.Sprintf("validation failed: environment %q tidak diizinkan untuk action ini", incident.Environment)
+		action.ApprovalHint = fmt.Sprintf("validation failed: environment %q is not allowed for this action", incident.Environment)
 		return action
 	}
 
 	if len(definition.AllowedTargets) > 0 && !slices.Contains(definition.AllowedTargets, action.TargetResource) {
 		action.Status = domain.CandidateActionStatusInvalid
-		action.ApprovalHint = fmt.Sprintf("validation failed: target %q tidak diizinkan", action.TargetResource)
+		action.ApprovalHint = fmt.Sprintf("validation failed: target %q is not allowed", action.TargetResource)
 		return action
 	}
 
@@ -198,12 +198,12 @@ func validateParameters(definition execution.ActionDefinition, parametersJSON st
 func approvalHint(definition execution.ActionDefinition) string {
 	if definition.ApprovalRequired {
 		if definition.SupportsRollback && definition.RollbackActionKey != "" {
-			return fmt.Sprintf("Action ini valid tetapi tetap membutuhkan approval operator sebelum dieksekusi. Rollback yang disiapkan: %s.", definition.RollbackActionKey)
+			return fmt.Sprintf("This action is valid but requires operator approval before execution. Prepared rollback: %s.", definition.RollbackActionKey)
 		}
-		return "Action ini valid tetapi tetap membutuhkan approval operator sebelum dieksekusi."
+		return "This action is valid but requires operator approval before execution."
 	}
 
-	return "Action ini tidak memerlukan approval tambahan."
+	return "This action does not require additional approval."
 }
 
 func detectMode(evidence []domain.EvidenceItem) string {

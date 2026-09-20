@@ -44,7 +44,7 @@ func (g *MistralGenerator) Generate(
 		return domain.TriageResult{}, fmt.Errorf("llm triage client is not configured")
 	}
 
-	systemPrompt := "Anda adalah AI incident triage operator. Kembalikan HANYA JSON valid dalam Bahasa Indonesia tanpa markdown."
+	systemPrompt := "You are an incident triage operator. Return ONLY valid JSON in English without Markdown."
 	userPrompt := buildTriagePrompt(incident, evidence, documents)
 
 	messages := []ai.ChatMessage{
@@ -92,10 +92,10 @@ func (g *MistralGenerator) Generate(
 		result.DraftStatusUpdate = fmt.Sprintf("[%s] %s", strings.ToUpper(incident.Severity), result.Summary)
 	}
 	if result.BlastRadius == "" {
-		result.BlastRadius = "blast radius belum cukup jelas; perlu verifikasi operator"
+		result.BlastRadius = "the blast radius is not clear enough and requires operator verification"
 	}
 	if result.ConfidenceNotes == "" {
-		result.ConfidenceNotes = "confidence tidak diberikan model; gunakan evidence dan dokumen untuk validasi manual"
+		result.ConfidenceNotes = "the model did not provide confidence notes; use evidence and documents for manual validation"
 	}
 	if providerMetadata != "" {
 		result.ConfidenceNotes = strings.TrimSpace(result.ConfidenceNotes + "; " + providerMetadata + "; prompt_version=triage-v1")
@@ -179,7 +179,7 @@ func buildTriagePrompt(
 	documents []domain.DocumentReference,
 ) string {
 	var builder strings.Builder
-	builder.WriteString("Ringkas incident berikut ke JSON dengan schema:\n")
+	builder.WriteString("Summarize the following incident as JSON using this schema:\n")
 	builder.WriteString(`{"summary":"","hypotheses":[],"blast_radius":"","next_steps":[],"draft_status_update":"","confidence_notes":""}`)
 	builder.WriteString("\n\nIncident:\n")
 	builder.WriteString(fmt.Sprintf("- title: %s\n- service: %s\n- environment: %s\n- severity: %s\n", incident.Title, incident.ServiceName, incident.Environment, incident.Severity))
@@ -187,13 +187,13 @@ func buildTriagePrompt(
 	builder.WriteString(buildEvidenceDigest(evidence))
 	builder.WriteString("\n\nRelevant documents:\n")
 	builder.WriteString(buildDocumentDigest(documents))
-	builder.WriteString("\n\nAturan:\n- Maksimal 4 hypotheses.\n- Maksimal 5 next_steps.\n- Prioritaskan konteks incident response yang operasional.\n- Jangan keluarkan markdown.")
+	builder.WriteString("\n\nRules:\n- Use at most 4 hypotheses.\n- Use at most 5 next_steps.\n- Prioritize actionable incident-response context.\n- Write every user-facing value in English.\n- Do not output Markdown.")
 	return builder.String()
 }
 
 func buildEvidenceDigest(evidence []domain.EvidenceItem) string {
 	if len(evidence) == 0 {
-		return "- tidak ada evidence"
+		return "- no evidence"
 	}
 
 	var lines []string
@@ -208,7 +208,7 @@ func buildEvidenceDigest(evidence []domain.EvidenceItem) string {
 
 func buildDocumentDigest(documents []domain.DocumentReference) string {
 	if len(documents) == 0 {
-		return "- tidak ada dokumen relevan"
+		return "- no relevant documents"
 	}
 
 	var lines []string

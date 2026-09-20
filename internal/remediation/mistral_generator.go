@@ -53,7 +53,7 @@ func (g *MistralGenerator) Generate(
 		return nil, fmt.Errorf("llm remediation client is not configured")
 	}
 
-	systemPrompt := "Anda memilih candidate action incident response. Pilih HANYA action dari catalog yang diberikan. Kembalikan HANYA JSON valid tanpa markdown."
+	systemPrompt := "You select candidate incident-response actions. Choose ONLY actions from the supplied catalog. Return ONLY valid JSON in English without Markdown."
 	userPrompt := buildActionPrompt(incident, triage, evidence, documents, g.catalog)
 
 	content, err := g.client.CompleteJSON(ctx, []ai.ChatMessage{
@@ -93,7 +93,7 @@ func (g *MistralGenerator) Generate(
 				TargetResource: strings.TrimSpace(draft.TargetResource),
 				Rationale:      strings.TrimSpace(draft.Rationale),
 				EvidenceRefs:   compactStrings(draft.EvidenceRefs),
-				ApprovalHint:   "validation failed: action tidak ada di catalog",
+				ApprovalHint:   "validation failed: action is not present in the catalog",
 				Status:         domain.CandidateActionStatusInvalid,
 				CreatedAt:      g.now(),
 			})
@@ -188,8 +188,8 @@ func buildActionPrompt(
 	catalog execution.Catalog,
 ) string {
 	var builder strings.Builder
-	builder.WriteString("Pilih candidate action paling aman untuk incident berikut.\n")
-	builder.WriteString(`Kembalikan JSON schema {"actions":[{"action_type":"","target_resource":"","parameters":{},"rationale":"","evidence_refs":[]}]} tanpa field tambahan.`)
+	builder.WriteString("Select the safest candidate actions for the following incident.\n")
+	builder.WriteString(`Return the JSON schema {"actions":[{"action_type":"","target_resource":"","parameters":{},"rationale":"","evidence_refs":[]}]} without additional fields.`)
 	builder.WriteString("\n\nIncident:\n")
 	builder.WriteString(fmt.Sprintf("- title: %s\n- service: %s\n- environment: %s\n- severity: %s\n", incident.Title, incident.ServiceName, incident.Environment, incident.Severity))
 	builder.WriteString(fmt.Sprintf("- triage_summary: %s\n- blast_radius: %s\n", triage.Summary, triage.BlastRadius))
@@ -199,7 +199,7 @@ func buildActionPrompt(
 	builder.WriteString(buildDocumentDigest(documents))
 	builder.WriteString("\n\nCatalog:\n")
 	builder.WriteString(buildCatalogDigest(catalog))
-	builder.WriteString("\n\nAturan:\n- Pilih maksimal 4 action.\n- Gunakan hanya action_type dari catalog.\n- Hormati target dan parameter yang masuk akal.\n- Prioritaskan low-risk lebih dulu.\n- evidence_refs harus berisi ID evidence yang relevan jika tersedia.")
+	builder.WriteString("\n\nRules:\n- Select at most 4 actions.\n- Use only action_type values from the catalog.\n- Use valid targets and reasonable parameters.\n- Prioritize low-risk actions.\n- Write rationales in English.\n- evidence_refs must contain relevant evidence IDs when available.")
 	return builder.String()
 }
 
@@ -245,7 +245,7 @@ func describeParameters(parameters []execution.ParameterDefinition) string {
 
 func buildEvidenceDigest(evidence []domain.EvidenceItem) string {
 	if len(evidence) == 0 {
-		return "- tidak ada evidence"
+		return "- no evidence"
 	}
 
 	lines := make([]string, 0, len(evidence))
@@ -260,7 +260,7 @@ func buildEvidenceDigest(evidence []domain.EvidenceItem) string {
 
 func buildDocumentDigest(documents []domain.DocumentReference) string {
 	if len(documents) == 0 {
-		return "- tidak ada dokumen relevan"
+		return "- no relevant documents"
 	}
 
 	lines := make([]string, 0, len(documents))

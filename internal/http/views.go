@@ -195,7 +195,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
     <div class="hero-card">
       <p class="eyebrow">Triovexa Workbench</p>
       <h1>Incident Workbench</h1>
-      <p class="muted">UI sederhana untuk memicu demo scenario, membaca triage AI atau heuristic, lalu mengikuti approval, execution, verification, dan rollback dari satu tempat.</p>
+      <p class="muted">Use one workspace to trigger demo scenarios, review AI or heuristic triage, and follow approval, execution, verification, and rollback.</p>
       <div class="hero-links">
         <a href="/debug/tools">Diagnostics</a>
         <a href="/debug/policies">Policy Catalog</a>
@@ -206,7 +206,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
     <div class="hero-card">
       <p class="eyebrow">Operator Snapshot</p>
       <h2 class="tight">{{if .KillSwitchEnabled}}Kill Switch Active{{else}}Runtime Flow Ready{{end}}</h2>
-      <p class="muted">Gunakan workbench ini untuk berpindah antara heuristic dan provider real, lalu bandingkan hasil triage dan action generation tanpa perlu restart server.</p>
+      <p class="muted">Switch between heuristic and configured providers, then compare triage and action generation without restarting the server.</p>
       <p><span class="chip">Reasoning {{.Runtime.ReasoningMode}}</span> <span class="chip">Observability {{.Runtime.ObservabilityMode}}</span></p>
       <p><span class="chip">Total incident {{.Stats.Total}}</span> <span class="chip">Awaiting approval {{.Stats.AwaitingApproval}}</span></p>
     </div>
@@ -218,7 +218,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
   <p class="banner error">{{.Error}}</p>
   {{end}}
   {{if .KillSwitchEnabled}}
-  <p class="banner warning">Kill switch sedang aktif. Evaluasi dan triage tetap berjalan, tetapi action baru akan diblok oleh policy.</p>
+  <p class="banner warning">The kill switch is active. Evaluation and triage continue, but policy blocks new actions.</p>
   {{end}}
   <section class="stats-grid">
     <article class="stat-card"><div class="stat-label">Total Incident</div><div class="stat-value">{{.Stats.Total}}</div></article>
@@ -232,7 +232,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
   <section class="workbench-grid">
     <article class="panel">
       <h2>Demo Scenarios</h2>
-      <p class="muted">Trigger skenario demo langsung dari browser untuk melihat bagaimana mode reasoning aktif membaca evidence dan mengusulkan candidate action.</p>
+      <p class="muted">Trigger a demo scenario from the browser to see how the active reasoning mode reads evidence and proposes candidate actions.</p>
       <div class="scenario-grid">
         {{range .DemoScenarios}}
         <form class="scenario-card" method="post" action="/ui/demo/scenarios/{{.Key}}">
@@ -252,7 +252,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
 
     <article class="panel">
       <h2>Operator Controls</h2>
-      <p class="muted">Control panel sederhana untuk menguji safety guardrails dan mengganti provider runtime tanpa restart.</p>
+      <p class="muted">Use these controls to exercise safety guardrails and change the runtime provider without a restart.</p>
       <form class="control-form" method="post" action="/ui/admin/kill-switch">
         <input type="hidden" name="redirect" value="/ui/incidents" />
         <input type="hidden" name="enabled" value="{{if .KillSwitchEnabled}}false{{else}}true{{end}}" />
@@ -269,11 +269,11 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
         <button class="secondary-button" type="submit">Switch Observability to {{if eq .Runtime.ObservabilityMode "grafana"}}demo{{else}}grafana{{end}}</button>
       </form>
       <p class="muted">Current state: {{if .KillSwitchEnabled}}enabled{{else}}disabled{{end}}</p>
-      <p class="muted">Saat kill switch aktif, incident intake dan triage tetap masuk, tetapi approval atau execution baru akan diblok.</p>
+      <p class="muted">When the kill switch is active, incident intake and triage continue, but new approvals and executions are blocked.</p>
       <p class="muted">Mistral: {{if .Runtime.MistralConfigured}}configured ({{.Runtime.MistralModel}}){{else}}not configured{{end}}</p>
       <p class="muted">Grafana: {{if .Runtime.GrafanaConfigured}}configured{{else}}not configured{{end}} | metrics UID {{if .Runtime.MetricsSourceUID}}{{.Runtime.MetricsSourceUID}}{{else}}-{{end}} | logs UID {{if .Runtime.LogsSourceUID}}{{.Runtime.LogsSourceUID}}{{else}}-{{end}}</p>
       {{if .Runtime.DatasourceCount}}
-      <p class="muted">Datasource discovery: {{.Runtime.DatasourceCount}} source(s) terlihat dari Grafana.</p>
+      <p class="muted">Datasource discovery: {{.Runtime.DatasourceCount}} source(s) visible from Grafana.</p>
       {{end}}
       {{if .Runtime.DatasourceError}}
       <p class="muted">Datasource discovery error: {{.Runtime.DatasourceError}}</p>
@@ -310,7 +310,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
               {{if .TriageSummary}}
                 <p>{{.TriageSummary}}</p>
               {{else}}
-                <p class="muted">Triage belum tersedia.</p>
+                <p class="muted">Triage is not available yet.</p>
               {{end}}
               <p class="muted">Candidate actions: {{.CandidateActionCount}}</p>
             </td>
@@ -319,14 +319,14 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
                 <strong>{{.ActionType}}</strong>
                 <p class="muted">risk {{.RiskLevel}} -> status {{.Status}}</p>
               {{else}}
-                <span class="muted">Belum ada candidate action.</span>
+                <span class="muted">No candidate actions yet.</span>
               {{end}}
             </td>
             <td>
               {{if .LatestVerificationStatus}}
                 <span class="chip">{{.LatestVerificationStatus}}</span>
               {{else}}
-                <span class="muted">Belum ada verification</span>
+                <span class="muted">No verification yet.</span>
               {{end}}
             </td>
             <td>{{formatTime .Incident.UpdatedAt}}</td>
@@ -334,7 +334,7 @@ var incidentListTemplate = template.Must(template.New("incident-list").Funcs(tem
           {{end}}
         {{else}}
           <tr>
-            <td colspan="5">Belum ada incident yang masuk. Gunakan Demo Scenarios di atas untuk mulai mengetes heuristik.</td>
+            <td colspan="5">No incidents have arrived. Use Demo Scenarios above to exercise the heuristic workflow.</td>
           </tr>
         {{end}}
       </tbody>
@@ -371,7 +371,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
     <article class="card">
       <h2>Operator Step</h2>
       <p>{{.NextOperatorStep}}</p>
-      <p class="muted">Gunakan action lane di bawah untuk menilai apakah hasil reasoning aktif ini cukup aman untuk dieksekusi atau justru perlu dihentikan dan dieskalasi.</p>
+      <p class="muted">Use the action lane below to decide whether the active reasoning result is safe to execute or should be stopped and escalated.</p>
       <p class="muted">Reasoning mode: {{.Runtime.ReasoningMode}} | Observability mode: {{.Runtime.ObservabilityMode}}</p>
     </article>
   </section>
@@ -382,7 +382,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
   <p class="banner" style="background:#fde7e5;color:#b3261e;border-color:#f1b5b1;">{{.Error}}</p>
   {{end}}
   {{if .KillSwitchEnabled}}
-  <p class="banner">Kill switch sedang aktif. Action baru akan ditolak oleh policy evaluator sampai dinonaktifkan kembali.</p>
+  <p class="banner">The kill switch is active. The policy evaluator rejects new actions until it is disabled.</p>
   {{end}}
 
   <div class="grid">
@@ -431,7 +431,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
 
   <section class="card" style="margin-top:1rem;">
     <h2>Action Lane</h2>
-    <p class="muted">Setiap card di bawah merangkum hasil heuristik, policy decision, operator control, dan outcome terakhir untuk satu candidate action.</p>
+    <p class="muted">Each entry below summarizes the heuristic result, policy decision, operator controls, and latest outcome for one candidate action.</p>
     <div class="action-grid">
       {{if .Actions}}
         {{range .Actions}}
@@ -455,7 +455,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
                 <p>{{.Reason}}</p>
                 <p class="muted"><code>{{.PolicyRuleRef}}</code></p>
               {{else}}
-                <p class="muted">Belum ada policy decision.</p>
+                <p class="muted">No policy decision yet.</p>
               {{end}}
               <p><strong>Approval Hint:</strong> {{.ApprovalHint}}</p>
               <p><strong>Evidence Refs:</strong> {{joinStrings .EvidenceRefs}}</p>
@@ -487,7 +487,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
                   <button class="approve" type="submit">Execute</button>
                 </form>
                 {{else}}
-                <p class="muted">Tidak ada aksi approval atau execution manual untuk status saat ini.</p>
+                <p class="muted">No manual approval or execution action is available for the current state.</p>
                 {{end}}
               {{end}}
             </section>
@@ -498,13 +498,13 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
                 <p><strong>Execution:</strong> <span class="pill">{{.Status}}</span></p>
                 <p class="muted">Started {{formatTime .StartedAt}} by {{.InitiatedBy}}</p>
               {{else}}
-                <p class="muted">Belum ada execution record.</p>
+                <p class="muted">No execution record yet.</p>
               {{end}}
               {{with latestVerificationForAction .ID $.VerificationResults $.ExecutionRecords}}
                 <p><strong>Verification:</strong> <span class="pill">{{.Status}}</span></p>
                 <p>{{.Notes}}</p>
               {{else}}
-                <p class="muted">Belum ada verification result.</p>
+                <p class="muted">No verification result yet.</p>
               {{end}}
               {{with latestRollbackForAction .ID $.RollbackRecords}}
                 <p><strong>Rollback:</strong> <span class="pill">{{.Status}}</span> via {{replaceUnderscores .RollbackActionKey}}</p>
@@ -540,7 +540,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
           </tr>
           {{end}}
         {{else}}
-          <tr><td colspan="5">Belum ada approval record.</td></tr>
+          <tr><td colspan="5">No approval records yet.</td></tr>
         {{end}}
       </tbody>
     </table>
@@ -568,7 +568,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
           </tr>
           {{end}}
         {{else}}
-          <tr><td colspan="6">Belum ada execution record.</td></tr>
+          <tr><td colspan="6">No execution records yet.</td></tr>
         {{end}}
       </tbody>
     </table>
@@ -598,7 +598,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
           </tr>
           {{end}}
         {{else}}
-          <tr><td colspan="5">Belum ada verification result.</td></tr>
+          <tr><td colspan="5">No verification results yet.</td></tr>
         {{end}}
       </tbody>
     </table>
@@ -630,7 +630,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
           </tr>
           {{end}}
         {{else}}
-          <tr><td colspan="7">Belum ada rollback record.</td></tr>
+          <tr><td colspan="7">No rollback records yet.</td></tr>
         {{end}}
       </tbody>
     </table>
@@ -656,7 +656,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
           </tr>
           {{end}}
         {{else}}
-          <tr><td colspan="4">Belum ada evidence.</td></tr>
+          <tr><td colspan="4">No evidence yet.</td></tr>
         {{end}}
       </tbody>
     </table>
@@ -682,7 +682,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
           </tr>
           {{end}}
         {{else}}
-          <tr><td colspan="4">Belum ada dokumen relevan.</td></tr>
+          <tr><td colspan="4">No relevant documents yet.</td></tr>
         {{end}}
       </tbody>
     </table>
@@ -708,7 +708,7 @@ var incidentDetailTemplate = template.Must(template.New("incident-detail").Funcs
           </tr>
           {{end}}
         {{else}}
-          <tr><td colspan="4">Belum ada audit trail.</td></tr>
+          <tr><td colspan="4">No audit trail yet.</td></tr>
         {{end}}
       </tbody>
     </table>
