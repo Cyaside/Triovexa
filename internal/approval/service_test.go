@@ -2,6 +2,8 @@ package approval
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,6 +73,41 @@ func TestServiceEvaluateActionsMovesIncidentToAwaitingApproval(t *testing.T) {
 
 	if decision.Decision != domain.PolicyDecisionApprovalRequired {
 		t.Fatalf("policy decision = %q, want %q", decision.Decision, domain.PolicyDecisionApprovalRequired)
+	}
+}
+
+func TestConcurrentApproversProduceOneAtomicDecision(t *testing.T) {
+	repository := storage.NewMemoryStore()
+	service := NewService(repository, policy.NewEvaluator(execution.DefaultCatalog()), NewKillSwitch(false))
+	incidentRecord := domain.Incident{ID: "inc-concurrent", Environment: "staging", State: domain.IncidentStateAwaitingApproval, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if err := repository.CreateIncident(context.Background(), incidentRecord); err != nil {
+		t.Fatal(err)
+	}
+	action := domain.CandidateAction{ID: uuid.NewString(), IncidentID: incidentRecord.ID, ActionType: "restart_demo_worker", TargetResource: "demo-worker", ParametersJSON: `{}`, RiskLevel: domain.RiskLevelLow, Status: domain.CandidateActionStatusAwaitingApproval, CreatedAt: time.Now().UTC()}
+	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SavePolicyDecisions(context.Background(), []domain.PolicyDecision{{ID: uuid.NewString(), CandidateActionID: action.ID, Decision: domain.PolicyDecisionApprovalRequired, ApprovalRequired: true, PolicyRuleRef: "policy-v1", DecidedAt: time.Now().UTC()}}); err != nil {
+		t.Fatal(err)
+	}
+	var successes atomic.Int32
+	var wait sync.WaitGroup
+	for _, actor := range []string{"operator-a", "operator-b"} {
+		wait.Add(1)
+		go func(actor string) {
+			defer wait.Done()
+			if _, err := service.ApproveAction(context.Background(), action.ID, actor, "approved"); err == nil {
+				successes.Add(1)
+			}
+		}(actor)
+	}
+	wait.Wait()
+	if successes.Load() != 1 {
+		t.Fatalf("successful approvals = %d, want 1", successes.Load())
+	}
+	records, _ := repository.ListApprovalRecords(context.Background(), incidentRecord.ID)
+	if len(records) != 1 {
+		t.Fatalf("approval records = %d, want 1", len(records))
 	}
 }
 

@@ -33,3 +33,7 @@ type ConditionalStateStore interface {
 type ExecutionRecoveryStore interface {
 	ListExecutionRecordsByStatus(context.Context, string) ([]domain.ExecutionRecord, error)
 }
+
+type AtomicApprovalStore interface {
+	DecideApproval(context.Context, string, domain.ApprovalRecord, domain.CandidateActionStatus, domain.CandidateActionStatus, domain.IncidentState, domain.IncidentState) (bool, error)
+}

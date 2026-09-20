@@ -41,6 +41,7 @@ type Recorder struct {
 	startedAt time.Time
 
 	incidentIntakeTotal int64
+	webhookRateLimited  int64
 
 	httpRequests       map[requestKey]int64
 	httpRequestLatency map[routeKey]durationMetric
@@ -81,6 +82,15 @@ func (r *Recorder) IncIncidentIngested() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.incidentIntakeTotal++
+}
+
+func (r *Recorder) IncWebhookRateLimited() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.webhookRateLimited++
 }
 
 func (r *Recorder) ObserveHTTPRequest(method string, route string, status int, duration time.Duration) {
@@ -210,6 +220,9 @@ func (r *Recorder) render() []string {
 		"# HELP triovexa_incident_intake_total Total incidents accepted from external alert intake.",
 		"# TYPE triovexa_incident_intake_total counter",
 		fmt.Sprintf("triovexa_incident_intake_total %d", r.incidentIntakeTotal),
+		"# HELP triovexa_webhook_rate_limited_total Total webhook requests rejected by rate limiting.",
+		"# TYPE triovexa_webhook_rate_limited_total counter",
+		fmt.Sprintf("triovexa_webhook_rate_limited_total %d", r.webhookRateLimited),
 		"# HELP triovexa_kill_switch_enabled Whether the global kill switch is enabled.",
 		"# TYPE triovexa_kill_switch_enabled gauge",
 		fmt.Sprintf("triovexa_kill_switch_enabled %d", boolToInt(r.killSwitchEnabled)),

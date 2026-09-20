@@ -73,16 +73,17 @@ func (e RetryableError) Unwrap() error {
 }
 
 type Service struct {
-	repository storage.Repository
-	catalog    Catalog
-	adapter    Adapter
-	killSwitch KillSwitchReader
-	verifier   VerificationWorkflow
-	metrics    *telemetry.Recorder
-	timeout    time.Duration
-	retries    int
-	cooldown   time.Duration
-	now        func() time.Time
+	repository     storage.Repository
+	catalog        Catalog
+	adapter        Adapter
+	killSwitch     KillSwitchReader
+	verifier       VerificationWorkflow
+	metrics        *telemetry.Recorder
+	timeout        time.Duration
+	retries        int
+	cooldown       time.Duration
+	evidenceMaxAge time.Duration
+	now            func() time.Time
 }
 
 func NewService(
@@ -106,18 +107,26 @@ func NewService(
 	}
 
 	return &Service{
-		repository: repository,
-		catalog:    catalog,
-		adapter:    adapter,
-		killSwitch: killSwitch,
-		verifier:   verifier,
-		timeout:    timeout,
-		retries:    retries,
-		cooldown:   cooldown,
+		repository:     repository,
+		catalog:        catalog,
+		adapter:        adapter,
+		killSwitch:     killSwitch,
+		verifier:       verifier,
+		timeout:        timeout,
+		retries:        retries,
+		cooldown:       cooldown,
+		evidenceMaxAge: time.Minute,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
 	}
+}
+
+func (s *Service) WithEvidenceMaxAge(maxAge time.Duration) *Service {
+	if maxAge > 0 {
+		s.evidenceMaxAge = maxAge
+	}
+	return s
 }
 
 func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
@@ -300,6 +309,15 @@ func (s *Service) ExecuteAction(ctx context.Context, actionID string, initiatedB
 		}
 		return domain.ExecutionRecord{}, err
 	}
+	if err := s.validateEvidenceFreshness(ctx, action); err != nil {
+		if auditErr := s.audit(ctx, action.IncidentID, "execution_evidence_validation_failed", "completed", map[string]any{
+			"candidate_action_id": action.ID,
+			"error":               err.Error(),
+		}); auditErr != nil {
+			return domain.ExecutionRecord{}, fmt.Errorf("audit evidence validation failure: %w", auditErr)
+		}
+		return domain.ExecutionRecord{}, err
+	}
 	record := domain.ExecutionRecord{
 		ID:                uuid.NewString(),
 		CandidateActionID: action.ID,
@@ -434,6 +452,36 @@ func (s *Service) validateApproval(ctx context.Context, action domain.CandidateA
 		return nil
 	}
 	return errors.New("approved action has no valid approval record")
+}
+
+func (s *Service) validateEvidenceFreshness(ctx context.Context, action domain.CandidateAction) error {
+	items, err := s.repository.ListEvidenceItems(ctx, action.IncidentID)
+	if err != nil {
+		return fmt.Errorf("load evidence before dispatch: %w", err)
+	}
+	if len(action.EvidenceRefs) == 0 {
+		return errors.New("action has no evidence references")
+	}
+	byID := make(map[string]domain.EvidenceItem, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	for _, reference := range action.EvidenceRefs {
+		item, ok := byID[reference]
+		if !ok {
+			return fmt.Errorf("referenced evidence %q is missing", reference)
+		}
+		if item.Timestamp.IsZero() || s.now().Sub(item.Timestamp) > s.evidenceMaxAge {
+			return fmt.Errorf("referenced evidence %q is stale", reference)
+		}
+		var metadata map[string]any
+		if json.Unmarshal([]byte(item.MetadataJSON), &metadata) == nil {
+			if complete, exists := metadata["complete"].(bool); exists && !complete {
+				return fmt.Errorf("referenced evidence %q is incomplete", reference)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) executeWithRetry(ctx context.Context, action domain.CandidateAction, request AdapterRequest) (AdapterResult, error) {

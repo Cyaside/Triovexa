@@ -953,6 +953,52 @@ func (s *PostgresStore) CreateApprovalRecord(ctx context.Context, record domain.
 	return err
 }
 
+func (s *PostgresStore) DecideApproval(ctx context.Context, incidentID string, record domain.ApprovalRecord, expectedAction, nextAction domain.CandidateActionStatus, expectedIncident, nextIncident domain.IncidentState) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var actionStatus string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM candidate_actions WHERE id = $1 AND incident_id = $2 FOR UPDATE`, record.CandidateActionID, incidentID).Scan(&actionStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, err
+	}
+	if actionStatus != string(expectedAction) {
+		return false, nil
+	}
+	if expectedIncident != "" {
+		var incidentState string
+		if err := tx.QueryRowContext(ctx, `SELECT state FROM incidents WHERE id = $1 FOR UPDATE`, incidentID).Scan(&incidentState); err != nil {
+			return false, err
+		}
+		if incidentState != string(expectedIncident) {
+			return false, nil
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO approval_records (id, candidate_action_id, approved_by, decision, note, action_digest, policy_version, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, record.ID, record.CandidateActionID, record.ApprovedBy, record.Decision, record.Note, record.ActionDigest,
+		record.PolicyVersion, nullableTime(record.ExpiresAt), record.CreatedAt.UTC()); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE candidate_actions SET status = $1 WHERE id = $2`, string(nextAction), record.CandidateActionID); err != nil {
+		return false, err
+	}
+	if nextIncident != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE incidents SET state = $1, updated_at = $2 WHERE id = $3`, string(nextIncident), time.Now().UTC(), incidentID); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *PostgresStore) ListApprovalRecords(ctx context.Context, incidentID string) ([]domain.ApprovalRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT ar.id, ar.candidate_action_id, ar.approved_by, ar.decision, ar.note, ar.action_digest, ar.policy_version, COALESCE(ar.expires_at, ar.created_at), ar.created_at

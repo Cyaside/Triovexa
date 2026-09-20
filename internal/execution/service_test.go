@@ -75,6 +75,23 @@ func TestServiceExecuteActionSuccess(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsStaleEvidenceBeforeDispatch(t *testing.T) {
+	repository := storage.NewMemoryStore()
+	_, action := seedApprovedExecutionFixture(t, repository)
+	adapter := &fakeAdapter{exec: func(context.Context, domain.CandidateAction, AdapterRequest) (AdapterResult, error) {
+		return AdapterResult{ExecutorType: "fake"}, nil
+	}}
+	service := NewService(repository, DefaultCatalog(), adapter, staticKillSwitch{}, nil, time.Second, 0, time.Minute)
+	service.now = func() time.Time { return time.Now().UTC().Add(2 * time.Minute) }
+	_, err := service.ExecuteAction(context.Background(), action.ID, "operator-a")
+	if err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("error = %v, want stale evidence rejection", err)
+	}
+	if adapter.calls != 0 {
+		t.Fatalf("adapter calls = %d, want 0", adapter.calls)
+	}
+}
+
 func TestServiceExecuteActionRetriesRetryableError(t *testing.T) {
 	t.Parallel()
 
@@ -169,9 +186,15 @@ func TestServiceExecuteActionAllowsApprovedMediumRisk(t *testing.T) {
 		ParametersJSON: `{}`,
 		RiskLevel:      domain.RiskLevelMedium,
 		Rationale:      "pause consumer to limit blast radius",
-		EvidenceRefs:   []string{},
+		EvidenceRefs:   []string{"evidence-fresh"},
 		Status:         domain.CandidateActionStatusApproved,
 		CreatedAt:      time.Now().UTC(),
+	}
+	if err := repository.SaveEvidenceItems(context.Background(), []domain.EvidenceItem{{
+		ID: "evidence-fresh", IncidentID: incidentRecord.ID, Type: "metric", Source: "test",
+		Snippet: "worker unhealthy", Timestamp: time.Now().UTC(), MetadataJSON: `{"complete":true}`,
+	}}); err != nil {
+		t.Fatalf("save evidence: %v", err)
 	}
 	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
 		t.Fatalf("save candidate action: %v", err)
@@ -302,9 +325,15 @@ func seedApprovedExecutionFixture(t *testing.T, repository storage.Repository) (
 		ParametersJSON: `{"worker_id":"worker-primary"}`,
 		RiskLevel:      domain.RiskLevelLow,
 		Rationale:      "worker restart is safe",
-		EvidenceRefs:   []string{},
+		EvidenceRefs:   []string{"evidence-fresh"},
 		Status:         domain.CandidateActionStatusApproved,
 		CreatedAt:      time.Now().UTC(),
+	}
+	if err := repository.SaveEvidenceItems(context.Background(), []domain.EvidenceItem{{
+		ID: "evidence-fresh", IncidentID: incidentRecord.ID, Type: "metric", Source: "test",
+		Snippet: "worker unhealthy", Timestamp: time.Now().UTC(), MetadataJSON: `{"complete":true}`,
+	}}); err != nil {
+		t.Fatalf("save evidence: %v", err)
 	}
 	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
 		t.Fatalf("save candidate action: %v", err)

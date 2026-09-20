@@ -24,6 +24,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/policy"
 	"github.com/Cyaside/Triovexa/internal/remediation"
 	"github.com/Cyaside/Triovexa/internal/retrieval"
+	securitylog "github.com/Cyaside/Triovexa/internal/security"
 	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/telemetry"
 	"github.com/Cyaside/Triovexa/internal/triage"
@@ -34,9 +35,9 @@ import (
 func main() {
 	cfg := appconfig.Load()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	logger := slog.New(securitylog.NewRedactingHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: cfg.LogLevel,
-	}))
+	})))
 
 	var repository storage.Repository
 	var err error

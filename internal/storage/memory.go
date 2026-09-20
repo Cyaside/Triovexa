@@ -383,6 +383,41 @@ func (s *MemoryStore) CreateApprovalRecord(_ context.Context, record domain.Appr
 	return nil
 }
 
+func (s *MemoryStore) DecideApproval(_ context.Context, incidentID string, record domain.ApprovalRecord, expectedAction, nextAction domain.CandidateActionStatus, expectedIncident, nextIncident domain.IncidentState) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	actions := s.actions[incidentID]
+	index := -1
+	for i := range actions {
+		if actions[i].ID == record.CandidateActionID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return false, ErrNotFound
+	}
+	if actions[index].Status != expectedAction {
+		return false, nil
+	}
+	incident, ok := s.incidents[incidentID]
+	if !ok {
+		return false, ErrNotFound
+	}
+	if expectedIncident != "" && incident.State != expectedIncident {
+		return false, nil
+	}
+	actions[index].Status = nextAction
+	s.actions[incidentID] = actions
+	s.approvals[record.CandidateActionID] = append(s.approvals[record.CandidateActionID], record)
+	if nextIncident != "" {
+		incident.State = nextIncident
+		incident.UpdatedAt = time.Now().UTC()
+		s.incidents[incidentID] = incident
+	}
+	return true, nil
+}
+
 func (s *MemoryStore) ListApprovalRecords(_ context.Context, incidentID string) ([]domain.ApprovalRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

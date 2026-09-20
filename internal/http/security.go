@@ -2,10 +2,13 @@ package http
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/auth"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/domain"
+	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
 const sessionCookieName = "triovexa_session"
@@ -110,15 +114,29 @@ func remoteHost(address string) string {
 	return strings.TrimSpace(address)
 }
 
-func securityMiddleware(cfg config.Config, service *auth.Service, next http.Handler) http.Handler {
+func securityMiddleware(cfg config.Config, service *auth.Service, metrics *telemetry.Recorder, next http.Handler) http.Handler {
+	webhookLimiter := newLoginLimiter()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/webhooks/grafana" {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-			if secret := strings.TrimSpace(cfg.GrafanaWebhookSecret); secret != "" && !secureEqual(bearerToken(r), secret) {
+			secret := strings.TrimSpace(cfg.GrafanaWebhookSecret)
+			provided := bearerToken(r)
+			if secret != "" && !secureEqual(provided, secret) {
 				writeAPIError(w, http.StatusUnauthorized, "invalid_webhook_credential", "Webhook credential is invalid.")
 				return
 			}
+			limit := cfg.WebhookRateLimit
+			if limit > 0 && !webhookLimiter.allowWindow(webhookRateKey(r, provided), time.Now(), limit, cfg.WebhookRateWindow) {
+				metrics.IncWebhookRateLimited()
+				w.Header().Set("Retry-After", "60")
+				writeAPIError(w, http.StatusTooManyRequests, "webhook_rate_limited", "Webhook rate limit exceeded.")
+				return
+			}
 			next.ServeHTTP(w, r)
+			return
+		}
+		if isMutation(r.Method) && !validMutationOrigin(cfg, r) {
+			writeAPIError(w, http.StatusForbidden, "origin_invalid", "Request origin is not allowed.")
 			return
 		}
 		if !cfg.InternalMode() {
@@ -166,6 +184,53 @@ func securityMiddleware(cfg config.Config, service *auth.Service, next http.Hand
 		ctx := context.WithValue(r.Context(), identityContextKey{}, requestIdentity{User: user, Session: session})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (l *loginLimiter) allowWindow(key string, now time.Time, limit int, window time.Duration) bool {
+	if window <= 0 {
+		window = time.Minute
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cutoff := now.Add(-window)
+	items := l.attempts[key][:0]
+	for _, item := range l.attempts[key] {
+		if item.After(cutoff) {
+			items = append(items, item)
+		}
+	}
+	if len(items) >= limit {
+		l.attempts[key] = items
+		return false
+	}
+	l.attempts[key] = append(items, now)
+	return true
+}
+
+func validMutationOrigin(cfg config.Config, r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
+	}
+	if strings.EqualFold(parsed.Host, r.Host) {
+		return true
+	}
+	normalized := strings.TrimRight(strings.ToLower(origin), "/")
+	for _, allowed := range cfg.AllowedOrigins {
+		if normalized == strings.TrimRight(strings.ToLower(strings.TrimSpace(allowed)), "/") {
+			return true
+		}
+	}
+	return false
+}
+
+func webhookRateKey(r *http.Request, token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return remoteHost(r.RemoteAddr) + ":" + hex.EncodeToString(digest[:8])
 }
 
 func currentIdentity(ctx context.Context) (requestIdentity, bool) {

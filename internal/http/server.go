@@ -934,7 +934,7 @@ func NewServerWithTelemetry(
 
 	return &http.Server{
 		Addr:         cfg.HTTPAddress(),
-		Handler:      withLogging(logger, serverMetrics, securityMiddleware(cfg, authService, mux)),
+		Handler:      withLogging(logger, serverMetrics, securityMiddleware(cfg, authService, serverMetrics, mux)),
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,

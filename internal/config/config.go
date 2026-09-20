@@ -27,7 +27,10 @@ type Config struct {
 	DeploymentMode                  string
 	SessionSecure                   bool
 	SessionTTL                      time.Duration
+	AllowedOrigins                  []string
 	GrafanaWebhookSecret            string
+	WebhookRateLimit                int
+	WebhookRateWindow               time.Duration
 	DatabaseURL                     string
 	DocsRoot                        string
 	DemoServiceBaseURL              string
@@ -87,7 +90,10 @@ func Load() Config {
 		DeploymentMode:                  getEnv("DEPLOYMENT_MODE", "local-demo"),
 		SessionSecure:                   getBoolEnv("SESSION_SECURE", false),
 		SessionTTL:                      getDurationEnv("SESSION_TTL", 12*time.Hour),
+		AllowedOrigins:                  splitCSVEnv("BROWSER_ALLOWED_ORIGINS"),
 		GrafanaWebhookSecret:            getEnv("GRAFANA_WEBHOOK_SECRET", ""),
+		WebhookRateLimit:                getIntEnv("WEBHOOK_RATE_LIMIT", 60),
+		WebhookRateWindow:               getDurationEnv("WEBHOOK_RATE_WINDOW", time.Minute),
 		DatabaseURL:                     getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disable"),
 		DocsRoot:                        getEnv("DOCS_ROOT", "docs"),
 		DemoServiceBaseURL:              getEnv("DEMO_SERVICE_BASE_URL", "http://localhost:8090"),

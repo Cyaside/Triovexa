@@ -209,22 +209,32 @@ func (s *Service) ApproveAction(ctx context.Context, actionID string, approvedBy
 		ExpiresAt:         now.Add(15 * time.Minute),
 		CreatedAt:         now,
 	}
-	if err := s.repository.CreateApprovalRecord(ctx, record); err != nil {
-		return domain.CandidateAction{}, fmt.Errorf("create approval record: %w", err)
-	}
-
-	if err := s.repository.UpdateCandidateActionStatus(ctx, actionID, domain.CandidateActionStatusApproved); err != nil {
-		return domain.CandidateAction{}, fmt.Errorf("update action status: %w", err)
-	}
-
 	incidentRecord, err := s.repository.GetIncident(ctx, action.IncidentID)
 	if err != nil {
 		return domain.CandidateAction{}, fmt.Errorf("get incident for action: %w", err)
 	}
-
-	incidentRecord, err = s.transitionIncidentState(ctx, incidentRecord, domain.IncidentStateApproved)
-	if err != nil {
-		return domain.CandidateAction{}, fmt.Errorf("move incident to approved: %w", err)
+	if atomic, ok := s.repository.(storage.AtomicApprovalStore); ok {
+		updated, err := atomic.DecideApproval(ctx, action.IncidentID, record,
+			domain.CandidateActionStatusAwaitingApproval, domain.CandidateActionStatusApproved,
+			incidentRecord.State, domain.IncidentStateApproved)
+		if err != nil {
+			return domain.CandidateAction{}, fmt.Errorf("persist approval decision: %w", err)
+		}
+		if !updated {
+			return domain.CandidateAction{}, fmt.Errorf("candidate action %q was already decided", actionID)
+		}
+		incidentRecord.State = domain.IncidentStateApproved
+	} else {
+		if err := s.repository.CreateApprovalRecord(ctx, record); err != nil {
+			return domain.CandidateAction{}, fmt.Errorf("create approval record: %w", err)
+		}
+		if err := s.repository.UpdateCandidateActionStatus(ctx, actionID, domain.CandidateActionStatusApproved); err != nil {
+			return domain.CandidateAction{}, fmt.Errorf("update action status: %w", err)
+		}
+		incidentRecord, err = s.transitionIncidentState(ctx, incidentRecord, domain.IncidentStateApproved)
+		if err != nil {
+			return domain.CandidateAction{}, fmt.Errorf("move incident to approved: %w", err)
+		}
 	}
 
 	auditedAt := s.now()
@@ -260,17 +270,26 @@ func (s *Service) RejectAction(ctx context.Context, actionID string, approvedBy 
 		Note:              note,
 		CreatedAt:         s.now(),
 	}
-	if err := s.repository.CreateApprovalRecord(ctx, record); err != nil {
-		return domain.CandidateAction{}, fmt.Errorf("create approval record: %w", err)
-	}
-
-	if err := s.repository.UpdateCandidateActionStatus(ctx, actionID, domain.CandidateActionStatusDenied); err != nil {
-		return domain.CandidateAction{}, fmt.Errorf("update action status: %w", err)
-	}
-
 	incidentRecord, err := s.repository.GetIncident(ctx, action.IncidentID)
 	if err != nil {
 		return domain.CandidateAction{}, fmt.Errorf("get incident for action: %w", err)
+	}
+	if atomic, ok := s.repository.(storage.AtomicApprovalStore); ok {
+		updated, err := atomic.DecideApproval(ctx, action.IncidentID, record,
+			domain.CandidateActionStatusAwaitingApproval, domain.CandidateActionStatusDenied, "", "")
+		if err != nil {
+			return domain.CandidateAction{}, fmt.Errorf("persist rejection decision: %w", err)
+		}
+		if !updated {
+			return domain.CandidateAction{}, fmt.Errorf("candidate action %q was already decided", actionID)
+		}
+	} else {
+		if err := s.repository.CreateApprovalRecord(ctx, record); err != nil {
+			return domain.CandidateAction{}, fmt.Errorf("create approval record: %w", err)
+		}
+		if err := s.repository.UpdateCandidateActionStatus(ctx, actionID, domain.CandidateActionStatusDenied); err != nil {
+			return domain.CandidateAction{}, fmt.Errorf("update action status: %w", err)
+		}
 	}
 
 	if _, err := s.refreshIncidentState(ctx, incidentRecord); err != nil {
