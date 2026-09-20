@@ -55,6 +55,8 @@ type Config struct {
 	GrafanaLogsQuery                string
 	GrafanaDeployLogsQuery          string
 	GrafanaQueryLookback            time.Duration
+	PrometheusBaseURL               string
+	AlertmanagerBaseURL             string
 	LocalObservabilityProfilePath   string
 	LocalObservabilityProfileLoaded bool
 	LocalObservabilityProfileError  string
@@ -113,6 +115,8 @@ func Load() Config {
 		GrafanaLogsQuery:                getEnvOrValue("GRAFANA_LOGS_QUERY", profile.LogsQuery, ""),
 		GrafanaDeployLogsQuery:          getEnvOrValue("GRAFANA_DEPLOY_LOGS_QUERY", profile.DeployLogsQuery, ""),
 		GrafanaQueryLookback:            getDurationEnv("GRAFANA_QUERY_LOOKBACK", 15*time.Minute),
+		PrometheusBaseURL:               getEnv("PROMETHEUS_BASE_URL", ""),
+		AlertmanagerBaseURL:             getEnv("ALERTMANAGER_BASE_URL", ""),
 		LocalObservabilityProfilePath:   profilePath,
 		LocalObservabilityProfileLoaded: profileLoaded,
 		LocalObservabilityProfileError:  profileError,

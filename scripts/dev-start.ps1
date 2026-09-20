@@ -12,11 +12,14 @@ if (-not $SkipDatabase) {
 
 $databaseUrl = $env:DATABASE_URL
 if (-not $databaseUrl) {
-    $databaseUrl = "postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disable"
+    $databaseUrl = "postgres://postgres:postgres@localhost:5433/triovexa?sslmode=disable"
 }
 
-$demoCommand = "Set-Location '$repoRoot'; powershell -ExecutionPolicy Bypass -File '.\scripts\dev-run-demo.ps1'"
-$serverCommand = "`$env:DATABASE_URL = '$databaseUrl'; Set-Location '$repoRoot'; powershell -ExecutionPolicy Bypass -File '.\scripts\dev-run-server.ps1'"
+$demoScriptPath = Join-Path $repoRoot "scripts\dev-run-demo.ps1"
+$serverScriptPath = Join-Path $repoRoot "scripts\dev-run-server.ps1"
+
+$demoCommand = "& '$demoScriptPath'"
+$serverCommand = "`$env:DATABASE_URL = '$databaseUrl'; & '$serverScriptPath'"
 
 Start-Process powershell -ArgumentList @("-NoExit", "-Command", $demoCommand) -WorkingDirectory $repoRoot
 Start-Process powershell -ArgumentList @("-NoExit", "-Command", $serverCommand) -WorkingDirectory $repoRoot

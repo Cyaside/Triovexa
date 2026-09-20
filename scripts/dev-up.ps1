@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
-$dockerInfo = docker info 2>&1
+cmd /c "docker info 1>nul 2>nul"
 if ($LASTEXITCODE -ne 0) {
-    throw "Docker daemon is not reachable. Start Docker Desktop first, then rerun this script. Details: $dockerInfo"
+    throw "Docker daemon is not reachable. Start Docker Desktop first, then rerun this script."
 }
 
 $composeArgs = @("compose", "up", "-d", "postgres")
@@ -18,7 +18,7 @@ for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         Write-Host ""
         Write-Host "Next steps:"
         Write-Host "1. Ensure DATABASE_URL is set to:"
-        Write-Host "   postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disable"
+        Write-Host "   postgres://postgres:postgres@localhost:5433/triovexa?sslmode=disable"
         Write-Host "2. Run the demo service:"
         Write-Host "   go run ./cmd/demo-service"
         Write-Host "3. Run the app server:"
