@@ -22,6 +22,7 @@ test.beforeEach(async ({ page }) => {
     grafana: { configured: true, metrics_source_uid: 'prometheus', logs_source_uid: 'loki' },
     prometheus: { configured: true, endpoint: 'http://prometheus:9090' },
     alertmanager: { configured: true, endpoint: 'http://alertmanager:9093' },
+    loki: { configured: true, endpoint: 'http://loki:3100' },
   } }))
   await page.route('**/api/v1/connections/prometheus/test', (route) => route.fulfill({ json: { status: 'connected', service: 'prometheus', latency_ms: 12 } }))
 })
@@ -60,6 +61,7 @@ test('shows and tests direct monitoring connections', async ({ page }) => {
   await page.goto('/ui/connections')
   await expect(page.getByRole('heading', { name: 'Prometheus' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Alertmanager' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Loki' })).toBeVisible()
   const request = page.waitForRequest((item) => item.url().endsWith('/api/v1/connections/prometheus/test'))
   await page.getByRole('button', { name: 'Test connection' }).nth(1).click()
   await request

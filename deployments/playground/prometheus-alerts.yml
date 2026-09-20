@@ -1,0 +1,26 @@
+groups:
+  - name: triovexa-workload
+    interval: 5s
+    rules:
+      - alert: TriovexaWorkerHeartbeatStale
+        expr: triovexa_worker_healthy == 0
+        for: 15s
+        labels:
+          severity: critical
+          service: queue-worker
+          environment: staging
+        annotations:
+          summary: Queue worker heartbeat is stale
+          description: The Redis Streams worker has not published a fresh heartbeat.
+      - alert: TriovexaQueueBacklogHigh
+        expr: triovexa_queue_backlog > 20
+        for: 30s
+        labels:
+          severity: high
+          service: queue-worker
+          environment: staging
+        annotations:
+          summary: Queue backlog is increasing
+          description: More than twenty jobs remain in the workload stream.
+      - record: triovexa:jobs_processed:rate1m
+        expr: rate(triovexa_jobs_processed_total[1m])

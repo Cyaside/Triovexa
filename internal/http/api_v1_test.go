@@ -102,3 +102,17 @@ func TestReadinessProbeRejectsRedirects(t *testing.T) {
 		t.Fatal("probeReadiness followed a redirect")
 	}
 }
+
+func TestReadinessProbeSupportsLokiReadyPath(t *testing.T) {
+	server := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if r.URL.Path == "/ready" {
+			w.WriteHeader(stdhttp.StatusOK)
+			return
+		}
+		stdhttp.NotFound(w, r)
+	}))
+	defer server.Close()
+	if err := probeReadiness(context.Background(), server.URL); err != nil {
+		t.Fatalf("probe loki readiness: %v", err)
+	}
+}

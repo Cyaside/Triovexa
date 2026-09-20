@@ -1,0 +1,21 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {"type":"stat","title":"Worker health","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"triovexa_worker_healthy","refId":"A"}],"gridPos":{"h":6,"w":6,"x":0,"y":0}},
+    {"type":"stat","title":"Queue backlog","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"triovexa_queue_backlog","refId":"A"}],"gridPos":{"h":6,"w":6,"x":6,"y":0}},
+    {"type":"timeseries","title":"Processing rate","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"triovexa:jobs_processed:rate1m","legendFormat":"jobs/s","refId":"A"}],"gridPos":{"h":8,"w":12,"x":0,"y":6}},
+    {"type":"timeseries","title":"Worker errors","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"rate(triovexa_worker_errors_total[1m])","legendFormat":"errors/s","refId":"A"}],"gridPos":{"h":8,"w":12,"x":12,"y":6}},
+    {"type":"timeseries","title":"Verification outcomes","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (status) (rate(triovexa_verification_outcomes_total[5m]))","legendFormat":"{{status}}","refId":"A"}],"gridPos":{"h":8,"w":12,"x":0,"y":14}},
+    {"type":"logs","title":"Workload logs","datasource":{"type":"loki","uid":"loki"},"targets":[{"expr":"{service=~\"triovexa|producer|workload-supervisor\"}","refId":"A"}],"gridPos":{"h":8,"w":12,"x":12,"y":14}}
+  ],
+  "refresh": "5s",
+  "schemaVersion": 41,
+  "tags": ["triovexa", "playground"],
+  "templating": {"list": []},
+  "time": {"from": "now-30m", "to": "now"},
+  "timezone": "browser",
+  "title": "Triovexa Workload Recovery",
+  "uid": "triovexa-workload",
+  "version": 1
+}

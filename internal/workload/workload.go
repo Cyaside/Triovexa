@@ -246,11 +246,25 @@ func (s *Supervisor) Handler(ctx context.Context) http.Handler {
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		backlog, _ := s.client.XLen(r.Context(), stream).Result()
 		processed, _ := s.client.Get(r.Context(), "triovexa:stats:processed").Int64()
+		produced, _ := s.client.Get(r.Context(), "triovexa:stats:produced").Int64()
 		failures, _ := s.client.Get(r.Context(), "triovexa:stats:errors").Int64()
+		heartbeat, _ := s.client.Get(r.Context(), "triovexa:worker:heartbeat").Result()
+		paused, _ := s.client.Get(r.Context(), "triovexa:consumer:paused").Bool()
+		workerHealthy := 0
+		if parsed, err := time.Parse(time.RFC3339Nano, heartbeat); err == nil && time.Since(parsed) < 10*time.Second {
+			workerHealthy = 1
+		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "triovexa_queue_backlog %d\ntriovexa_jobs_processed_total %d\ntriovexa_worker_errors_total %d\n", backlog, processed, failures)
+		fmt.Fprintf(w, "triovexa_queue_backlog %d\ntriovexa_jobs_processed_total %d\ntriovexa_jobs_produced_total %d\ntriovexa_worker_errors_total %d\ntriovexa_worker_healthy %d\ntriovexa_consumer_paused %d\ntriovexa_worker_generation %d\n",
+			backlog, processed, produced, failures, workerHealthy, boolToMetric(paused), s.generation.Load())
 	})
 	return mux
+}
+func boolToMetric(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func (s *Supervisor) authorized(r *http.Request) bool {

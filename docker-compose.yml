@@ -65,8 +65,10 @@ services:
       DOCS_ROOT: /app/docs
       WORKLOAD_CONTROL_BASE_URL: http://workload-supervisor:8091
       WORKLOAD_CONTROL_TOKEN: ${WORKLOAD_CONTROL_TOKEN:-local-control-token}
+      REDIS_ADDRESS: redis:6379
       PROMETHEUS_BASE_URL: http://prometheus:9090
       ALERTMANAGER_BASE_URL: http://alertmanager:9093
+      LOKI_BASE_URL: http://loki:3100
       REASONING_MODE: heuristic
       OBSERVABILITY_MODE: demo
     ports:
@@ -87,6 +89,7 @@ services:
     command: ["--config.file=/etc/prometheus/prometheus.yml"]
     volumes:
       - ./deployments/playground/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deployments/playground/prometheus-alerts.yml:/etc/prometheus/rules/triovexa.yml:ro
     depends_on:
       - workload-supervisor
       - alertmanager
@@ -103,6 +106,16 @@ services:
     restart: unless-stopped
     command: ["-config.file=/etc/loki/local-config.yaml"]
 
+  alloy:
+    image: grafana/alloy:v1.10.2
+    restart: unless-stopped
+    command: ["run", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./deployments/playground/alloy.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
   grafana:
     image: grafana/grafana:12.1.1
     restart: unless-stopped
@@ -114,10 +127,13 @@ services:
       - "3000:3000"
     volumes:
       - ./deployments/playground/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./deployments/playground/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./deployments/playground/dashboards:/var/lib/grafana/dashboards:ro
       - triovexa-grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
       - loki
+      - alloy
 
 volumes:
   triovexa-postgres-data:

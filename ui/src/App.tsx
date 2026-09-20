@@ -106,12 +106,13 @@ function Approvals() {
 }
 
 function Connections() {
-  const result = useQuery({ queryKey: ['connections'], queryFn: () => api<{ reasoning: Record<string, unknown>; grafana: Record<string, unknown>; prometheus: Record<string, unknown>; alertmanager: Record<string, unknown> }>('/api/v1/connections') })
+  const result = useQuery({ queryKey: ['connections'], queryFn: () => api<{ reasoning: Record<string, unknown>; grafana: Record<string, unknown>; prometheus: Record<string, unknown>; alertmanager: Record<string, unknown>; loki: Record<string, unknown> }>('/api/v1/connections') })
   return <div className="standard-page"><PageHeader title="Connections" subtitle="Server-managed integrations used for reasoning, alerting, and evidence." />{result.isLoading ? <State title="Checking connections…" /> : result.isError ? <ErrorBox>{result.error.message}</ErrorBox> : result.data ? <div className="settings-list">
     <ConnectionRow name="Reasoning provider" description="Structured triage and remediation proposals" data={result.data.reasoning} testPath="reasoning" />
     <ConnectionRow name="Grafana" description="Metrics and logs used as incident evidence" data={result.data.grafana} />
     <ConnectionRow name="Prometheus" description="Workload metrics, recording rules, and alert evaluation" data={result.data.prometheus} testPath="prometheus" />
     <ConnectionRow name="Alertmanager" description="Alert routing and delivery status for the playground stack" data={result.data.alertmanager} testPath="alertmanager" />
+    <ConnectionRow name="Loki" description="Centralized logs collected from Triovexa and the workload stack" data={result.data.loki} testPath="loki" />
   </div> : <Empty title="Connections unavailable" text="The server did not return integration status." />}</div>
 }
 

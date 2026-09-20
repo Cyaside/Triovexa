@@ -289,28 +289,34 @@ func probeReadiness(ctx context.Context, baseURL string) error {
 	if err != nil || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return errors.New("invalid readiness endpoint")
 	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/-/ready"
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
-	if err != nil {
-		return err
-	}
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
-	response, err := client.Do(request)
-	if err != nil {
-		return err
+	basePath := strings.TrimRight(parsed.Path, "/")
+	for index, readinessPath := range []string{"/-/ready", "/ready"} {
+		parsed.Path = basePath + readinessPath
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+		if err != nil {
+			return err
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			return err
+		}
+		response.Body.Close()
+		if response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
+			return nil
+		}
+		if response.StatusCode != http.StatusNotFound || index == 1 {
+			return fmt.Errorf("readiness endpoint returned status %d", response.StatusCode)
+		}
 	}
-	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("readiness endpoint returned status %d", response.StatusCode)
-	}
-	return nil
+	return errors.New("readiness endpoint unavailable")
 }
 
 func loadIncidentDetail(r *http.Request, repository storage.Repository, id string) (incidentDetailResponse, error) {

@@ -1,6 +1,10 @@
-# Planning docs kept local only
-guide/
-prd.md
+# Internal planning and agent workspaces kept local only
+/guide/
+/prd.md
+/.agents/
+/.kilo/
+/.tmp/
+/work/
 
 # Build outputs
 bin/

@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Triovexa Playground
+    orgId: 1
+    folder: Triovexa
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 10
+    options:
+      path: /var/lib/grafana/dashboards

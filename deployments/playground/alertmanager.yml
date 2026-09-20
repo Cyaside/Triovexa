@@ -7,3 +7,6 @@ route:
 
 receivers:
   - name: playground-log
+    webhook_configs:
+      - url: http://triovexa:8080/webhooks/grafana
+        send_resolved: true
