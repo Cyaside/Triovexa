@@ -48,6 +48,29 @@ func TestRecoverStartedExecutionFinalizesConfirmedExternalEffect(t *testing.T) {
 	}
 }
 
+func TestRecoverStartedExecutionEscalatesUnknownPreDispatchWindow(t *testing.T) {
+	repository := storage.NewMemoryStore()
+	incidentRecord, action := seedApprovedExecutionFixture(t, repository)
+	now := time.Now().UTC()
+	record := domain.ExecutionRecord{ID: "execution-before-dispatch", CandidateActionID: action.ID, IdempotencyKey: "execute:" + action.ID, InitiatedBy: "operator", ExecutorType: "workload-control-api", Status: ExecutionStatusStarted, StartedAt: now, FinishedAt: now, ResultJSON: `{}`}
+	claimed, err := repository.ClaimExecution(context.Background(), incidentRecord.ID, action.ID, record)
+	if err != nil || !claimed {
+		t.Fatalf("claim execution: claimed=%t err=%v", claimed, err)
+	}
+	service := NewService(repository, DefaultCatalog(), recoveryAdapter{status: ReconciliationUnknown}, nil, nil, time.Second, 0, time.Minute)
+	if recovered, err := service.RecoverStartedExecutions(context.Background()); err != nil || recovered != 1 {
+		t.Fatalf("recover executions: recovered=%d err=%v", recovered, err)
+	}
+	records, _ := repository.ListExecutionRecordsByAction(context.Background(), action.ID)
+	if records[0].Status != ExecutionStatusInconclusive {
+		t.Fatalf("status = %q, want inconclusive", records[0].Status)
+	}
+	updated, _ := repository.GetIncident(context.Background(), incidentRecord.ID)
+	if updated.State != domain.IncidentStateEscalated {
+		t.Fatalf("incident state = %q, want escalated", updated.State)
+	}
+}
+
 func TestControlAdapterReconcilesOperationStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/operations/execute:action-1" {

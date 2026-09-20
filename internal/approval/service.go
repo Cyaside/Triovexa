@@ -213,6 +213,9 @@ func (s *Service) ApproveAction(ctx context.Context, actionID string, approvedBy
 	if err != nil {
 		return domain.CandidateAction{}, fmt.Errorf("get incident for action: %w", err)
 	}
+	if incidentRecord.State != domain.IncidentStateApproved && !incident.CanTransition(incidentRecord.State, domain.IncidentStateApproved) {
+		return domain.CandidateAction{}, fmt.Errorf("incident %q cannot be approved from terminal state %q", incidentRecord.ID, incidentRecord.State)
+	}
 	if atomic, ok := s.repository.(storage.AtomicApprovalStore); ok {
 		updated, err := atomic.DecideApproval(ctx, action.IncidentID, record,
 			domain.CandidateActionStatusAwaitingApproval, domain.CandidateActionStatusApproved,

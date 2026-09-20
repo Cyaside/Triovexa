@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Cyaside/Triovexa/internal/alerting"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/storage"
 )
@@ -14,6 +15,38 @@ import (
 type stubCollector struct {
 	evidence []domain.EvidenceItem
 	err      error
+}
+
+func TestSameFingerprintCreatesNewEpisodeAfterTerminalIncident(t *testing.T) {
+	repository := storage.NewMemoryStore()
+	service := NewService(repository, nil, nil, nil, nil, nil)
+	payload := alerting.GrafanaWebhookPayload{
+		Title:        "queue worker stalled",
+		CommonLabels: map[string]string{"service": "queue-worker", "environment": "staging", "severity": "critical"},
+		Alerts: []alerting.GrafanaAlert{{
+			Status: "firing", Fingerprint: "worker-stall-episode", StartsAt: time.Now().UTC(),
+			Labels:      map[string]string{"service": "queue-worker", "environment": "staging", "severity": "critical"},
+			Annotations: map[string]string{"summary": "queue worker stalled"},
+		}},
+	}
+	first, shouldTriage, err := service.acceptGrafanaWebhook(context.Background(), payload, false)
+	if err != nil || shouldTriage {
+		t.Fatalf("first intake: incident=%#v triage=%t err=%v", first, shouldTriage, err)
+	}
+	duplicate, shouldTriage, err := service.acceptGrafanaWebhook(context.Background(), payload, false)
+	if err != nil || shouldTriage || duplicate.ID != first.ID {
+		t.Fatalf("duplicate intake: incident=%#v triage=%t err=%v", duplicate, shouldTriage, err)
+	}
+	if err := repository.UpdateIncidentState(context.Background(), first.ID, domain.IncidentStateClosed); err != nil {
+		t.Fatal(err)
+	}
+	second, shouldTriage, err := service.acceptGrafanaWebhook(context.Background(), payload, false)
+	if err != nil || shouldTriage {
+		t.Fatalf("second episode intake: incident=%#v triage=%t err=%v", second, shouldTriage, err)
+	}
+	if second.ID == first.ID {
+		t.Fatal("terminal incident was reused instead of creating a new episode")
+	}
 }
 
 func (s stubCollector) Collect(context.Context, domain.Incident) ([]domain.EvidenceItem, error) {

@@ -2,6 +2,7 @@ package approval
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -182,5 +183,30 @@ func TestServiceApproveActionPersistsApprovalRecord(t *testing.T) {
 
 	if len(records) != 1 || records[0].Decision != "approved" {
 		t.Fatalf("approval records = %#v, want one approved record", records)
+	}
+}
+
+func TestServiceRejectsApprovalAfterIncidentBecomesTerminal(t *testing.T) {
+	t.Parallel()
+
+	repository := storage.NewMemoryStore()
+	service := NewService(repository, policy.NewEvaluator(execution.DefaultCatalog()), NewKillSwitch(false))
+	incidentRecord := domain.Incident{ID: "inc-terminal", Environment: "staging", State: domain.IncidentStateClosed, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if err := repository.CreateIncident(context.Background(), incidentRecord); err != nil {
+		t.Fatal(err)
+	}
+	action := domain.CandidateAction{ID: uuid.NewString(), IncidentID: incidentRecord.ID, ActionType: "restart_worker", TargetResource: "queue-worker", ParametersJSON: `{"worker_id":"queue-worker"}`, RiskLevel: domain.RiskLevelLow, Status: domain.CandidateActionStatusAwaitingApproval, CreatedAt: time.Now().UTC()}
+	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SavePolicyDecisions(context.Background(), []domain.PolicyDecision{{ID: uuid.NewString(), CandidateActionID: action.ID, Decision: domain.PolicyDecisionApprovalRequired, ApprovalRequired: true, PolicyRuleRef: "risk/low-requires-approval", DecidedAt: time.Now().UTC()}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ApproveAction(context.Background(), action.ID, "operator-a", "stale decision"); err == nil || !strings.Contains(err.Error(), "terminal state") {
+		t.Fatalf("approve terminal incident error = %v, want terminal-state rejection", err)
+	}
+	records, _ := repository.ListApprovalRecords(context.Background(), incidentRecord.ID)
+	if len(records) != 0 {
+		t.Fatalf("approval records = %#v, want none", records)
 	}
 }

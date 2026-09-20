@@ -92,6 +92,43 @@ func TestServiceRejectsStaleEvidenceBeforeDispatch(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsExpiredApprovalBeforeDispatch(t *testing.T) {
+	repository := storage.NewMemoryStore()
+	_, action := seedApprovedExecutionFixture(t, repository)
+	adapter := &fakeAdapter{exec: func(context.Context, domain.CandidateAction, AdapterRequest) (AdapterResult, error) {
+		return AdapterResult{ExecutorType: "fake"}, nil
+	}}
+	service := NewService(repository, DefaultCatalog(), adapter, staticKillSwitch{}, nil, time.Second, 0, time.Minute)
+	service.now = func() time.Time { return time.Now().UTC().Add(16 * time.Minute) }
+	_, err := service.ExecuteAction(context.Background(), action.ID, "operator-a")
+	if err == nil || !strings.Contains(err.Error(), "approval expired") {
+		t.Fatalf("error = %v, want expired approval rejection", err)
+	}
+	if adapter.calls != 0 {
+		t.Fatalf("adapter calls = %d, want 0", adapter.calls)
+	}
+}
+
+func TestServiceRejectsActionModifiedAfterApproval(t *testing.T) {
+	repository := storage.NewMemoryStore()
+	_, action := seedApprovedExecutionFixture(t, repository)
+	action.ParametersJSON = `{"worker_id":"different-worker"}`
+	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{exec: func(context.Context, domain.CandidateAction, AdapterRequest) (AdapterResult, error) {
+		return AdapterResult{ExecutorType: "fake"}, nil
+	}}
+	service := NewService(repository, DefaultCatalog(), adapter, staticKillSwitch{}, nil, time.Second, 0, time.Minute)
+	_, err := service.ExecuteAction(context.Background(), action.ID, "operator-a")
+	if err == nil || !strings.Contains(err.Error(), "no longer matches") {
+		t.Fatalf("error = %v, want modified approval rejection", err)
+	}
+	if adapter.calls != 0 {
+		t.Fatalf("adapter calls = %d, want 0", adapter.calls)
+	}
+}
+
 func TestServiceExecuteActionRetriesRetryableError(t *testing.T) {
 	t.Parallel()
 

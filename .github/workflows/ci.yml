@@ -7,6 +7,32 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: triovexa_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d triovexa_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/triovexa_test?sslmode=disable
+      TEST_REDIS_ADDRESS: 127.0.0.1:6379
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -16,6 +42,16 @@ jobs:
       - run: go test ./...
       - run: go vet ./...
       - run: go test -race ./...
+      - name: Verify PostgreSQL backup and restore
+        env:
+          PGPASSWORD: postgres
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          createdb -h 127.0.0.1 -U postgres triovexa_restore
+          bash scripts/backup-postgres.sh "$TEST_DATABASE_URL" "$RUNNER_TEMP/triovexa.dump"
+          bash scripts/restore-postgres.sh "postgres://postgres:postgres@127.0.0.1:5432/triovexa_restore?sslmode=disable" "$RUNNER_TEMP/triovexa.dump"
+          psql "postgres://postgres:postgres@127.0.0.1:5432/triovexa_restore?sslmode=disable" -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM schema_migrations;"
 
   operator-console:
     runs-on: ubuntu-latest
