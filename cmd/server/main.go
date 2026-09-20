@@ -61,6 +61,7 @@ func main() {
 			logger.Error("failed to close storage", slog.String("error", err.Error()))
 		}
 	}()
+	applyStoredConnectionProfiles(context.Background(), repository, &cfg, logger)
 
 	retriever := retrieval.NewFileRetriever(cfg.DocsRoot)
 	catalog := execution.DefaultCatalog()
@@ -226,4 +227,31 @@ func main() {
 	}
 
 	logger.Info("server stopped cleanly")
+}
+
+func applyStoredConnectionProfiles(ctx context.Context, repository storage.Repository, cfg *appconfig.Config, logger *slog.Logger) {
+	settings, ok := repository.(storage.SettingsStore)
+	if !ok {
+		return
+	}
+	if raw, err := settings.GetSetting(ctx, appconfig.ReasoningConnectionSettingKey); err == nil {
+		profile, decodeErr := appconfig.DecodeReasoningConnectionProfile(raw)
+		if decodeErr != nil {
+			logger.Warn("ignoring invalid stored reasoning connection profile", slog.String("error", decodeErr.Error()))
+		} else {
+			appconfig.ApplyReasoningConnectionProfile(cfg, profile)
+		}
+	} else if !errors.Is(err, storage.ErrNotFound) {
+		logger.Warn("failed to load stored reasoning connection profile", slog.String("error", err.Error()))
+	}
+	if raw, err := settings.GetSetting(ctx, appconfig.GrafanaConnectionSettingKey); err == nil {
+		profile, decodeErr := appconfig.DecodeGrafanaConnectionProfile(raw)
+		if decodeErr != nil {
+			logger.Warn("ignoring invalid stored Grafana connection profile", slog.String("error", decodeErr.Error()))
+		} else {
+			appconfig.ApplyGrafanaConnectionProfile(cfg, profile)
+		}
+	} else if !errors.Is(err, storage.ErrNotFound) {
+		logger.Warn("failed to load stored Grafana connection profile", slog.String("error", err.Error()))
+	}
 }

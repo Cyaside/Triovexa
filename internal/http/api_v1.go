@@ -17,6 +17,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
+	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/storage"
 )
 
@@ -42,6 +43,10 @@ func registerAPIV1(
 	executionService *execution.Service,
 	runtime *RuntimeControls,
 ) {
+	registerConnectionConfigurationAPI(mux, cfg, repository)
+	registerPlaygroundAPI(mux, cfg)
+	settings, _ := repository.(storage.SettingsStore)
+
 	mux.HandleFunc("/api/v1/incidents", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -189,10 +194,25 @@ func registerAPIV1(
 			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
-		provider, baseURL, apiKey, model := cfg.EffectiveLLM()
+		profile := effectiveReasoningProfile(r.Context(), cfg, settings)
+		if r.ContentLength != 0 {
+			if err := decodeBoundedJSON(w, r, &profile); err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+				return
+			}
+		}
+		if err := config.ValidateReasoningConnectionProfile(profile); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_connection_profile", err.Error())
+			return
+		}
+		apiKey, available := config.ResolveCredential(profile.CredentialRef)
+		if !available {
+			writeAPIError(w, http.StatusBadRequest, "credential_unavailable", "The credential reference is not available in the server environment.")
+			return
+		}
 		client, err := ai.NewOpenAICompatibleClient(ai.ProviderConfig{
-			Name: provider, BaseURL: baseURL, APIKey: apiKey, Model: model,
-			JSONMode: cfg.LLMJSONMode, Timeout: cfg.LLMTimeout,
+			Name: profile.Provider, BaseURL: profile.BaseURL, APIKey: apiKey, Model: profile.Model,
+			JSONMode: profile.JSONMode, Timeout: cfg.LLMTimeout,
 			AllowHTTP: !cfg.InternalMode(), AllowHosts: cfg.LLMAllowHosts, RequireAllowlist: cfg.InternalMode(),
 		})
 		if err != nil || !client.Configured() {
@@ -207,7 +227,7 @@ func registerAPIV1(
 			writeAPIError(w, http.StatusBadGateway, "provider_test_failed", "The provider did not return a valid JSON response. Check the server logs and provider settings.")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": "connected", "provider": provider, "model": model, "latency_ms": time.Since(started).Milliseconds()})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "connected", "provider": profile.Provider, "model": profile.Model, "latency_ms": time.Since(started).Milliseconds()})
 	})
 
 	registerReadinessConnectionTest(mux, "/api/v1/connections/prometheus/test", "Prometheus", cfg.PrometheusBaseURL)
@@ -221,14 +241,38 @@ func registerAPIV1(
 				return
 			}
 			var payload struct {
-				Enabled bool `json:"enabled"`
+				Enabled           *bool  `json:"enabled"`
+				ReasoningMode     string `json:"reasoning_mode"`
+				ObservabilityMode string `json:"observability_mode"`
 			}
 			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&payload); err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", "Invalid settings payload.")
 				return
 			}
-			state := approvalService.SetKillSwitch(payload.Enabled)
-			writeJSON(w, http.StatusOK, map[string]any{"kill_switch_enabled": state.Enabled, "updated_at": state.UpdatedAt})
+			state := approvalService.KillSwitchState()
+			if payload.Enabled != nil {
+				state = approvalService.SetKillSwitch(*payload.Enabled)
+			}
+			var snapshot any
+			if runtime != nil && runtime.Modes != nil {
+				current := runtime.Modes.Snapshot()
+				if strings.TrimSpace(payload.ReasoningMode) != "" {
+					if _, err := mode.ParseReasoning(payload.ReasoningMode); err != nil {
+						writeAPIError(w, http.StatusBadRequest, "invalid_reasoning_mode", err.Error())
+						return
+					}
+					current = runtime.Modes.SetReasoning(payload.ReasoningMode)
+				}
+				if strings.TrimSpace(payload.ObservabilityMode) != "" {
+					if _, err := mode.ParseObservability(payload.ObservabilityMode); err != nil {
+						writeAPIError(w, http.StatusBadRequest, "invalid_observability_mode", err.Error())
+						return
+					}
+					current = runtime.Modes.SetObservability(payload.ObservabilityMode)
+				}
+				snapshot = current
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"kill_switch_enabled": state.Enabled, "updated_at": state.UpdatedAt, "runtime": snapshot})
 			return
 		}
 		if r.Method != http.MethodGet {
@@ -239,7 +283,11 @@ func registerAPIV1(
 		if approvalService != nil {
 			killSwitch = approvalService.KillSwitchState().Enabled
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"deployment_mode": cfg.DeploymentMode, "environment": cfg.Environment, "kill_switch_enabled": killSwitch})
+		var snapshot any
+		if runtime != nil && runtime.Modes != nil {
+			snapshot = runtime.Modes.Snapshot()
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deployment_mode": cfg.DeploymentMode, "environment": cfg.Environment, "kill_switch_enabled": killSwitch, "runtime": snapshot})
 	})
 }
 

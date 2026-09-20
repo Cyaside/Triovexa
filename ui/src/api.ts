@@ -18,6 +18,18 @@ function csrfToken() {
   return item ? decodeURIComponent(item.split('=').slice(1).join('=')) : ''
 }
 
+export class APIError extends Error {
+  status: number
+  code: string
+
+  constructor(message: string, status: number, code = 'request_failed') {
+    super(message)
+    this.name = 'APIError'
+    this.status = status
+    this.code = code
+  }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   if (init?.body) headers.set('Content-Type', 'application/json')
@@ -26,7 +38,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers, credentials: 'same-origin' })
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
-    throw new Error(payload?.error?.message ?? `Request failed (${response.status})`)
+    throw new APIError(payload?.error?.message ?? `Request failed (${response.status})`, response.status, payload?.error?.code)
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>

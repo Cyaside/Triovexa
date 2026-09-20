@@ -3,7 +3,6 @@ package http
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -114,7 +113,7 @@ func NewServerWithTelemetry(
 			"environment":            cfg.Environment,
 			"kill_switch_enabled":    killSwitchState.Enabled,
 			"kill_switch_updated_at": killSwitchState.UpdatedAt.Format(time.RFC3339),
-			"phase":                  "phase-07-hardening-portfolio-release",
+			"phase":                  "phase-07-hardening-release",
 			"available_endpoints": []string{
 				"GET /health",
 				"GET /metrics",
@@ -132,14 +131,15 @@ func NewServerWithTelemetry(
 				"POST /actions/{id}/execute",
 				"POST /admin/kill-switch",
 				"POST /admin/runtime-modes",
-				"GET /ui/assets/workbench.css",
-				"GET /ui/incidents",
-				"GET /ui/incidents/{id}",
-				"GET /ui/setup/observability",
-				"POST /ui/setup/observability/test-connection",
-				"POST /ui/setup/observability/test-query",
-				"POST /ui/setup/observability/save-profile",
-				"POST /ui/setup/observability/clear-profile",
+				"GET /api/v1/incidents",
+				"GET /api/v1/incidents/{id}",
+				"GET /api/v1/approvals",
+				"GET /api/v1/connections",
+				"PUT /api/v1/connections/grafana/config",
+				"PUT /api/v1/connections/reasoning/config",
+				"GET /api/v1/playground",
+				"POST /api/v1/playground/faults",
+				"GET /ui/*",
 			},
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		}
@@ -160,7 +160,7 @@ func NewServerWithTelemetry(
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
-			"phase":               "phase-07-hardening-portfolio-release",
+			"phase":               "phase-07-hardening-release",
 			"kill_switch_enabled": killSwitchState.Enabled,
 			"catalog":             catalogView(execution.DefaultCatalog()),
 		})
@@ -587,357 +587,6 @@ func NewServerWithTelemetry(
 			"verification_results": verificationResults,
 			"rollback_records":     rollbackRecords,
 			"audit_events":         auditEvents,
-		})
-	})
-
-	mux.HandleFunc("/ui/incidents", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if uiAppAvailable() {
-			serveUIApp(w, r)
-			return
-		}
-
-		incidents, err := repository.ListIncidents(r.Context())
-		if err != nil {
-			http.Error(w, "failed to load incidents", http.StatusInternalServerError)
-			return
-		}
-
-		items, err := buildIncidentListItems(r.Context(), repository, incidents)
-		if err != nil {
-			http.Error(w, "failed to build incident workbench", http.StatusInternalServerError)
-			return
-		}
-
-		renderIncidentList(w, incidentListPageData{
-			Items:             items,
-			KillSwitchEnabled: approvalService != nil && approvalService.KillSwitchState().Enabled,
-			Stats:             buildIncidentDashboardStats(incidents),
-			DemoScenarios:     demoScenarioViews(),
-			Runtime:           buildRuntimeViewData(r.Context(), runtimeControl),
-			Notice:            strings.TrimSpace(r.URL.Query().Get("notice")),
-			Error:             strings.TrimSpace(r.URL.Query().Get("error")),
-		})
-	})
-
-	mux.HandleFunc("/ui/demo/scenarios/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if incidentService == nil {
-			http.Error(w, "incident workflow is not configured", http.StatusNotImplemented)
-			return
-		}
-
-		scenarioKey := strings.TrimPrefix(r.URL.Path, "/ui/demo/scenarios/")
-		incidentRecord, err := triggerDemoScenario(r.Context(), cfg.DemoServiceBaseURL, incidentService, scenarioKey)
-		if err != nil {
-			logger.Error("failed to trigger demo scenario", slog.String("scenario", scenarioKey), slog.String("error", err.Error()))
-			target := appendUIMessage("/ui/incidents", "error", "Failed to run the demo scenario. Check the server logs for details.")
-			if errors.Is(err, errDemoScenarioNotFound) {
-				target = appendUIMessage("/ui/incidents", "error", "Unknown demo scenario.")
-			}
-			http.Redirect(w, r, target, http.StatusSeeOther)
-			return
-		}
-
-		target := appendUIMessage(
-			"/ui/incidents/"+incidentRecord.ID,
-			"notice",
-			"The demo scenario completed. The new incident and its heuristic results are ready for review.",
-		)
-		http.Redirect(w, r, target, http.StatusSeeOther)
-	})
-
-	mux.HandleFunc("/ui/admin/kill-switch", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if approvalService == nil {
-			http.Error(w, "approval workflow is not configured", http.StatusNotImplemented)
-			return
-		}
-
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "invalid form payload", http.StatusBadRequest)
-			return
-		}
-
-		enabled, err := parseKillSwitchRequest(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		state := approvalService.SetKillSwitch(enabled)
-		target := sanitizeUIRedirectTarget(r.FormValue("redirect"), "/ui/incidents")
-		message := "The kill switch is disabled. Manual approvals and executions are available again."
-		if state.Enabled {
-			message = "The kill switch is enabled. Triage continues, but new actions are blocked."
-		}
-		http.Redirect(w, r, appendUIMessage(target, "notice", message), http.StatusSeeOther)
-	})
-
-	mux.HandleFunc("/ui/admin/runtime-modes", func(w http.ResponseWriter, r *http.Request) {
-		if runtimeControl == nil || runtimeControl.Modes == nil {
-			http.Error(w, "runtime mode controls are not configured", http.StatusNotImplemented)
-			return
-		}
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "invalid form payload", http.StatusBadRequest)
-			return
-		}
-
-		reasoningMode, observabilityMode, err := parseRuntimeModeRequest(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		snapshot := runtimeControl.Modes.Snapshot()
-		if reasoningMode != "" {
-			snapshot = runtimeControl.Modes.SetReasoning(reasoningMode)
-		}
-		if observabilityMode != "" {
-			snapshot = runtimeControl.Modes.SetObservability(observabilityMode)
-		}
-
-		target := sanitizeUIRedirectTarget(r.FormValue("redirect"), "/ui/incidents")
-		message := fmt.Sprintf("Runtime mode diperbarui. Reasoning=%s, Observability=%s.", snapshot.Reasoning, snapshot.Observability)
-		http.Redirect(w, r, appendUIMessage(target, "notice", message), http.StatusSeeOther)
-	})
-
-	loadSetupDefaults := func() (observabilitySetupForm, observabilityProfileState) {
-		return loadObservabilitySetupDefaults(cfg)
-	}
-	mux.HandleFunc("/ui/setup/observability", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		setupForm, profileState := loadSetupDefaults()
-		renderObservabilitySetupPage(w, observabilitySetupPageData{
-			Form:          setupForm,
-			Runtime:       buildRuntimeViewData(r.Context(), runtimeControl),
-			LocalModeNote: buildLocalModeNote(),
-			Profile:       profileState,
-			Readiness:     buildObservabilityReadiness(setupForm, observabilityConnectionResult{}, nil),
-			Notice:        strings.TrimSpace(r.URL.Query().Get("notice")),
-			Error:         strings.TrimSpace(r.URL.Query().Get("error")),
-		})
-	})
-
-	mux.HandleFunc("/ui/setup/observability/test-connection", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		setupForm, profileState := loadSetupDefaults()
-		form, err := parseObservabilitySetupForm(r, setupForm)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		connection, datasources := runObservabilityConnectionTest(r.Context(), form)
-		renderObservabilitySetupPage(w, observabilitySetupPageData{
-			Form:          form,
-			Runtime:       buildRuntimeViewData(r.Context(), runtimeControl),
-			LocalModeNote: buildLocalModeNote(),
-			Profile:       profileState,
-			Connection:    connection,
-			Datasources:   datasources,
-			Readiness:     buildObservabilityReadiness(form, connection, nil),
-		})
-	})
-
-	mux.HandleFunc("/ui/setup/observability/test-query", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		setupForm, profileState := loadSetupDefaults()
-		form, err := parseObservabilitySetupForm(r, setupForm)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		connection, datasources, queryResults, evidence := runObservabilityQueryPreview(r.Context(), form)
-		renderObservabilitySetupPage(w, observabilitySetupPageData{
-			Form:          form,
-			Runtime:       buildRuntimeViewData(r.Context(), runtimeControl),
-			LocalModeNote: buildLocalModeNote(),
-			Profile:       profileState,
-			Connection:    connection,
-			Datasources:   datasources,
-			QueryResults:  queryResults,
-			Evidence:      evidence,
-			Readiness:     buildObservabilityReadiness(form, connection, queryResults),
-		})
-	})
-
-	mux.HandleFunc("/ui/setup/observability/save-profile", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		setupForm, _ := loadSetupDefaults()
-		form, err := parseObservabilitySetupForm(r, setupForm)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if err := config.SaveObservabilityProfile(cfg.LocalObservabilityProfilePath, profileFromObservabilitySetupForm(form)); err != nil {
-			target := appendUIMessage("/ui/setup/observability", "error", "Failed to save the local observability profile.")
-			http.Redirect(w, r, target, http.StatusSeeOther)
-			return
-		}
-
-		target := appendUIMessage(
-			"/ui/setup/observability",
-			"notice",
-			"Local observability profile saved. Restart the server if you want runtime defaults to reload from the saved profile.",
-		)
-		http.Redirect(w, r, target, http.StatusSeeOther)
-	})
-
-	mux.HandleFunc("/ui/setup/observability/clear-profile", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		if err := config.ClearObservabilityProfile(cfg.LocalObservabilityProfilePath); err != nil {
-			target := appendUIMessage("/ui/setup/observability", "error", "Failed to clear the local observability profile.")
-			http.Redirect(w, r, target, http.StatusSeeOther)
-			return
-		}
-
-		target := appendUIMessage("/ui/setup/observability", "notice", "Saved local observability profile cleared from this machine.")
-		http.Redirect(w, r, target, http.StatusSeeOther)
-	})
-
-	mux.HandleFunc("/ui/incidents/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if uiAppAvailable() {
-			serveUIApp(w, r)
-			return
-		}
-
-		incidentID := strings.TrimPrefix(r.URL.Path, "/ui/incidents/")
-		if incidentID == "" {
-			http.Error(w, "incident id is required", http.StatusBadRequest)
-			return
-		}
-
-		record, err := repository.GetIncident(r.Context(), incidentID)
-		if err != nil {
-			if errors.Is(err, storage.ErrNotFound) {
-				http.NotFound(w, r)
-				return
-			}
-			http.Error(w, "failed to load incident", http.StatusInternalServerError)
-			return
-		}
-
-		evidence, err := repository.ListEvidenceItems(r.Context(), incidentID)
-		if err != nil {
-			http.Error(w, "failed to load evidence", http.StatusInternalServerError)
-			return
-		}
-
-		documents, err := repository.ListDocumentReferences(r.Context(), incidentID)
-		if err != nil {
-			http.Error(w, "failed to load documents", http.StatusInternalServerError)
-			return
-		}
-
-		actions, err := repository.ListCandidateActions(r.Context(), incidentID)
-		if err != nil {
-			http.Error(w, "failed to load candidate actions", http.StatusInternalServerError)
-			return
-		}
-
-		policyDecisions, err := repository.ListPolicyDecisions(r.Context(), incidentID)
-		if err != nil {
-			http.Error(w, "failed to load policy decisions", http.StatusInternalServerError)
-			return
-		}
-
-		approvalRecords, err := repository.ListApprovalRecords(r.Context(), incidentID)
-		if err != nil {
-			http.Error(w, "failed to load approval records", http.StatusInternalServerError)
-			return
-		}
-
-		executionRecords, err := repository.ListExecutionRecords(r.Context(), incidentID)
-		if err != nil {
-			http.Error(w, "failed to load execution records", http.StatusInternalServerError)
-			return
-		}
-
-		verificationResults, err := repository.ListVerificationResults(r.Context(), incidentID)
-		if err != nil {
-			http.Error(w, "failed to load verification results", http.StatusInternalServerError)
-			return
-		}
-
-		rollbackRecords, err := repository.ListRollbackRecords(r.Context(), incidentID)
-		if err != nil {
-			http.Error(w, "failed to load rollback records", http.StatusInternalServerError)
-			return
-		}
-
-		auditEvents, err := repository.ListAuditEvents(r.Context(), incidentID)
-		if err != nil {
-			http.Error(w, "failed to load audit trail", http.StatusInternalServerError)
-			return
-		}
-
-		var triageResult *domain.TriageResult
-		result, err := repository.GetTriageResult(r.Context(), incidentID)
-		if err == nil {
-			triageResult = &result
-		} else if !errors.Is(err, storage.ErrNotFound) {
-			http.Error(w, "failed to load triage result", http.StatusInternalServerError)
-			return
-		}
-
-		renderIncidentDetail(w, incidentDetailPageData{
-			Incident:            record,
-			Triage:              triageResult,
-			Evidence:            evidence,
-			Documents:           documents,
-			Actions:             actions,
-			PolicyDecisions:     policyDecisions,
-			ApprovalRecords:     approvalRecords,
-			ExecutionRecords:    executionRecords,
-			VerificationResults: verificationResults,
-			RollbackRecords:     rollbackRecords,
-			KillSwitchEnabled:   approvalService != nil && approvalService.KillSwitchState().Enabled,
-			AuditTrail:          auditEvents,
-			Runtime:             buildRuntimeViewData(r.Context(), runtimeControl),
-			Notice:              strings.TrimSpace(r.URL.Query().Get("notice")),
-			Error:               strings.TrimSpace(r.URL.Query().Get("error")),
-			NextOperatorStep:    describeNextOperatorStep(record, approvalService != nil && approvalService.KillSwitchState().Enabled),
 		})
 	})
 
