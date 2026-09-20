@@ -9,6 +9,8 @@ This folder contains the implementation documentation that supports the current 
 - `scenarios/`
 - `runbooks/`
 - `postmortems/`
+- `evidence/`
+- `releases/`
 
 ## Purpose
 
@@ -19,3 +21,4 @@ This folder contains the implementation documentation that supports the current 
 - provide end-to-end demo scenarios
 - capture the PostgreSQL persistence setup
 - provide sample runbooks and postmortems for retrieval and triage
+- publish reproducible E2E evidence and release limitations

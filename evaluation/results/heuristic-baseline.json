@@ -1,0 +1,398 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-20T18:19:39.9496548Z",
+  "mode": "heuristic",
+  "prompt_version": "triage-v1/remediation-v1",
+  "summary": {
+    "runs": 30,
+    "cases": 30,
+    "accuracy_percent": 100,
+    "evidence_grounding_percent": 100,
+    "invalid_proposals": 0,
+    "fallbacks": 0,
+    "average_latency_ms": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  },
+  "results": [
+    {
+      "case_id": "worker-stall-01",
+      "repeat": 1,
+      "expected_action": "restart_worker",
+      "proposed_actions": [
+        "restart_worker"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "worker-stall-02",
+      "repeat": 1,
+      "expected_action": "restart_worker",
+      "proposed_actions": [
+        "restart_worker"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "worker-stall-03",
+      "repeat": 1,
+      "expected_action": "restart_worker",
+      "proposed_actions": [
+        "restart_worker"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "worker-stall-04",
+      "repeat": 1,
+      "expected_action": "restart_worker",
+      "proposed_actions": [
+        "restart_worker"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "worker-stall-05",
+      "repeat": 1,
+      "expected_action": "restart_worker",
+      "proposed_actions": [
+        "restart_worker"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "worker-stall-06",
+      "repeat": 1,
+      "expected_action": "restart_worker",
+      "proposed_actions": [
+        "restart_worker"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "worker-stall-07",
+      "repeat": 1,
+      "expected_action": "restart_worker",
+      "proposed_actions": [
+        "restart_worker"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "worker-stall-08",
+      "repeat": 1,
+      "expected_action": "restart_demo_worker",
+      "proposed_actions": [
+        "pause_demo_queue_consumer",
+        "restart_demo_worker",
+        "retry_demo_background_job"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "worker-stall-09",
+      "repeat": 1,
+      "expected_action": "restart_demo_worker",
+      "proposed_actions": [
+        "pause_demo_queue_consumer",
+        "restart_demo_worker",
+        "retry_demo_background_job"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "worker-stall-10",
+      "repeat": 1,
+      "expected_action": "restart_demo_worker",
+      "proposed_actions": [
+        "pause_demo_queue_consumer",
+        "restart_demo_worker",
+        "retry_demo_background_job"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "timeout-deploy-01",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "timeout-deploy-02",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "timeout-deploy-03",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "timeout-deploy-04",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "timeout-deploy-05",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "timeout-deploy-06",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "timeout-deploy-07",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "timeout-deploy-08",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "error-spike-01",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "error-spike-02",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "error-spike-03",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "error-spike-04",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "error-spike-05",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "error-spike-06",
+      "repeat": 1,
+      "expected_action": "refresh_demo_cache",
+      "proposed_actions": [
+        "refresh_demo_cache"
+      ],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "ambiguous-01",
+      "repeat": 1,
+      "proposed_actions": [],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "ambiguous-02",
+      "repeat": 1,
+      "proposed_actions": [],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "ambiguous-03",
+      "repeat": 1,
+      "proposed_actions": [],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "ambiguous-04",
+      "repeat": 1,
+      "proposed_actions": [],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "ambiguous-05",
+      "repeat": 1,
+      "proposed_actions": [],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    },
+    {
+      "case_id": "ambiguous-06",
+      "repeat": 1,
+      "proposed_actions": [],
+      "accurate": true,
+      "evidence_grounded": true,
+      "invalid_proposals": 0,
+      "fallback": false,
+      "latency_ms": 0
+    }
+  ]
+}

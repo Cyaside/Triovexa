@@ -1,0 +1,992 @@
+[
+  {
+    "id": "worker-stall-01",
+    "title": "Queue processing stopped with backlog 24",
+    "service": "queue-worker",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "worker stalled; queue backlog=24; processed=2; consumer_paused=false",
+        "metadata": {
+          "mode": "worker_stall",
+          "queue_backlog": 24,
+          "workerHealthy": false
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "worker heartbeat missed while producers remain active",
+        "metadata": {
+          "errors": 0
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Worker stall recovery",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "restart_worker"
+  },
+  {
+    "id": "worker-stall-02",
+    "title": "Queue processing stopped with backlog 35",
+    "service": "queue-worker",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "worker stalled; queue backlog=35; processed=2; consumer_paused=false",
+        "metadata": {
+          "mode": "worker_stall",
+          "queue_backlog": 35,
+          "workerHealthy": false
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "worker heartbeat missed while producers remain active",
+        "metadata": {
+          "errors": 0
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Worker stall recovery",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "restart_worker"
+  },
+  {
+    "id": "worker-stall-03",
+    "title": "Queue processing stopped with backlog 48",
+    "service": "queue-worker",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "worker stalled; queue backlog=48; processed=2; consumer_paused=false",
+        "metadata": {
+          "mode": "worker_stall",
+          "queue_backlog": 48,
+          "workerHealthy": false
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "worker heartbeat missed while producers remain active",
+        "metadata": {
+          "errors": 0
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Worker stall recovery",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "restart_worker"
+  },
+  {
+    "id": "worker-stall-04",
+    "title": "Queue processing stopped with backlog 59",
+    "service": "queue-worker",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "worker stalled; queue backlog=59; processed=2; consumer_paused=false",
+        "metadata": {
+          "mode": "worker_stall",
+          "queue_backlog": 59,
+          "workerHealthy": false
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "worker heartbeat missed while producers remain active",
+        "metadata": {
+          "errors": 0
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Worker stall recovery",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "restart_worker"
+  },
+  {
+    "id": "worker-stall-05",
+    "title": "Queue processing stopped with backlog 72",
+    "service": "queue-worker",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "worker stalled; queue backlog=72; processed=2; consumer_paused=false",
+        "metadata": {
+          "mode": "worker_stall",
+          "queue_backlog": 72,
+          "workerHealthy": false
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "worker heartbeat missed while producers remain active",
+        "metadata": {
+          "errors": 0
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Worker stall recovery",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "restart_worker"
+  },
+  {
+    "id": "worker-stall-06",
+    "title": "Queue processing stopped with backlog 88",
+    "service": "queue-worker",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "worker stalled; queue backlog=88; processed=2; consumer_paused=false",
+        "metadata": {
+          "mode": "worker_stall",
+          "queue_backlog": 88,
+          "workerHealthy": false
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "worker heartbeat missed while producers remain active",
+        "metadata": {
+          "errors": 0
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Worker stall recovery",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "restart_worker"
+  },
+  {
+    "id": "worker-stall-07",
+    "title": "Queue processing stopped with backlog 105",
+    "service": "queue-worker",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "worker stalled; queue backlog=105; processed=2; consumer_paused=false",
+        "metadata": {
+          "mode": "worker_stall",
+          "queue_backlog": 105,
+          "workerHealthy": false
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "worker heartbeat missed while producers remain active",
+        "metadata": {
+          "errors": 0
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Worker stall recovery",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "restart_worker"
+  },
+  {
+    "id": "worker-stall-08",
+    "title": "Queue processing stopped with backlog 121",
+    "service": "demo-worker",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "worker stalled; queue backlog=121; processed=2; consumer_paused=false",
+        "metadata": {
+          "mode": "worker_stall",
+          "queue_backlog": 121,
+          "workerHealthy": false
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "worker heartbeat missed while producers remain active",
+        "metadata": {
+          "errors": 0
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Worker stall recovery",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "restart_demo_worker"
+  },
+  {
+    "id": "worker-stall-09",
+    "title": "Queue processing stopped with backlog 144",
+    "service": "demo-worker",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "worker stalled; queue backlog=144; processed=2; consumer_paused=false",
+        "metadata": {
+          "mode": "worker_stall",
+          "queue_backlog": 144,
+          "workerHealthy": false
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "worker heartbeat missed while producers remain active",
+        "metadata": {
+          "errors": 0
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Worker stall recovery",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "restart_demo_worker"
+  },
+  {
+    "id": "worker-stall-10",
+    "title": "Queue processing stopped with backlog 200",
+    "service": "demo-worker",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "worker stalled; queue backlog=200; processed=2; consumer_paused=false",
+        "metadata": {
+          "mode": "worker_stall",
+          "queue_backlog": 200,
+          "workerHealthy": false
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "worker heartbeat missed while producers remain active",
+        "metadata": {
+          "errors": 0
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Worker stall recovery",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "restart_demo_worker"
+  },
+  {
+    "id": "timeout-deploy-01",
+    "title": "Checkout timeout after deploy build-1",
+    "service": "checkout-api",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "request timeouts increased after deployment build-1; latency_ms=510",
+        "metadata": {
+          "mode": "timeout_after_deploy",
+          "latency_ms": 510,
+          "last_deploy": "build-1"
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "upstream timeout observed on the primary request path",
+        "metadata": {
+          "error_rate": 0.08
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Timeout after deployment",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "timeout-deploy-02",
+    "title": "Checkout timeout after deploy build-2",
+    "service": "checkout-api",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "request timeouts increased after deployment build-2; latency_ms=620",
+        "metadata": {
+          "mode": "timeout_after_deploy",
+          "latency_ms": 620,
+          "last_deploy": "build-2"
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "upstream timeout observed on the primary request path",
+        "metadata": {
+          "error_rate": 0.08
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Timeout after deployment",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "timeout-deploy-03",
+    "title": "Checkout timeout after deploy build-3",
+    "service": "checkout-api",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "request timeouts increased after deployment build-3; latency_ms=740",
+        "metadata": {
+          "mode": "timeout_after_deploy",
+          "latency_ms": 740,
+          "last_deploy": "build-3"
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "upstream timeout observed on the primary request path",
+        "metadata": {
+          "error_rate": 0.08
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Timeout after deployment",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "timeout-deploy-04",
+    "title": "Checkout timeout after deploy build-4",
+    "service": "checkout-api",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "request timeouts increased after deployment build-4; latency_ms=880",
+        "metadata": {
+          "mode": "timeout_after_deploy",
+          "latency_ms": 880,
+          "last_deploy": "build-4"
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "upstream timeout observed on the primary request path",
+        "metadata": {
+          "error_rate": 0.08
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Timeout after deployment",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "timeout-deploy-05",
+    "title": "Checkout timeout after deploy build-5",
+    "service": "checkout-api",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "request timeouts increased after deployment build-5; latency_ms=1010",
+        "metadata": {
+          "mode": "timeout_after_deploy",
+          "latency_ms": 1010,
+          "last_deploy": "build-5"
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "upstream timeout observed on the primary request path",
+        "metadata": {
+          "error_rate": 0.08
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Timeout after deployment",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "timeout-deploy-06",
+    "title": "Checkout timeout after deploy build-6",
+    "service": "checkout-api",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "request timeouts increased after deployment build-6; latency_ms=1250",
+        "metadata": {
+          "mode": "timeout_after_deploy",
+          "latency_ms": 1250,
+          "last_deploy": "build-6"
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "upstream timeout observed on the primary request path",
+        "metadata": {
+          "error_rate": 0.08
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Timeout after deployment",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "timeout-deploy-07",
+    "title": "Checkout timeout after deploy build-7",
+    "service": "checkout-api",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "request timeouts increased after deployment build-7; latency_ms=1600",
+        "metadata": {
+          "mode": "timeout_after_deploy",
+          "latency_ms": 1600,
+          "last_deploy": "build-7"
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "upstream timeout observed on the primary request path",
+        "metadata": {
+          "error_rate": 0.08
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Timeout after deployment",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "timeout-deploy-08",
+    "title": "Checkout timeout after deploy build-8",
+    "service": "checkout-api",
+    "environment": "staging",
+    "severity": "high",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "request timeouts increased after deployment build-8; latency_ms=2200",
+        "metadata": {
+          "mode": "timeout_after_deploy",
+          "latency_ms": 2200,
+          "last_deploy": "build-8"
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "upstream timeout observed on the primary request path",
+        "metadata": {
+          "error_rate": 0.08
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Timeout after deployment",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "error-spike-01",
+    "title": "API error rate spike variant 1",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "medium",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "error rate spike on primary path; latency_ms=500",
+        "metadata": {
+          "mode": "error_rate_spike",
+          "latency_ms": 500,
+          "error_rate": 0.11
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "cache lookup failures correlate with request errors",
+        "metadata": {
+          "errors": 1
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Error rate spike",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "error-spike-02",
+    "title": "API error rate spike variant 2",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "medium",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "error rate spike on primary path; latency_ms=650",
+        "metadata": {
+          "mode": "error_rate_spike",
+          "latency_ms": 650,
+          "error_rate": 0.12000000000000001
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "cache lookup failures correlate with request errors",
+        "metadata": {
+          "errors": 2
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Error rate spike",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "error-spike-03",
+    "title": "API error rate spike variant 3",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "medium",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "error rate spike on primary path; latency_ms=800",
+        "metadata": {
+          "mode": "error_rate_spike",
+          "latency_ms": 800,
+          "error_rate": 0.13
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "cache lookup failures correlate with request errors",
+        "metadata": {
+          "errors": 3
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Error rate spike",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "error-spike-04",
+    "title": "API error rate spike variant 4",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "medium",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "error rate spike on primary path; latency_ms=950",
+        "metadata": {
+          "mode": "error_rate_spike",
+          "latency_ms": 950,
+          "error_rate": 0.14
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "cache lookup failures correlate with request errors",
+        "metadata": {
+          "errors": 4
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Error rate spike",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "error-spike-05",
+    "title": "API error rate spike variant 5",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "medium",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "error rate spike on primary path; latency_ms=1200",
+        "metadata": {
+          "mode": "error_rate_spike",
+          "latency_ms": 1200,
+          "error_rate": 0.15000000000000002
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "cache lookup failures correlate with request errors",
+        "metadata": {
+          "errors": 5
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Error rate spike",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "error-spike-06",
+    "title": "API error rate spike variant 6",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "medium",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "error rate spike on primary path; latency_ms=1800",
+        "metadata": {
+          "mode": "error_rate_spike",
+          "latency_ms": 1800,
+          "error_rate": 0.16
+        }
+      },
+      {
+        "type": "log",
+        "source": "evaluation-fixture",
+        "snippet": "cache lookup failures correlate with request errors",
+        "metadata": {
+          "errors": 6
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "Error rate spike",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": "refresh_demo_cache"
+  },
+  {
+    "id": "ambiguous-01",
+    "title": "CPU increased briefly and returned to baseline",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "low",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "cpu utilization changed without a sustained failure",
+        "metadata": {
+          "complete": true
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "General incident triage",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": ""
+  },
+  {
+    "id": "ambiguous-02",
+    "title": "Single malformed request",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "low",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "one client request was rejected with validation error",
+        "metadata": {
+          "complete": true
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "General incident triage",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": ""
+  },
+  {
+    "id": "ambiguous-03",
+    "title": "Deployment completed normally",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "low",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "deployment event has no correlated error or latency regression",
+        "metadata": {
+          "complete": true
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "General incident triage",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": ""
+  },
+  {
+    "id": "ambiguous-04",
+    "title": "Log volume changed",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "low",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "log volume increased but service health remains normal",
+        "metadata": {
+          "complete": true
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "General incident triage",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": ""
+  },
+  {
+    "id": "ambiguous-05",
+    "title": "Unknown telemetry gap",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "low",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "telemetry is incomplete and no failure pattern can be established",
+        "metadata": {
+          "complete": false
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "General incident triage",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": ""
+  },
+  {
+    "id": "ambiguous-06",
+    "title": "Low priority notification",
+    "service": "demo-api",
+    "environment": "staging",
+    "severity": "low",
+    "evidence": [
+      {
+        "type": "metric",
+        "source": "evaluation-fixture",
+        "snippet": "informational event without customer impact",
+        "metadata": {
+          "complete": true
+        }
+      }
+    ],
+    "documents": [
+      {
+        "title": "General incident triage",
+        "type": "runbook",
+        "relevance": "matches the observed incident pattern"
+      }
+    ],
+    "expected_action": ""
+  }
+]

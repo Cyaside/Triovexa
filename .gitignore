@@ -19,6 +19,7 @@ ui/playwright-report/
 *.dylib
 
 # Runtime artifacts
+/artifacts/
 *.db
 *.sqlite
 *.sqlite3

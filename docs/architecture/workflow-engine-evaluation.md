@@ -5,8 +5,8 @@ This note records the current evaluation of whether Triovexa still fits an inter
 ## Current Decision
 
 - decision: keep the internal orchestration approach
-- status: accepted for the current action portfolio
-- revisit when the action portfolio or recovery logic grows materially
+- status: accepted for the current action catalog
+- revisit when the action catalog or recovery logic grows materially
 
 ## Why The Current Approach Is Still Enough
 
@@ -33,7 +33,7 @@ This note records the current evaluation of whether Triovexa still fits an inter
 
 - orchestration code becomes harder to read due to retry and compensation branches
 - state transitions become scattered
-- rollback and escalation logic may start overlapping as the action portfolio grows
+- rollback and escalation logic may start overlapping as the action catalog grows
 
 ## Guardrails Until Re-evaluation
 
