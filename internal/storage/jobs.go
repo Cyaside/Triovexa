@@ -17,3 +17,15 @@ type DurableJobStore interface {
 	FailJob(context.Context, string, string, string, time.Time, bool) error
 	RecoverTriageJobs(context.Context) (int, error)
 }
+
+// AtomicIntakeStore persists the accepted incident, its intake audit event,
+// and the first workflow job as one durable unit before a webhook is acknowledged.
+type AtomicIntakeStore interface {
+	CreateIncidentIntake(context.Context, domain.Incident, domain.AuditEvent, domain.WorkflowJob) error
+}
+
+// ConditionalStateStore prevents stale workers from overwriting a newer
+// incident state observed after their work began.
+type ConditionalStateStore interface {
+	CompareAndSwapIncidentState(context.Context, string, domain.IncidentState, domain.IncidentState) (bool, error)
+}

@@ -3,9 +3,13 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"sort"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -16,6 +20,9 @@ import (
 type PostgresStore struct {
 	db *sql.DB
 }
+
+//go:embed migrations/*.sql
+var migrationFS embed.FS
 
 func NewPostgresStore(databaseURL string) (*PostgresStore, error) {
 	db, err := sql.Open("pgx", databaseURL)
@@ -45,167 +52,50 @@ func (s *PostgresStore) Close() error {
 }
 
 func (s *PostgresStore) migrate(ctx context.Context) error {
-	statements := []string{
-		`CREATE TABLE IF NOT EXISTS incidents (
-			id TEXT PRIMARY KEY,
-			external_alert_id TEXT NOT NULL,
-			alert_source TEXT NOT NULL,
-			title TEXT NOT NULL,
-			service_name TEXT NOT NULL,
-			environment TEXT NOT NULL,
-			severity TEXT NOT NULL,
-			state TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL,
-			updated_at TIMESTAMPTZ NOT NULL
-		);`,
-		`CREATE TABLE IF NOT EXISTS audit_events (
-			id TEXT PRIMARY KEY,
-			incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
-			step_name TEXT NOT NULL,
-			status TEXT NOT NULL,
-			details_json JSONB NOT NULL,
-			started_at TIMESTAMPTZ NOT NULL,
-			finished_at TIMESTAMPTZ NOT NULL
-		);`,
-		`CREATE TABLE IF NOT EXISTS evidence_items (
-			id TEXT PRIMARY KEY,
-			incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
-			type TEXT NOT NULL,
-			source TEXT NOT NULL,
-			snippet TEXT NOT NULL,
-			timestamp TIMESTAMPTZ NOT NULL,
-			metadata_json JSONB NOT NULL
-		);`,
-		`CREATE TABLE IF NOT EXISTS document_references (
-			id TEXT PRIMARY KEY,
-			incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
-			document_title TEXT NOT NULL,
-			document_type TEXT NOT NULL,
-			relevance_reason TEXT NOT NULL,
-			snippet TEXT NOT NULL
-		);`,
-		`CREATE TABLE IF NOT EXISTS triage_results (
-			id TEXT PRIMARY KEY,
-			incident_id TEXT NOT NULL UNIQUE REFERENCES incidents(id) ON DELETE CASCADE,
-			summary TEXT NOT NULL,
-			hypotheses_json JSONB NOT NULL,
-			blast_radius TEXT NOT NULL,
-			next_steps_json JSONB NOT NULL,
-			draft_status_update TEXT NOT NULL,
-			confidence_notes TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL
-		);`,
-		`CREATE TABLE IF NOT EXISTS candidate_actions (
-			id TEXT PRIMARY KEY,
-			incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
-			action_type TEXT NOT NULL,
-			target_resource TEXT NOT NULL,
-			parameters_json JSONB NOT NULL,
-			risk_level TEXT NOT NULL,
-			rationale TEXT NOT NULL,
-			evidence_refs_json JSONB NOT NULL,
-			approval_hint TEXT NOT NULL,
-			status TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL
-		);`,
-		`CREATE TABLE IF NOT EXISTS policy_decisions (
-			id TEXT PRIMARY KEY,
-			candidate_action_id TEXT NOT NULL UNIQUE REFERENCES candidate_actions(id) ON DELETE CASCADE,
-			decision TEXT NOT NULL,
-			reason TEXT NOT NULL,
-			approval_required BOOLEAN NOT NULL,
-			policy_rule_ref TEXT NOT NULL,
-			decided_at TIMESTAMPTZ NOT NULL
-		);`,
-		`CREATE TABLE IF NOT EXISTS approval_records (
-			id TEXT PRIMARY KEY,
-			candidate_action_id TEXT NOT NULL REFERENCES candidate_actions(id) ON DELETE CASCADE,
-			approved_by TEXT NOT NULL,
-			decision TEXT NOT NULL,
-			note TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL
-		);`,
-		`ALTER TABLE approval_records ADD COLUMN IF NOT EXISTS action_digest TEXT NOT NULL DEFAULT '';`,
-		`ALTER TABLE approval_records ADD COLUMN IF NOT EXISTS policy_version TEXT NOT NULL DEFAULT '';`,
-		`ALTER TABLE approval_records ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;`,
-		`CREATE TABLE IF NOT EXISTS execution_records (
-			id TEXT PRIMARY KEY,
-			candidate_action_id TEXT NOT NULL REFERENCES candidate_actions(id) ON DELETE CASCADE,
-			idempotency_key TEXT NOT NULL,
-			initiated_by TEXT NOT NULL,
-			executor_type TEXT NOT NULL,
-			status TEXT NOT NULL,
-			started_at TIMESTAMPTZ NOT NULL,
-			finished_at TIMESTAMPTZ NOT NULL,
-			result_json JSONB NOT NULL
-		);`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS execution_records_candidate_action_unique ON execution_records(candidate_action_id);`,
-		`CREATE INDEX IF NOT EXISTS incidents_external_alert_lookup ON incidents(alert_source, external_alert_id, created_at DESC);`,
-		`CREATE INDEX IF NOT EXISTS audit_events_incident_lookup ON audit_events(incident_id, started_at);`,
-		`CREATE INDEX IF NOT EXISTS candidate_actions_incident_lookup ON candidate_actions(incident_id, created_at);`,
-		`CREATE TABLE IF NOT EXISTS workflow_jobs (
-			id TEXT PRIMARY KEY,
-			type TEXT NOT NULL,
-			dedup_key TEXT NOT NULL UNIQUE,
-			payload_json JSONB NOT NULL,
-			status TEXT NOT NULL,
-			attempts INTEGER NOT NULL DEFAULT 0,
-			max_attempts INTEGER NOT NULL DEFAULT 3,
-			available_at TIMESTAMPTZ NOT NULL,
-			lease_owner TEXT NOT NULL DEFAULT '',
-			lease_until TIMESTAMPTZ,
-			last_error TEXT NOT NULL DEFAULT '',
-			created_at TIMESTAMPTZ NOT NULL,
-			updated_at TIMESTAMPTZ NOT NULL
-		);`,
-		`CREATE INDEX IF NOT EXISTS workflow_jobs_claim_lookup ON workflow_jobs(status, available_at, lease_until);`,
-		`CREATE TABLE IF NOT EXISTS users (
-			id TEXT PRIMARY KEY,
-			username TEXT NOT NULL UNIQUE,
-			password_hash TEXT NOT NULL,
-			role TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL
-		);`,
-		`CREATE TABLE IF NOT EXISTS sessions (
-			token_hash TEXT PRIMARY KEY,
-			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			csrf_hash TEXT NOT NULL,
-			expires_at TIMESTAMPTZ NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL
-		);`,
-		`CREATE INDEX IF NOT EXISTS sessions_expiry_lookup ON sessions(expires_at);`,
-		`CREATE TABLE IF NOT EXISTS application_settings (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL,
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-		);`,
-		`CREATE TABLE IF NOT EXISTS verification_results (
-			id TEXT PRIMARY KEY,
-			execution_record_id TEXT NOT NULL UNIQUE REFERENCES execution_records(id) ON DELETE CASCADE,
-			status TEXT NOT NULL,
-			evidence_json JSONB NOT NULL,
-			notes TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL
-		);`,
-		`CREATE TABLE IF NOT EXISTS rollback_records (
-			id TEXT PRIMARY KEY,
-			candidate_action_id TEXT NOT NULL REFERENCES candidate_actions(id) ON DELETE CASCADE,
-			rollback_action_key TEXT NOT NULL,
-			triggered_by TEXT NOT NULL,
-			status TEXT NOT NULL,
-			started_at TIMESTAMPTZ NOT NULL,
-			finished_at TIMESTAMPTZ NOT NULL,
-			result_json JSONB NOT NULL,
-			note TEXT NOT NULL
-		);`,
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+		version TEXT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	for _, statement := range statements {
-		if _, err := s.db.ExecContext(ctx, statement); err != nil {
-			return err
+	entries, err := fs.ReadDir(migrationFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("read embedded migrations: %w", err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		version := strings.TrimSuffix(entry.Name(), ".sql")
+		var applied bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, version).Scan(&applied); err != nil {
+			return fmt.Errorf("check migration %s: %w", version, err)
+		}
+		if applied {
+			continue
+		}
+		body, err := migrationFS.ReadFile("migrations/" + entry.Name())
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", version, err)
+		}
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin migration %s: %w", version, err)
+		}
+		if _, err = tx.ExecContext(ctx, string(body)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("apply migration %s: %w", version, err)
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, version); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("record migration %s: %w", version, err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %s: %w", version, err)
 		}
 	}
-
 	return nil
 }
 
@@ -279,6 +169,34 @@ func (s *PostgresStore) EnqueueJob(ctx context.Context, job domain.WorkflowJob) 
 		ON CONFLICT(dedup_key) DO NOTHING
 	`, job.ID, job.Type, job.DedupKey, job.PayloadJSON, domain.JobQueued, job.Attempts, job.MaxAttempts, job.AvailableAt.UTC(), job.CreatedAt.UTC())
 	return err
+}
+
+func (s *PostgresStore) CreateIncidentIntake(ctx context.Context, incident domain.Incident, event domain.AuditEvent, job domain.WorkflowJob) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO incidents (id, external_alert_id, alert_source, title, service_name, environment, severity, state, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, incident.ID, incident.ExternalAlertID, incident.AlertSource, incident.Title, incident.ServiceName, incident.Environment,
+		incident.Severity, string(incident.State), incident.CreatedAt.UTC(), incident.UpdatedAt.UTC()); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO audit_events (id, incident_id, step_name, status, details_json, started_at, finished_at)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+	`, event.ID, event.IncidentID, event.StepName, event.Status, event.DetailsJSON, event.StartedAt.UTC(), event.FinishedAt.UTC()); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO workflow_jobs (id, type, dedup_key, payload_json, status, attempts, max_attempts, available_at, lease_owner, lease_until, last_error, created_at, updated_at)
+		VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, '', NULL, '', $9, $9)
+	`, job.ID, job.Type, job.DedupKey, job.PayloadJSON, domain.JobQueued, job.Attempts, job.MaxAttempts, job.AvailableAt.UTC(), job.CreatedAt.UTC()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *PostgresStore) ClaimJob(ctx context.Context, workerID string, leaseUntil time.Time) (domain.WorkflowJob, error) {
@@ -404,6 +322,21 @@ func (s *PostgresStore) UpdateIncidentState(ctx context.Context, incidentID stri
 	}
 
 	return nil
+}
+
+func (s *PostgresStore) CompareAndSwapIncidentState(ctx context.Context, incidentID string, expected, next domain.IncidentState) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE incidents SET state = $1, updated_at = $2
+		WHERE id = $3 AND state = $4
+	`, string(next), time.Now().UTC(), incidentID, string(expected))
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
 }
 
 func (s *PostgresStore) GetIncident(ctx context.Context, incidentID string) (domain.Incident, error) {

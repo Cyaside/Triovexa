@@ -334,7 +334,15 @@ func (s *Service) transitionIncidentState(ctx context.Context, incidentRecord do
 		return domain.Incident{}, fmt.Errorf("invalid incident state transition from %q to %q", incidentRecord.State, next)
 	}
 
-	if err := s.repository.UpdateIncidentState(ctx, incidentRecord.ID, next); err != nil {
+	if conditional, ok := s.repository.(storage.ConditionalStateStore); ok {
+		updated, err := conditional.CompareAndSwapIncidentState(ctx, incidentRecord.ID, incidentRecord.State, next)
+		if err != nil {
+			return domain.Incident{}, err
+		}
+		if !updated {
+			return domain.Incident{}, fmt.Errorf("incident state changed while transitioning from %q to %q", incidentRecord.State, next)
+		}
+	} else if err := s.repository.UpdateIncidentState(ctx, incidentRecord.ID, next); err != nil {
 		return domain.Incident{}, err
 	}
 

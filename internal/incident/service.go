@@ -80,7 +80,7 @@ func NewService(
 }
 
 func (s *Service) IngestGrafanaWebhook(ctx context.Context, payload alerting.GrafanaWebhookPayload) (domain.Incident, error) {
-	incident, shouldRunTriage, err := s.acceptGrafanaWebhook(ctx, payload)
+	incident, shouldRunTriage, err := s.acceptGrafanaWebhook(ctx, payload, false)
 	if err != nil {
 		return domain.Incident{}, err
 	}
@@ -101,7 +101,7 @@ func (s *Service) IngestGrafanaWebhook(ctx context.Context, payload alerting.Gra
 }
 
 func (s *Service) IngestGrafanaWebhookAsync(ctx context.Context, payload alerting.GrafanaWebhookPayload) (domain.Incident, error) {
-	incident, shouldRunTriage, err := s.acceptGrafanaWebhook(ctx, payload)
+	incident, shouldRunTriage, err := s.acceptGrafanaWebhook(ctx, payload, true)
 	if err != nil {
 		return domain.Incident{}, err
 	}
@@ -156,7 +156,7 @@ func (s *Service) ProcessWorkflowJob(ctx context.Context, job domain.WorkflowJob
 	return err
 }
 
-func (s *Service) acceptGrafanaWebhook(ctx context.Context, payload alerting.GrafanaWebhookPayload) (domain.Incident, bool, error) {
+func (s *Service) acceptGrafanaWebhook(ctx context.Context, payload alerting.GrafanaWebhookPayload, atomicAsync bool) (domain.Incident, bool, error) {
 	normalized, err := alerting.NormalizeGrafanaPayload(payload)
 	if err != nil {
 		return domain.Incident{}, false, fmt.Errorf("normalize grafana payload: %w", err)
@@ -220,13 +220,6 @@ func (s *Service) acceptGrafanaWebhook(ctx context.Context, payload alerting.Gra
 		UpdatedAt:       now,
 	}
 
-	if err := s.repository.CreateIncident(ctx, incident); err != nil {
-		return domain.Incident{}, false, fmt.Errorf("create incident: %w", err)
-	}
-	if s.metrics != nil {
-		s.metrics.IncIncidentIngested()
-	}
-
 	details, err := json.Marshal(map[string]any{
 		"alert_source":      normalized.AlertSource,
 		"external_alert_id": normalized.ExternalAlertID,
@@ -248,6 +241,31 @@ func (s *Service) acceptGrafanaWebhook(ctx context.Context, payload alerting.Gra
 		DetailsJSON: string(details),
 		StartedAt:   now,
 		FinishedAt:  now,
+	}
+	if atomicAsync && s.isReadOnlyTriageConfigured() {
+		if intake, ok := s.repository.(storage.AtomicIntakeStore); ok {
+			incident.State = domain.IncidentStateTriaging
+			incident.UpdatedAt = now
+			job := domain.WorkflowJob{
+				ID: uuid.NewString(), Type: domain.JobTypeTriage, DedupKey: "triage:" + incident.ID,
+				PayloadJSON: fmt.Sprintf(`{"incident_id":%q}`, incident.ID), Status: domain.JobQueued,
+				MaxAttempts: 3, AvailableAt: now, CreatedAt: now, UpdatedAt: now,
+			}
+			if err := intake.CreateIncidentIntake(ctx, incident, auditEvent, job); err != nil {
+				return domain.Incident{}, false, fmt.Errorf("persist atomic incident intake: %w", err)
+			}
+			if s.metrics != nil {
+				s.metrics.IncIncidentIngested()
+			}
+			return incident, false, nil
+		}
+	}
+
+	if err := s.repository.CreateIncident(ctx, incident); err != nil {
+		return domain.Incident{}, false, fmt.Errorf("create incident: %w", err)
+	}
+	if s.metrics != nil {
+		s.metrics.IncIncidentIngested()
 	}
 
 	if err := s.repository.AddAuditEvent(ctx, auditEvent); err != nil {
@@ -464,7 +482,15 @@ func (s *Service) transitionIncidentState(ctx context.Context, incident domain.I
 		return domain.Incident{}, fmt.Errorf("invalid incident state transition from %q to %q", incident.State, next)
 	}
 
-	if err := s.repository.UpdateIncidentState(ctx, incident.ID, next); err != nil {
+	if conditional, ok := s.repository.(storage.ConditionalStateStore); ok {
+		updated, err := conditional.CompareAndSwapIncidentState(ctx, incident.ID, incident.State, next)
+		if err != nil {
+			return domain.Incident{}, err
+		}
+		if !updated {
+			return domain.Incident{}, fmt.Errorf("incident state changed while transitioning from %q to %q", incident.State, next)
+		}
+	} else if err := s.repository.UpdateIncidentState(ctx, incident.ID, next); err != nil {
 		return domain.Incident{}, err
 	}
 

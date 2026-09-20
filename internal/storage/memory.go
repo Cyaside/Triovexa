@@ -144,6 +144,22 @@ func (s *MemoryStore) UpdateIncidentState(_ context.Context, incidentID string, 
 	return nil
 }
 
+func (s *MemoryStore) CompareAndSwapIncidentState(_ context.Context, incidentID string, expected, next domain.IncidentState) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	incident, ok := s.incidents[incidentID]
+	if !ok {
+		return false, ErrNotFound
+	}
+	if incident.State != expected {
+		return false, nil
+	}
+	incident.State = next
+	incident.UpdatedAt = time.Now().UTC()
+	s.incidents[incidentID] = incident
+	return true, nil
+}
+
 func (s *MemoryStore) GetIncident(_ context.Context, incidentID string) (domain.Incident, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
