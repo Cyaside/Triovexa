@@ -168,7 +168,10 @@ func main() {
 		} else if recovered > 0 {
 			logger.Info("recovered triage jobs", slog.Int("count", recovered))
 		}
-		workflow.NewRunner(jobStore, incidentService.ProcessWorkflowJob, logger, 2).Start(appCtx)
+		// A triage job can make one provider call for triage and another for
+		// remediation. Keep its lease and context alive for both calls plus the
+		// final transactional writes.
+		workflow.NewRunnerWithLease(jobStore, incidentService.ProcessWorkflowJob, logger, 2, 2*cfg.LLMTimeout+time.Minute).Start(appCtx)
 	}
 	server := apphttp.NewServerWithTelemetry(
 		cfg,

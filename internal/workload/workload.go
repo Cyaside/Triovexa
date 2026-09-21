@@ -21,6 +21,7 @@ import (
 )
 
 const stream = "triovexa:jobs"
+const faultEpisodeKey = "triovexa:fault:episode"
 
 func RedisClient(address string) *redis.Client { return redis.NewClient(&redis.Options{Addr: address}) }
 
@@ -152,11 +153,12 @@ func (s *Supervisor) Handler(ctx context.Context) http.Handler {
 		failures, _ := s.client.Get(r.Context(), "triovexa:stats:errors").Int64()
 		heartbeat, _ := s.client.Get(r.Context(), "triovexa:worker:heartbeat").Result()
 		paused, _ := s.client.Get(r.Context(), "triovexa:consumer:paused").Bool()
+		episode, _ := s.client.Get(r.Context(), faultEpisodeKey).Int64()
 		fresh := false
 		if parsed, err := time.Parse(time.RFC3339Nano, heartbeat); err == nil {
 			fresh = time.Since(parsed) < 10*time.Second
 		}
-		writeJSON(w, 200, map[string]any{"target": "queue-worker", "source": "redis-streams", "timestamp": time.Now().UTC(), "complete": true, "worker_healthy": fresh, "consumer_paused": paused, "queue_backlog": backlog, "jobs_processed": processed, "jobs_produced": produced, "errors": failures, "generation": s.generation.Load()})
+		writeJSON(w, 200, map[string]any{"target": "queue-worker", "source": "redis-streams", "timestamp": time.Now().UTC(), "complete": true, "worker_healthy": fresh, "consumer_paused": paused, "queue_backlog": backlog, "jobs_processed": processed, "jobs_produced": produced, "errors": failures, "generation": s.generation.Load(), "episode": episode})
 	})
 	mux.HandleFunc("/operations", func(w http.ResponseWriter, r *http.Request) {
 		if !s.authorized(r) {
@@ -245,6 +247,9 @@ func (s *Supervisor) Handler(ctx context.Context) http.Handler {
 			http.Error(w, "invalid fault mode", 400)
 			return
 		}
+		if request.Mode != "healthy" {
+			_ = s.client.Incr(r.Context(), faultEpisodeKey).Err()
+		}
 		_ = s.client.Set(r.Context(), "triovexa:fault", request.Mode, 0).Err()
 		writeJSON(w, 200, map[string]any{"mode": request.Mode})
 	})
@@ -255,13 +260,14 @@ func (s *Supervisor) Handler(ctx context.Context) http.Handler {
 		failures, _ := s.client.Get(r.Context(), "triovexa:stats:errors").Int64()
 		heartbeat, _ := s.client.Get(r.Context(), "triovexa:worker:heartbeat").Result()
 		paused, _ := s.client.Get(r.Context(), "triovexa:consumer:paused").Bool()
+		episode, _ := s.client.Get(r.Context(), faultEpisodeKey).Int64()
 		workerHealthy := 0
 		if parsed, err := time.Parse(time.RFC3339Nano, heartbeat); err == nil && time.Since(parsed) < 10*time.Second {
 			workerHealthy = 1
 		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "triovexa_queue_backlog %d\ntriovexa_jobs_processed_total %d\ntriovexa_jobs_produced_total %d\ntriovexa_worker_errors_total %d\ntriovexa_worker_healthy %d\ntriovexa_consumer_paused %d\ntriovexa_worker_generation %d\n",
-			backlog, processed, produced, failures, workerHealthy, boolToMetric(paused), s.generation.Load())
+		fmt.Fprintf(w, "triovexa_queue_backlog{episode=%q} %d\ntriovexa_jobs_processed_total %d\ntriovexa_jobs_produced_total %d\ntriovexa_worker_errors_total %d\ntriovexa_worker_healthy %d\ntriovexa_consumer_paused %d\ntriovexa_worker_generation %d\n",
+			strconv.FormatInt(episode, 10), backlog, processed, produced, failures, workerHealthy, boolToMetric(paused), s.generation.Load())
 	})
 	return mux
 }

@@ -23,13 +23,20 @@ type Runner struct {
 }
 
 func NewRunner(store storage.DurableJobStore, handler Handler, logger *slog.Logger, workers int) *Runner {
+	return NewRunnerWithLease(store, handler, logger, workers, 45*time.Second)
+}
+
+func NewRunnerWithLease(store storage.DurableJobStore, handler Handler, logger *slog.Logger, workers int, lease time.Duration) *Runner {
 	if workers <= 0 {
 		workers = 2
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Runner{store: store, handler: handler, logger: logger, workers: workers, lease: 45 * time.Second, pollInterval: 500 * time.Millisecond}
+	if lease <= 0 {
+		lease = 45 * time.Second
+	}
+	return &Runner{store: store, handler: handler, logger: logger, workers: workers, lease: lease, pollInterval: 500 * time.Millisecond}
 }
 
 func (r *Runner) Start(ctx context.Context) {

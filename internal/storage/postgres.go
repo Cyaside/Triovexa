@@ -276,7 +276,10 @@ func (s *PostgresStore) RecoverTriageJobs(ctx context.Context) (int, error) {
 		       jsonb_build_object('incident_id', i.id), 'queued', 0, 3, now(), '', '', now(), now()
 		FROM incidents i
 		WHERE i.state = 'triaging'
-		ON CONFLICT(dedup_key) DO NOTHING
+		ON CONFLICT(dedup_key) DO UPDATE
+		SET status = 'queued', attempts = 0, available_at = now(), lease_owner = '', lease_until = NULL,
+		    last_error = '', updated_at = now()
+		WHERE workflow_jobs.status = 'dead_letter'
 	`)
 	if err != nil {
 		return 0, err

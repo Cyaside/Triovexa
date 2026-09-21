@@ -17,6 +17,18 @@ type stubCollector struct {
 	err      error
 }
 
+type sequenceCollector struct {
+	calls int
+}
+
+func (s *sequenceCollector) Collect(_ context.Context, incident domain.Incident) ([]domain.EvidenceItem, error) {
+	s.calls++
+	return []domain.EvidenceItem{{
+		ID: incident.ID + "-evidence-" + string(rune('0'+s.calls)), IncidentID: incident.ID,
+		Type: "metric", Source: "workload-control", Timestamp: time.Now().UTC(), MetadataJSON: `{"complete":true}`,
+	}}, nil
+}
+
 func TestSameFingerprintCreatesNewEpisodeAfterTerminalIncident(t *testing.T) {
 	repository := storage.NewMemoryStore()
 	service := NewService(repository, nil, nil, nil, nil, nil)
@@ -74,6 +86,47 @@ func (s stubGenerator) Generate(context.Context, domain.Incident, []domain.Evide
 type stubActionGenerator struct {
 	actions []domain.CandidateAction
 	err     error
+}
+
+type capturingActionGenerator struct {
+	evidence []domain.EvidenceItem
+	action   domain.CandidateAction
+}
+
+func (s *capturingActionGenerator) Generate(_ context.Context, _ domain.Incident, _ domain.TriageResult, evidence []domain.EvidenceItem, _ []domain.DocumentReference) ([]domain.CandidateAction, error) {
+	s.evidence = append([]domain.EvidenceItem(nil), evidence...)
+	return []domain.CandidateAction{s.action}, nil
+}
+
+func TestRunReadOnlyTriageRefreshesEvidenceBeforeActionGeneration(t *testing.T) {
+	repository := storage.NewMemoryStore()
+	now := time.Now().UTC()
+	incidentRecord := domain.Incident{
+		ID: uuid.NewString(), ExternalAlertID: "refresh-action-evidence", AlertSource: "grafana",
+		Title: "worker stall", ServiceName: "queue-worker", Environment: "staging", Severity: "high",
+		State: domain.IncidentStateDetected, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.CreateIncident(context.Background(), incidentRecord); err != nil {
+		t.Fatal(err)
+	}
+	collector := &sequenceCollector{}
+	actions := &capturingActionGenerator{action: domain.CandidateAction{
+		ID: uuid.NewString(), IncidentID: incidentRecord.ID, ActionType: "restart_worker",
+		Status: domain.CandidateActionStatusAwaitingApproval, CreatedAt: now,
+	}}
+	service := NewService(repository, collector, stubRetriever{}, stubGenerator{result: domain.TriageResult{
+		ID: uuid.NewString(), IncidentID: incidentRecord.ID, Summary: "worker stalled", CreatedAt: now,
+	}}, actions, nil)
+
+	if _, err := service.runReadOnlyTriage(context.Background(), incidentRecord); err != nil {
+		t.Fatalf("runReadOnlyTriage() error = %v", err)
+	}
+	if collector.calls != 2 {
+		t.Fatalf("collector calls = %d, want 2", collector.calls)
+	}
+	if len(actions.evidence) != 1 || actions.evidence[0].ID != incidentRecord.ID+"-evidence-2" {
+		t.Fatalf("action evidence = %#v, want refreshed snapshot", actions.evidence)
+	}
 }
 
 func (s stubActionGenerator) Generate(context.Context, domain.Incident, domain.TriageResult, []domain.EvidenceItem, []domain.DocumentReference) ([]domain.CandidateAction, error) {

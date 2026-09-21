@@ -14,7 +14,7 @@ const (
 	defaultHTTPHost        = "127.0.0.1"
 	defaultEnvironment     = "local"
 	defaultReadTimeout     = 5 * time.Second
-	defaultWriteTimeout    = 150 * time.Second
+	defaultWriteTimeout    = 310 * time.Second
 	defaultIdleTimeout     = 30 * time.Second
 	defaultShutdownTimeout = 10 * time.Second
 )
@@ -107,7 +107,7 @@ func Load() Config {
 		LLMAPIKey:                       getEnv("LLM_API_KEY", ""),
 		LLMModel:                        getEnv("LLM_MODEL", ""),
 		LLMJSONMode:                     getBoolEnv("LLM_JSON_MODE", true),
-		LLMTimeout:                      getDurationEnv("LLM_TIMEOUT", 60*time.Second),
+		LLMTimeout:                      getDurationEnv("LLM_TIMEOUT", 5*time.Minute),
 		LLMAllowHosts:                   splitCSVEnv("LLM_ALLOW_HOSTS"),
 		CredentialKeyPath:               getEnv("CREDENTIAL_KEY_PATH", DefaultCredentialKeyPath()),
 		CredentialEncryptionKey:         getEnv("CREDENTIAL_ENCRYPTION_KEY", ""),

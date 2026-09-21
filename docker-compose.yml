@@ -59,7 +59,7 @@ services:
     environment:
       HTTP_HOST: 0.0.0.0
       HTTP_PORT: "8080"
-      HTTP_WRITE_TIMEOUT: 150s
+      HTTP_WRITE_TIMEOUT: 310s
       APP_ENV: local
       DEPLOYMENT_MODE: local-demo
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/triovexa?sslmode=disable
@@ -71,7 +71,7 @@ services:
       ALERTMANAGER_BASE_URL: http://alertmanager:9093
       LOKI_BASE_URL: http://loki:3100
       REASONING_MODE: llm
-      LLM_TIMEOUT: 60s
+      LLM_TIMEOUT: 5m
       CREDENTIAL_KEY_PATH: /app/runtime/credential.key
       OBSERVABILITY_MODE: demo
     volumes:

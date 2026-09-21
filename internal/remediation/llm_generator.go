@@ -50,10 +50,23 @@ func (g *LLMGenerator) Generate(
 	systemPrompt := "You select candidate incident-response actions. Choose ONLY actions from the supplied catalog. Return ONLY valid JSON in English without Markdown."
 	userPrompt := buildActionPrompt(incident, triage, evidence, documents, g.catalog)
 
-	content, err := g.client.CompleteJSON(ctx, []ai.ChatMessage{
+	messages := []ai.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
-	})
+	}
+	var content string
+	var providerMetadata string
+	var err error
+	if detailed, ok := g.client.(ai.DetailedJSONCompleter); ok {
+		completion, completionErr := detailed.CompleteJSONDetailed(ctx, messages)
+		err = completionErr
+		content = completion.Content
+		if completionErr == nil {
+			providerMetadata = fmt.Sprintf("provider=%s model=%s latency_ms=%d prompt_tokens=%d completion_tokens=%d prompt_version=remediation-v1", completion.Provider, completion.Model, completion.Latency.Milliseconds(), completion.Usage.PromptTokens, completion.Usage.CompletionTokens)
+		}
+	} else {
+		content, err = g.client.CompleteJSON(ctx, messages)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +120,9 @@ func (g *LLMGenerator) Generate(
 		}
 
 		action = helper.validateAction(incident, action)
+		if providerMetadata != "" {
+			action.ApprovalHint = strings.TrimSpace(action.ApprovalHint + "; " + providerMetadata)
+		}
 		actions = append(actions, action)
 		if len(actions) >= 4 {
 			break

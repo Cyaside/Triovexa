@@ -392,6 +392,29 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 		return incident, nil
 	}
 
+	// Triage generation may use most of the evidence freshness window when an
+	// external provider is slow. Collect a new snapshot for action selection so
+	// approval and dispatch remain bound to current workload state.
+	actionEvidence := evidence
+	refreshedAt := s.now()
+	if refreshed, refreshErr := s.collector.Collect(ctx, incident); refreshErr != nil {
+		if auditErr := s.audit(ctx, incident.ID, "action_evidence_refresh", "partial_failure", map[string]any{
+			"error": refreshErr.Error(),
+		}, refreshedAt, s.now()); auditErr != nil {
+			return domain.Incident{}, fmt.Errorf("audit action evidence refresh failure: %w", auditErr)
+		}
+	} else {
+		if err := s.repository.SaveEvidenceItems(ctx, refreshed); err != nil {
+			return domain.Incident{}, fmt.Errorf("save refreshed action evidence: %w", err)
+		}
+		if err := s.audit(ctx, incident.ID, "action_evidence_refresh", "completed", map[string]any{
+			"evidence_count": len(refreshed),
+		}, refreshedAt, s.now()); err != nil {
+			return domain.Incident{}, fmt.Errorf("audit action evidence refresh: %w", err)
+		}
+		actionEvidence = refreshed
+	}
+
 	startedAt := s.now()
 	if err := s.audit(ctx, incident.ID, "action_generation", "started", map[string]any{
 		"catalog_mode": actionCatalogMode(s.actions),
@@ -399,7 +422,7 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 		return domain.Incident{}, fmt.Errorf("audit action generation start: %w", err)
 	}
 
-	actions, err := s.actions.Generate(ctx, incident, result, evidence, documents)
+	actions, err := s.actions.Generate(ctx, incident, result, actionEvidence, documents)
 	if err != nil {
 		if s.metrics != nil {
 			s.metrics.ObserveTriageStage("action_generation", "failed", s.now().Sub(startedAt))
