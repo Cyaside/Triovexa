@@ -2,7 +2,7 @@
 
 Triovexa is an approval-gated incident response system for stalled workers and queue backlogs. It receives Prometheus alerts through Alertmanager, gathers workload evidence, proposes an allowlisted remediation, records an operator approval, executes the action through a constrained supervisor API, and verifies recovery from telemetry.
 
-The repository includes a real local workload: a producer and Redis Streams worker, PostgreSQL persistence, Prometheus, Alertmanager, Grafana, Loki with Grafana Alloy log collection, and a React operator console. The reasoning layer works without an API key through deterministic heuristics and can use an OpenAI-compatible Chat Completions endpoint.
+The repository includes a real local workload: a producer and Redis Streams worker, PostgreSQL persistence, Prometheus, Alertmanager, Grafana, Loki with Grafana Alloy log collection, and a React operator console. Incident reasoning uses a configured OpenAI-compatible Chat Completions endpoint; deterministic reasoning remains available for development tests and provider-failure fallback.
 
 ## Proven path
 
@@ -22,19 +22,32 @@ worker stall
 
 The latest checked-in evidence and its limits are described in [docs/evidence/README.md](docs/evidence/README.md). The runner uses only project-scoped Compose resources and refuses to start when port 8080 is occupied by another process.
 
+The checked-in provider-backed run records provider and model metadata for both triage and remediation and fails if either stage falls back to deterministic reasoning.
+
 ## Run the complete demo
 
 Requirements: Docker Desktop, Docker Compose, and PowerShell 7 or Windows PowerShell 5.1.
 
+Start the stack once, then configure the API base URL, model, and API key on the **Connections** page. Subsequent runs retain the encrypted credential and use the provider-backed path:
+
 ```powershell
-./scripts/demo.ps1 -Reset
+./scripts/demo.ps1
 ```
 
-The command builds the images, starts the stack, injects the bounded fault, completes the approval and execution flow, verifies recovery, and writes machine-readable evidence under `artifacts/e2e/`. It leaves the stack running for inspection:
+The command requires a connected provider in `llm` mode, builds the images, starts the stack, injects the bounded fault, completes the approval and execution flow, verifies recovery, and writes machine-readable evidence under `artifacts/e2e/`. It leaves the stack running for inspection:
 
 - Operator console: <http://127.0.0.1:8080/ui/incidents>
 - Grafana: <http://127.0.0.1:3300>
 - Readiness: <http://127.0.0.1:8080/health>
+
+After a successful run, record the inspected provider-backed incident:
+
+```powershell
+cd ui
+npm run record:demo
+```
+
+The recorder writes `artifacts/demo/triovexa-demo.webm` and metadata containing the provider, model, incident ID, and state. It refuses to record fallback output.
 
 Stop only this project with:
 
@@ -79,6 +92,7 @@ The adapter uses the Chat Completions contract. Configure an API root, model, AP
 - PostgreSQL migrations are versioned in `schema_migrations`.
 - Webhook intake stores the incident, audit event, and triage job in one transaction.
 - Workflow jobs use leases, bounded retries, conditional transitions, and startup recovery.
+- The job lease covers both provider calls, while action evidence is refreshed after triage so the 60-second dispatch freshness guard remains effective.
 - Execution claims and approval transitions are atomic, idempotent, and scoped to an allowlisted target.
 - Browser mutations require an authenticated session, CSRF protection, and a valid origin in internal mode.
 - Webhooks have a separate credential, request-size bound, and rate limit.
@@ -88,18 +102,18 @@ The adapter uses the Chat Completions contract. Configure an API root, model, AP
 
 ## Evaluation
 
-Run the fixed 30-case heuristic baseline:
+Run the fixed 30-case deterministic development baseline:
 
 ```powershell
 go run ./cmd/evaluator
 ```
 
-Run a provider three times per case:
+Run a configured OpenAI-compatible model three times per case:
 
 ```powershell
 $env:TRIOVEXA_EVAL_API_KEY = "..."
 go run ./cmd/evaluator -mode provider -provider openai-compatible `
-  -base-url https://provider.example/v1 -model model-name -repeats 3 `
+  -base-url https://api.example.com/v1 -model your-model -repeats 3 `
   -out evaluation/results/provider-model.json
 ```
 
@@ -127,4 +141,5 @@ CI also runs the Go race detector, real PostgreSQL and Redis integration tests, 
 ## Current limits
 
 Triovexa is a release candidate for local and small internal staging use. It is single-tenant and supports one bounded Redis workload integration. It does not claim general autonomous production remediation or compatibility with every API that describes itself as OpenAI-compatible.
+
 

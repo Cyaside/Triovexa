@@ -25,7 +25,7 @@ flowchart LR
 
 Alertmanager sends a bounded Grafana-compatible payload. Triovexa rate-limits and authenticates the webhook, normalizes every `alerts[]` member, distinguishes duplicate deliveries from new episodes, and stores the incident, intake audit event, and triage job in one PostgreSQL transaction before acknowledging the request.
 
-Two database workers claim jobs with leases. Conditional state transitions prevent an old job from overwriting newer incident state. Bounded retries and startup lease recovery preserve accepted work across process restarts.
+Two database workers claim jobs with leases sized for both provider calls and the final writes. Conditional state transitions prevent an old job from overwriting newer incident state. Bounded retries and startup recovery preserve accepted work across process restarts, including jobs that exhausted their attempts while the incident still requires triage.
 
 ## Decision path
 
@@ -33,7 +33,7 @@ Evidence collection, document retrieval, triage, action generation, and policy e
 
 The provider API key is encrypted with AES-256-GCM before persistence. PostgreSQL stores only ciphertext and non-secret connection metadata; the encryption key is kept in a separate runtime volume or injected by the deployment environment.
 
-Every proposal passes the same catalog validation. Approval binds the exact action type, parameters, target, policy version, and evidence digest for 15 minutes. The server revalidates this snapshot and evidence freshness immediately before dispatch.
+Every proposal passes the same catalog validation. Triovexa refreshes workload evidence after triage and uses that snapshot for action generation. Approval binds the exact action type, parameters, target, policy version, and evidence digest for 15 minutes. The server revalidates this snapshot and its 60-second freshness limit immediately before dispatch.
 
 ## Execution and reconciliation
 

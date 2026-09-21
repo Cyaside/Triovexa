@@ -10,15 +10,16 @@ Run the deterministic baseline:
 go run ./cmd/evaluator
 ```
 
-Run a provider three times per case:
+Run a configured OpenAI-compatible model three times per case:
 
 ```powershell
 $env:TRIOVEXA_EVAL_API_KEY = "..."
 go run ./cmd/evaluator -mode provider -provider openai-compatible `
-  -base-url https://api.example.com/v1 -model example-model -repeats 3 `
-  -out evaluation/results/example-model.json
+  -base-url https://api.example.com/v1 -model your-model -repeats 3 `
+  -out evaluation/results/provider-model.json
 ```
 
-Supply the endpoint's `-base-url` and `-model`. Use the same cases, repeats, and prompt version when comparing reports.
+Replace the endpoint and model when evaluating another Chat Completions-compatible service. Use the same cases, repeats, and prompt version when comparing reports.
 
 The committed heuristic result is a regression baseline for these designed cases, not an estimate of real-world incident accuracy. Provider reports are not checked in until they have been run against a named model with a real credential.
+
