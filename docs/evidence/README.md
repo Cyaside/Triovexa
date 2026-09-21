@@ -1,6 +1,6 @@
 # End-to-end evidence
 
-The checked-in record [`worker-stall-e2e.json`](worker-stall-e2e.json) is the machine-readable output of `scripts/demo.ps1 -Reset` on 2026-09-20 UTC. All seven gates passed:
+The checked-in record [`worker-stall-e2e.json`](worker-stall-e2e.json) is the machine-readable output of `scripts/demo.ps1 -Reset` on 2026-09-21 UTC. Run `20260921T001541Z` tested commit `6e6a413`; all seven gates passed:
 
 | Gate | Observed result |
 | --- | --- |
@@ -12,7 +12,6 @@ The checked-in record [`worker-stall-e2e.json`](worker-stall-e2e.json) is the ma
 | E2E-06 | Approval and execution changed the real worker generation from 1 to 2. |
 | E2E-07 | Verification observed backlog reduction and three consecutive healthy samples. |
 
-The run lasted 132 seconds. The final workload state had backlog `0`, generation `2`, worker healthy, and produced jobs equal to processed jobs. The verification trace contains the individual observations rather than relying on the supervisor's HTTP response alone.
+The run lasted 122.6 seconds. The final workload state had backlog `0`, generation `2`, worker healthy, and `98` produced jobs equal to `98` processed jobs. The verification trace stores four samples (`65 → 10 → 0 → 0`) and requires three consecutive recovery observations rather than relying on the supervisor's HTTP response alone.
 
 This evidence proves the included Compose scenario on the tested machine. It does not establish general production reliability, multi-tenant isolation, or compatibility with workloads outside the allowlisted supervisor contract.
-

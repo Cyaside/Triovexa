@@ -1,0 +1,324 @@
+{
+    "schema_version":  1,
+    "run_id":  "20260921T001541Z",
+    "scenario":  "worker-stall-alert-approval-restart-recovery",
+    "started_at":  "2026-09-21T00:15:41.9550223Z",
+    "finished_at":  "2026-09-21T00:17:44.5616930Z",
+    "status":  "passed",
+    "error":  null,
+    "project":  "triovexa-e2e",
+    "git_commit":  "6e6a413b84cec203b324f171e988567f608f8db6",
+    "steps":  [
+                  {
+                      "id":  "E2E-01",
+                      "title":  "Compose stack passed dependency-aware readiness",
+                      "status":  "passed",
+                      "observed_at":  "2026-09-21T00:16:02.5127835Z",
+                      "evidence":  {
+                                       "status":  "ok",
+                                       "dependencies":  {
+                                                            "postgresql":  {
+                                                                               "status":  "ok",
+                                                                               "latency_ms":  0
+                                                                           },
+                                                            "redis":  {
+                                                                          "status":  "ok",
+                                                                          "latency_ms":  2
+                                                                      },
+                                                            "supervisor":  {
+                                                                               "status":  "ok",
+                                                                               "latency_ms":  2
+                                                                           }
+                                                        }
+                                   }
+                  },
+                  {
+                      "id":  "E2E-02",
+                      "title":  "Real Redis Streams worker established a healthy baseline",
+                      "status":  "passed",
+                      "observed_at":  "2026-09-21T00:16:02.7451190Z",
+                      "evidence":  {
+                                       "complete":  true,
+                                       "consumer_paused":  false,
+                                       "errors":  0,
+                                       "generation":  1,
+                                       "jobs_processed":  2,
+                                       "jobs_produced":  2,
+                                       "queue_backlog":  0,
+                                       "source":  "redis-streams",
+                                       "target":  "queue-worker",
+                                       "timestamp":  "2026-09-21T00:16:02.298418808Z",
+                                       "worker_healthy":  true
+                                   }
+                  },
+                  {
+                      "id":  "E2E-03",
+                      "title":  "Bounded worker-stall fault created a real queue backlog",
+                      "status":  "passed",
+                      "observed_at":  "2026-09-21T00:16:27.0909674Z",
+                      "evidence":  {
+                                       "complete":  true,
+                                       "consumer_paused":  false,
+                                       "errors":  0,
+                                       "generation":  1,
+                                       "jobs_processed":  3,
+                                       "jobs_produced":  25,
+                                       "queue_backlog":  22,
+                                       "source":  "redis-streams",
+                                       "target":  "queue-worker",
+                                       "timestamp":  "2026-09-21T00:16:26.844261414Z",
+                                       "worker_healthy":  true
+                                   }
+                  },
+                  {
+                      "id":  "E2E-04",
+                      "title":  "Prometheus fired and Alertmanager delivered the incident",
+                      "status":  "passed",
+                      "observed_at":  "2026-09-21T00:17:12.4637260Z",
+                      "evidence":  {
+                                       "alert":  {
+                                                     "labels":  {
+                                                                    "alertname":  "TriovexaQueueBacklogHigh",
+                                                                    "environment":  "staging",
+                                                                    "instance":  "workload-supervisor:8091",
+                                                                    "job":  "queue-workload",
+                                                                    "service":  "queue-worker",
+                                                                    "severity":  "high"
+                                                                },
+                                                     "annotations":  {
+                                                                         "description":  "More than twenty jobs remain in the workload stream.",
+                                                                         "summary":  "Queue backlog is increasing"
+                                                                     },
+                                                     "state":  "firing",
+                                                     "activeAt":  "2026-09-21T00:16:31.343705222Z",
+                                                     "value":  "4.9e+01"
+                                                 },
+                                       "incident":  {
+                                                        "ID":  "c7254049-06d6-4941-8e8e-1eb6f85d22de",
+                                                        "ExternalAlertID":  "366c72279ab89421",
+                                                        "AlertSource":  "grafana",
+                                                        "Title":  "Queue backlog is increasing",
+                                                        "ServiceName":  "queue-worker",
+                                                        "Environment":  "staging",
+                                                        "Severity":  "high",
+                                                        "State":  "awaiting_approval",
+                                                        "CreatedAt":  "2026-09-21T00:17:11.812736Z",
+                                                        "UpdatedAt":  "2026-09-21T00:17:11.920296Z"
+                                                    }
+                                   }
+                  },
+                  {
+                      "id":  "E2E-05",
+                      "title":  "Heuristic triage proposed an allowlisted worker restart",
+                      "status":  "passed",
+                      "observed_at":  "2026-09-21T00:17:12.6675369Z",
+                      "evidence":  {
+                                       "triage":  {
+                                                      "ID":  "30f82c46-13b7-4751-aa03-c4b5741eb52b",
+                                                      "IncidentID":  "c7254049-06d6-4941-8e8e-1eb6f85d22de",
+                                                      "Summary":  "queue-worker in staging has a growing job backlog and an unhealthy worker. Most relevant document: worker stall with rollback.",
+                                                      "Hypotheses":  [
+                                                                         "the demo worker is stalled or crash-looping, leaving queued jobs unprocessed",
+                                                                         "the latest deployment may have introduced a payload incompatibility in the worker"
+                                                                     ],
+                                                      "BlastRadius":  "the primary blast radius is background processing, but synchronous requests may also degrade if the backlog continues to grow",
+                                                      "NextSteps":  [
+                                                                        "check worker health and restart patterns in the logs",
+                                                                        "compare queue backlog before and after the alert",
+                                                                        "review the worker restart or background job retry runbook"
+                                                                    ],
+                                                      "DraftStatusUpdate":  "[HIGH] queue-worker in staging has a growing job backlog and an unhealthy worker. Most relevant document: worker stall with rollback.",
+                                                      "ConfidenceNotes":  "medium-to-high confidence because backlog, worker health, and retrieved documentation indicate a consistent failure pattern",
+                                                      "CreatedAt":  "2026-09-21T00:17:11.904492Z"
+                                                  },
+                                       "action":  {
+                                                      "ID":  "c57fc95c-e853-4ed2-9ea1-2653f9413328",
+                                                      "IncidentID":  "c7254049-06d6-4941-8e8e-1eb6f85d22de",
+                                                      "ActionType":  "restart_worker",
+                                                      "TargetResource":  "queue-worker",
+                                                      "ParametersJSON":  "{\"worker_id\": \"queue-worker\"}",
+                                                      "RiskLevel":  "low",
+                                                      "Rationale":  "The Redis Streams backlog and unhealthy consumer make an allowlisted worker restart the safest candidate action. Triage summary: queue-worker in staging has a growing job backlog and an unhealthy worker. Most relevant document: worker stall with rollback.",
+                                                      "EvidenceRefs":  [
+                                                                           "2427bb64-87d9-4b8b-a0e3-0e661cc29cf8"
+                                                                       ],
+                                                      "ApprovalHint":  "This action is valid but requires operator approval before execution.",
+                                                      "Status":  "awaiting_approval",
+                                                      "CreatedAt":  "2026-09-21T00:17:11.908489Z"
+                                                  },
+                                       "evidence":  [
+                                                        {
+                                                            "ID":  "2427bb64-87d9-4b8b-a0e3-0e661cc29cf8",
+                                                            "IncidentID":  "c7254049-06d6-4941-8e8e-1eb6f85d22de",
+                                                            "Type":  "metric",
+                                                            "Source":  "workload-control",
+                                                            "Snippet":  "worker stalled; queue backlog=63; processed=3; consumer_paused=false",
+                                                            "Timestamp":  "2026-09-21T00:17:11.895475Z",
+                                                            "MetadataJSON":  "{\"mode\": \"worker_stall\", \"source\": \"redis-streams\", \"target\": \"queue-worker\", \"complete\": true, \"error_rate\": 0, \"generation\": 1, \"latency_ms\": 0, \"jobs_produced\": 66, \"queue_backlog\": 63, \"replica_count\": 1, \"workerHealthy\": true, \"jobs_processed\": 3, \"consumer_paused\": false}"
+                                                        }
+                                                    ]
+                                   }
+                  },
+                  {
+                      "id":  "E2E-06",
+                      "title":  "Approved execution restarted the real supervisor worker",
+                      "status":  "passed",
+                      "observed_at":  "2026-09-21T00:17:44.5147091Z",
+                      "evidence":  {
+                                       "generation_before":  1,
+                                       "generation_after":  2,
+                                       "action":  {
+                                                      "ID":  "c57fc95c-e853-4ed2-9ea1-2653f9413328",
+                                                      "IncidentID":  "c7254049-06d6-4941-8e8e-1eb6f85d22de",
+                                                      "ActionType":  "restart_worker",
+                                                      "TargetResource":  "queue-worker",
+                                                      "ParametersJSON":  "{\"worker_id\": \"queue-worker\"}",
+                                                      "RiskLevel":  "low",
+                                                      "Rationale":  "The Redis Streams backlog and unhealthy consumer make an allowlisted worker restart the safest candidate action. Triage summary: queue-worker in staging has a growing job backlog and an unhealthy worker. Most relevant document: worker stall with rollback.",
+                                                      "EvidenceRefs":  [
+                                                                           "2427bb64-87d9-4b8b-a0e3-0e661cc29cf8"
+                                                                       ],
+                                                      "ApprovalHint":  "This action is valid but requires operator approval before execution.",
+                                                      "Status":  "succeeded",
+                                                      "CreatedAt":  "2026-09-21T00:17:11.908489Z"
+                                                  },
+                                       "execution":  {
+                                                         "ID":  "4ffa21ad-8cb2-4c21-a66b-0fb7a5562535",
+                                                         "CandidateActionID":  "c57fc95c-e853-4ed2-9ea1-2653f9413328",
+                                                         "IdempotencyKey":  "execute:c57fc95c-e853-4ed2-9ea1-2653f9413328",
+                                                         "InitiatedBy":  "local-operator",
+                                                         "ExecutorType":  "workload-control-api",
+                                                         "Status":  "succeeded",
+                                                         "StartedAt":  "2026-09-21T00:17:13.905763Z",
+                                                         "FinishedAt":  "2026-09-21T00:17:13.92321Z",
+                                                         "ResultJSON":  "{\"error\": \"\", \"status\": \"succeeded\", \"target\": \"queue-worker\", \"operation\": \"restart_worker\", \"finished_at\": \"2026-09-21T00:17:13.921453309Z\", \"operation_id\": \"execute:c57fc95c-e853-4ed2-9ea1-2653f9413328\"}"
+                                                     }
+                                   }
+                  },
+                  {
+                      "id":  "E2E-07",
+                      "title":  "Three consecutive observations verified backlog recovery",
+                      "status":  "passed",
+                      "observed_at":  "2026-09-21T00:17:44.5600920Z",
+                      "evidence":  {
+                                       "incident":  {
+                                                        "ID":  "c7254049-06d6-4941-8e8e-1eb6f85d22de",
+                                                        "ExternalAlertID":  "366c72279ab89421",
+                                                        "AlertSource":  "grafana",
+                                                        "Title":  "Queue backlog is increasing",
+                                                        "ServiceName":  "queue-worker",
+                                                        "Environment":  "staging",
+                                                        "Severity":  "high",
+                                                        "State":  "resolved",
+                                                        "CreatedAt":  "2026-09-21T00:17:11.812736Z",
+                                                        "UpdatedAt":  "2026-09-21T00:17:43.44532Z"
+                                                    },
+                                       "verification":  {
+                                                            "ID":  "bdd5d9d1-4cd0-461e-ba8b-5c7973653408",
+                                                            "ExecutionRecordID":  "4ffa21ad-8cb2-4c21-a66b-0fb7a5562535",
+                                                            "Status":  "success",
+                                                            "EvidenceJSON":  "{\"after\": {\"mode\": \"healthy\", \"error_rate\": 0, \"latency_ms\": 0, \"last_deploy\": \"\", \"queue_backlog\": 0, \"replica_count\": 0, \"worker_healthy\": true, \"consumer_paused\": false, \"last_updated_utc\": \"2026-09-21T00:17:45.581062368Z\"}, \"before\": {\"mode\": \"worker_stall\", \"error_rate\": 0, \"latency_ms\": 0, \"last_deploy\": \"\", \"queue_backlog\": 63, \"replica_count\": 1, \"worker_healthy\": true, \"consumer_paused\": false, \"last_updated_utc\": \"2026-09-21T00:17:11.895475Z\"}, \"checks\": {\"alert_cleared\": true, \"latency_improved\": false, \"latency_worsened\": false, \"error_rate_improved\": false, \"error_rate_worsened\": false, \"health_check_normal\": true, \"queue_backlog_improved\": true, \"queue_backlog_worsened\": false}, \"observations\": [{\"mode\": \"healthy\", \"error_rate\": 0, \"latency_ms\": 0, \"last_deploy\": \"\", \"queue_backlog\": 65, \"replica_count\": 0, \"worker_healthy\": true, \"consumer_paused\": false, \"last_updated_utc\": \"2026-09-21T00:17:13.939342387Z\"}, {\"mode\": \"healthy\", \"error_rate\": 0, \"latency_ms\": 0, \"last_deploy\": \"\", \"queue_backlog\": 10, \"replica_count\": 0, \"worker_healthy\": true, \"consumer_paused\": false, \"last_updated_utc\": \"2026-09-21T00:17:23.942275056Z\"}, {\"mode\": \"healthy\", \"error_rate\": 0, \"latency_ms\": 0, \"last_deploy\": \"\", \"queue_backlog\": 0, \"replica_count\": 0, \"worker_healthy\": true, \"consumer_paused\": false, \"last_updated_utc\": \"2026-09-21T00:17:33.945315138Z\"}, {\"mode\": \"healthy\", \"error_rate\": 0, \"latency_ms\": 0, \"last_deploy\": \"\", \"queue_backlog\": 0, \"replica_count\": 0, \"worker_healthy\": true, \"consumer_paused\": false, \"last_updated_utc\": \"2026-09-21T00:17:45.581062368Z\"}], \"draft_status_update\": \"Incident \\\"Queue backlog is increasing\\\" for service queue-worker appears mitigated after action restart_worker executed by local-operator. Checks: alert_cleared=true health_check_normal=true error_rate_improved=false latency_improved=false queue_backlog_improved=true.\", \"required_observations\": 3, \"escalation_recommended\": false}",
+                                                            "Notes":  "verification passed: alert cleared and core signals improved after execution",
+                                                            "CreatedAt":  "2026-09-21T00:17:45.581922Z"
+                                                        },
+                                       "verification_evidence":  {
+                                                                     "after":  {
+                                                                                   "mode":  "healthy",
+                                                                                   "error_rate":  0,
+                                                                                   "latency_ms":  0,
+                                                                                   "last_deploy":  "",
+                                                                                   "queue_backlog":  0,
+                                                                                   "replica_count":  0,
+                                                                                   "worker_healthy":  true,
+                                                                                   "consumer_paused":  false,
+                                                                                   "last_updated_utc":  "2026-09-21T00:17:45.581062368Z"
+                                                                               },
+                                                                     "before":  {
+                                                                                    "mode":  "worker_stall",
+                                                                                    "error_rate":  0,
+                                                                                    "latency_ms":  0,
+                                                                                    "last_deploy":  "",
+                                                                                    "queue_backlog":  63,
+                                                                                    "replica_count":  1,
+                                                                                    "worker_healthy":  true,
+                                                                                    "consumer_paused":  false,
+                                                                                    "last_updated_utc":  "2026-09-21T00:17:11.895475Z"
+                                                                                },
+                                                                     "checks":  {
+                                                                                    "alert_cleared":  true,
+                                                                                    "latency_improved":  false,
+                                                                                    "latency_worsened":  false,
+                                                                                    "error_rate_improved":  false,
+                                                                                    "error_rate_worsened":  false,
+                                                                                    "health_check_normal":  true,
+                                                                                    "queue_backlog_improved":  true,
+                                                                                    "queue_backlog_worsened":  false
+                                                                                },
+                                                                     "observations":  [
+                                                                                          {
+                                                                                              "mode":  "healthy",
+                                                                                              "error_rate":  0,
+                                                                                              "latency_ms":  0,
+                                                                                              "last_deploy":  "",
+                                                                                              "queue_backlog":  65,
+                                                                                              "replica_count":  0,
+                                                                                              "worker_healthy":  true,
+                                                                                              "consumer_paused":  false,
+                                                                                              "last_updated_utc":  "2026-09-21T00:17:13.939342387Z"
+                                                                                          },
+                                                                                          {
+                                                                                              "mode":  "healthy",
+                                                                                              "error_rate":  0,
+                                                                                              "latency_ms":  0,
+                                                                                              "last_deploy":  "",
+                                                                                              "queue_backlog":  10,
+                                                                                              "replica_count":  0,
+                                                                                              "worker_healthy":  true,
+                                                                                              "consumer_paused":  false,
+                                                                                              "last_updated_utc":  "2026-09-21T00:17:23.942275056Z"
+                                                                                          },
+                                                                                          {
+                                                                                              "mode":  "healthy",
+                                                                                              "error_rate":  0,
+                                                                                              "latency_ms":  0,
+                                                                                              "last_deploy":  "",
+                                                                                              "queue_backlog":  0,
+                                                                                              "replica_count":  0,
+                                                                                              "worker_healthy":  true,
+                                                                                              "consumer_paused":  false,
+                                                                                              "last_updated_utc":  "2026-09-21T00:17:33.945315138Z"
+                                                                                          },
+                                                                                          {
+                                                                                              "mode":  "healthy",
+                                                                                              "error_rate":  0,
+                                                                                              "latency_ms":  0,
+                                                                                              "last_deploy":  "",
+                                                                                              "queue_backlog":  0,
+                                                                                              "replica_count":  0,
+                                                                                              "worker_healthy":  true,
+                                                                                              "consumer_paused":  false,
+                                                                                              "last_updated_utc":  "2026-09-21T00:17:45.581062368Z"
+                                                                                          }
+                                                                                      ],
+                                                                     "draft_status_update":  "Incident \"Queue backlog is increasing\" for service queue-worker appears mitigated after action restart_worker executed by local-operator. Checks: alert_cleared=true health_check_normal=true error_rate_improved=false latency_improved=false queue_backlog_improved=true.",
+                                                                     "required_observations":  3,
+                                                                     "escalation_recommended":  false
+                                                                 },
+                                       "final_workload_state":  {
+                                                                    "complete":  true,
+                                                                    "consumer_paused":  false,
+                                                                    "errors":  0,
+                                                                    "generation":  2,
+                                                                    "jobs_processed":  98,
+                                                                    "jobs_produced":  98,
+                                                                    "queue_backlog":  0,
+                                                                    "source":  "redis-streams",
+                                                                    "target":  "queue-worker",
+                                                                    "timestamp":  "2026-09-21T00:17:45.701803969Z",
+                                                                    "worker_healthy":  true
+                                                                }
+                                   }
+                  }
+              ]
+}
+
