@@ -31,9 +31,10 @@ func registerConnectionConfigurationAPI(mux *http.ServeMux, cfg config.Config, r
 
 	mux.HandleFunc("/api/v1/connections/reasoning/config", func(w http.ResponseWriter, r *http.Request) {
 		profile := effectiveReasoningProfile(r.Context(), cfg, settings)
+		_, persisted := effectiveReasoningBundle(r.Context(), settings)
 		switch r.Method {
 		case http.MethodGet:
-			writeJSON(w, http.StatusOK, reasoningProfileResponse(profile, runtime))
+			writeJSON(w, http.StatusOK, reasoningProfileResponse(profile, runtime, persisted))
 		case http.MethodPut:
 			if settings == nil {
 				writeAPIError(w, http.StatusServiceUnavailable, "settings_unavailable", "Connection settings are unavailable.")
@@ -45,8 +46,15 @@ func registerConnectionConfigurationAPI(mux *http.ServeMux, cfg config.Config, r
 				return
 			}
 			profile = requested.ReasoningConnectionProfile
-			if strings.TrimSpace(requested.APIKey) != "" {
-				profile.CredentialRef = "RUNTIME_LLM_API_KEY"
+			providedAPIKey := strings.TrimSpace(requested.APIKey)
+			apiKey := providedAPIKey
+			bundle, hasBundle := effectiveReasoningBundle(r.Context(), settings)
+			if providedAPIKey != "" {
+				if runtime == nil || runtime.Secrets == nil {
+					writeAPIError(w, http.StatusServiceUnavailable, "credential_storage_unavailable", "Encrypted credential storage is unavailable.")
+					return
+				}
+				profile.CredentialRef = "ENCRYPTED_LLM_API_KEY"
 			}
 			raw, err := config.EncodeConnectionProfile(profile)
 			if err == nil {
@@ -56,28 +64,56 @@ func registerConnectionConfigurationAPI(mux *http.ServeMux, cfg config.Config, r
 				writeAPIError(w, http.StatusBadRequest, "invalid_connection_profile", err.Error())
 				return
 			}
-			apiKey := strings.TrimSpace(requested.APIKey)
 			if apiKey == "" {
 				apiKey, _ = config.ResolveCredential(profile.CredentialRef)
 			}
-			if runtime != nil && runtime.Reasoning != nil {
-				if apiKey == "" && !runtime.Reasoning.Configured() {
-					writeAPIError(w, http.StatusBadRequest, "credential_unavailable", "Enter an API key to activate this provider.")
+			if apiKey == "" && (runtime == nil || runtime.Reasoning == nil || !runtime.Reasoning.Configured()) {
+				writeAPIError(w, http.StatusBadRequest, "credential_unavailable", "Enter an API key to activate this provider.")
+				return
+			}
+			validationKey := apiKey
+			if validationKey == "" {
+				validationKey = "retained-runtime-credential"
+			}
+			if candidate, candidateErr := ai.NewOpenAICompatibleClient(reasoningProviderConfig(cfg, profile, validationKey)); candidateErr != nil || !candidate.Configured() {
+				writeAPIError(w, http.StatusBadRequest, "provider_not_configured", "Reasoning provider configuration is incomplete or invalid.")
+				return
+			}
+			if providedAPIKey != "" {
+				encrypted, encryptErr := runtime.Secrets.Encrypt(apiKey)
+				if encryptErr != nil {
+					writeAPIError(w, http.StatusInternalServerError, "credential_storage_error", "Failed to encrypt the provider credential.")
 					return
 				}
-				if err := runtime.Reasoning.Reconfigure(reasoningProviderConfig(cfg, profile, apiKey)); err != nil {
-					writeAPIError(w, http.StatusBadRequest, "provider_not_configured", "Reasoning provider configuration is incomplete or invalid.")
+				bundle = config.ReasoningConnectionBundle{Profile: profile, EncryptedAPIKey: encrypted, EncryptionVersion: 1}
+				hasBundle = true
+			} else if hasBundle {
+				bundle.Profile = profile
+			}
+			settingKey := config.ReasoningConnectionSettingKey
+			settingValue := raw
+			if hasBundle {
+				settingKey = config.ReasoningConnectionBundleSettingKey
+				settingValue, err = config.EncodeConnectionProfile(bundle)
+				if err != nil {
+					writeAPIError(w, http.StatusInternalServerError, "credential_storage_error", "Failed to encode the provider credential.")
 					return
 				}
 			}
-			if err := settings.PutSetting(r.Context(), config.ReasoningConnectionSettingKey, raw); err != nil {
+			if err := settings.PutSetting(r.Context(), settingKey, settingValue); err != nil {
 				writeAPIError(w, http.StatusInternalServerError, "settings_error", "Failed to save the reasoning connection profile.")
 				return
+			}
+			if runtime != nil && runtime.Reasoning != nil {
+				if err := runtime.Reasoning.Reconfigure(reasoningProviderConfig(cfg, profile, apiKey)); err != nil {
+					writeAPIError(w, http.StatusInternalServerError, "provider_activation_failed", "The saved provider could not be activated.")
+					return
+				}
 			}
 			if runtime != nil && runtime.Modes != nil && runtime.Reasoning != nil && runtime.Reasoning.Configured() {
 				runtime.Modes.SetReasoning("llm")
 			}
-			payload := reasoningProfileResponse(profile, runtime)
+			payload := reasoningProfileResponse(profile, runtime, hasBundle)
 			payload["restart_required"] = false
 			writeJSON(w, http.StatusOK, payload)
 		default:
@@ -238,6 +274,9 @@ func effectiveReasoningProfile(ctx context.Context, cfg config.Config, settings 
 	reference := "LLM_API_KEY"
 	profile := config.ReasoningConnectionProfile{Provider: provider, BaseURL: baseURL, Model: model, CredentialRef: reference, JSONMode: cfg.LLMJSONMode}
 	if settings != nil {
+		if bundle, ok := effectiveReasoningBundle(ctx, settings); ok {
+			return bundle.Profile
+		}
 		if raw, err := settings.GetSetting(ctx, config.ReasoningConnectionSettingKey); err == nil {
 			if stored, decodeErr := config.DecodeReasoningConnectionProfile(raw); decodeErr == nil {
 				profile = stored
@@ -245,6 +284,18 @@ func effectiveReasoningProfile(ctx context.Context, cfg config.Config, settings 
 		}
 	}
 	return profile
+}
+
+func effectiveReasoningBundle(ctx context.Context, settings storage.SettingsStore) (config.ReasoningConnectionBundle, bool) {
+	if settings == nil {
+		return config.ReasoningConnectionBundle{}, false
+	}
+	raw, err := settings.GetSetting(ctx, config.ReasoningConnectionBundleSettingKey)
+	if err != nil {
+		return config.ReasoningConnectionBundle{}, false
+	}
+	bundle, err := config.DecodeReasoningConnectionBundle(raw)
+	return bundle, err == nil
 }
 
 func effectiveGrafanaProfile(ctx context.Context, cfg config.Config, settings storage.SettingsStore) config.GrafanaConnectionProfile {
@@ -271,10 +322,13 @@ func reasoningProviderConfig(cfg config.Config, profile config.ReasoningConnecti
 	}
 }
 
-func reasoningProfileResponse(profile config.ReasoningConnectionProfile, runtime *RuntimeControls) map[string]any {
+func reasoningProfileResponse(profile config.ReasoningConnectionProfile, runtime *RuntimeControls, persisted bool) map[string]any {
 	_, available := config.ResolveCredential(profile.CredentialRef)
 	source := "environment"
-	if runtime != nil && runtime.Reasoning != nil && runtime.Reasoning.Configured() {
+	if persisted {
+		available = runtime != nil && runtime.Reasoning != nil && runtime.Reasoning.Configured()
+		source = "encrypted_store"
+	} else if runtime != nil && runtime.Reasoning != nil && runtime.Reasoning.Configured() {
 		available = true
 		source = "runtime_memory"
 	}

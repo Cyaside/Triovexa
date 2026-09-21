@@ -33,8 +33,8 @@ func TestLoadConfigIncludesProviderDefaults(t *testing.T) {
 
 	cfg := Load()
 
-	if cfg.ReasoningMode != "heuristic" {
-		t.Fatalf("ReasoningMode = %q, want %q", cfg.ReasoningMode, "heuristic")
+	if cfg.ReasoningMode != "llm" {
+		t.Fatalf("ReasoningMode = %q, want %q", cfg.ReasoningMode, "llm")
 	}
 	if cfg.ObservabilityMode != "demo" {
 		t.Fatalf("ObservabilityMode = %q, want %q", cfg.ObservabilityMode, "demo")
@@ -51,6 +51,9 @@ func TestLoadConfigIncludesProviderDefaults(t *testing.T) {
 	}
 	if cfg.WriteTimeout != 150*time.Second {
 		t.Fatalf("WriteTimeout = %v, want %v", cfg.WriteTimeout, 150*time.Second)
+	}
+	if cfg.LLMTimeout != 60*time.Second {
+		t.Fatalf("LLMTimeout = %v, want %v", cfg.LLMTimeout, 60*time.Second)
 	}
 }
 

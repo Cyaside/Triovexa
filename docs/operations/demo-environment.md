@@ -142,6 +142,10 @@ Needed when real integrations are enabled:
   Credential used by the configured reasoning endpoint.
 - `LLM_MODEL`
   Model name used for triage and candidate action generation.
+- `CREDENTIAL_KEY_PATH`
+  Path to the local encryption key used for persistent provider credentials.
+- `CREDENTIAL_ENCRYPTION_KEY`
+  Optional base64-encoded 32-byte deployment-managed key. It takes precedence over the local key file.
 
 When these values are not configured, the application can still run in local demo mode using heuristic reasoning and the built-in demo collector.
 

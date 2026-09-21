@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	ReasoningConnectionSettingKey = "connection.reasoning"
-	GrafanaConnectionSettingKey   = "connection.grafana"
+	ReasoningConnectionSettingKey       = "connection.reasoning"
+	ReasoningConnectionBundleSettingKey = "connection.reasoning.bundle.v1"
+	GrafanaConnectionSettingKey         = "connection.grafana"
 )
 
 var credentialReferencePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
@@ -24,6 +25,15 @@ type ReasoningConnectionProfile struct {
 	Model         string `json:"model"`
 	CredentialRef string `json:"credential_ref"`
 	JSONMode      bool   `json:"json_mode"`
+}
+
+// ReasoningConnectionBundle stores non-secret provider configuration together
+// with an encrypted API key. The key required to decrypt it is kept outside the
+// database.
+type ReasoningConnectionBundle struct {
+	Profile           ReasoningConnectionProfile `json:"profile"`
+	EncryptedAPIKey   string                     `json:"encrypted_api_key"`
+	EncryptionVersion int                        `json:"encryption_version"`
 }
 
 // GrafanaConnectionProfile contains non-secret Grafana and query configuration.
@@ -58,6 +68,26 @@ func DecodeReasoningConnectionProfile(raw string) (ReasoningConnectionProfile, e
 	profile.Model = strings.TrimSpace(profile.Model)
 	profile.CredentialRef = strings.TrimSpace(profile.CredentialRef)
 	return profile, ValidateReasoningConnectionProfile(profile)
+}
+
+func DecodeReasoningConnectionBundle(raw string) (ReasoningConnectionBundle, error) {
+	var bundle ReasoningConnectionBundle
+	if err := json.Unmarshal([]byte(raw), &bundle); err != nil {
+		return bundle, fmt.Errorf("decode reasoning connection bundle: %w", err)
+	}
+	profileRaw, err := json.Marshal(bundle.Profile)
+	if err != nil {
+		return bundle, fmt.Errorf("normalize reasoning connection bundle: %w", err)
+	}
+	bundle.Profile, err = DecodeReasoningConnectionProfile(string(profileRaw))
+	if err != nil {
+		return bundle, err
+	}
+	bundle.EncryptedAPIKey = strings.TrimSpace(bundle.EncryptedAPIKey)
+	if bundle.EncryptedAPIKey == "" || bundle.EncryptionVersion != 1 {
+		return bundle, fmt.Errorf("reasoning connection bundle is incomplete")
+	}
+	return bundle, nil
 }
 
 func DecodeGrafanaConnectionProfile(raw string) (GrafanaConnectionProfile, error) {

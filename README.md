@@ -51,7 +51,7 @@ The React + TypeScript console is served as embedded static assets by the Go ser
 - approval and execution controls with explicit conflict handling;
 - Grafana, Prometheus, Alertmanager, Loki, and reasoning-provider status;
 - Grafana onboarding and query preview;
-- OpenAI-compatible provider configuration with a runtime-only API key;
+- OpenAI-compatible provider configuration with an encrypted persistent API key;
 - bounded playground controls for worker stall and processing failures;
 - loading, empty, stale, disconnected, forbidden, and `409` conflict states.
 
@@ -65,14 +65,14 @@ npm run build
 
 ## Reasoning providers
 
-Reasoning mode and provider are separate settings:
+The configured OpenAI-compatible provider is the normal reasoning path:
 
-- `heuristic` runs without external credentials;
-- `llm` uses the configured OpenAI-compatible endpoint;
+- `llm` is the default and uses the configured endpoint;
+- `heuristic` is reserved for development, deterministic tests, and provider-failure fallback;
 - every generated action is validated against the same action catalog and policy boundaries;
 - provider timeout, malformed output, or missing configuration falls back to heuristics and is recorded.
 
-The adapter uses the Chat Completions contract. Configure an API root, model, API key, and JSON-mode capability in **Connections**. A key entered in the console remains only in server memory until restart. HTTP endpoints are accepted only on loopback in local mode; internal deployments require HTTPS and an administrator allowlist.
+The adapter uses the Chat Completions contract. Configure an API root, model, API key, and JSON-mode capability in **Connections**. The server encrypts the key with AES-256-GCM before storing it in PostgreSQL; the encryption key is held separately in the runtime volume or supplied through `CREDENTIAL_ENCRYPTION_KEY`. HTTP endpoints are accepted only on loopback in local mode; internal deployments require HTTPS and an administrator allowlist.
 
 ## Safety and durability
 

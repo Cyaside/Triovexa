@@ -8,12 +8,14 @@ import (
 	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/observability"
 	"github.com/Cyaside/Triovexa/internal/readiness"
+	"github.com/Cyaside/Triovexa/internal/secretstore"
 )
 
 type RuntimeControls struct {
 	Modes     *mode.Manager
 	Providers ProviderStatus
 	Reasoning *ai.OpenAICompatibleClient
+	Secrets   *secretstore.Cipher
 	Auth      *auth.Service
 	Readiness interface {
 		Check(context.Context) readiness.Report

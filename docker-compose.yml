@@ -70,8 +70,12 @@ services:
       PROMETHEUS_BASE_URL: http://prometheus:9090
       ALERTMANAGER_BASE_URL: http://alertmanager:9093
       LOKI_BASE_URL: http://loki:3100
-      REASONING_MODE: heuristic
+      REASONING_MODE: llm
+      LLM_TIMEOUT: 60s
+      CREDENTIAL_KEY_PATH: /app/runtime/credential.key
       OBSERVABILITY_MODE: demo
+    volumes:
+      - triovexa-runtime-data:/app/runtime
     ports:
       - "8080:8080"
     depends_on:
@@ -140,3 +144,4 @@ volumes:
   triovexa-postgres-data:
   triovexa-redis-data:
   triovexa-grafana-data:
+  triovexa-runtime-data:

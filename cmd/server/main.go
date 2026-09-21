@@ -25,6 +25,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/readiness"
 	"github.com/Cyaside/Triovexa/internal/remediation"
 	"github.com/Cyaside/Triovexa/internal/retrieval"
+	"github.com/Cyaside/Triovexa/internal/secretstore"
 	securitylog "github.com/Cyaside/Triovexa/internal/security"
 	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/telemetry"
@@ -61,7 +62,12 @@ func main() {
 			logger.Error("failed to close storage", slog.String("error", err.Error()))
 		}
 	}()
-	applyStoredConnectionProfiles(context.Background(), repository, &cfg, logger)
+	credentialCipher, err := secretstore.NewCipher(cfg.CredentialKeyPath, cfg.CredentialEncryptionKey)
+	if err != nil {
+		logger.Error("failed to initialize credential encryption", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	applyStoredConnectionProfiles(context.Background(), repository, &cfg, logger, credentialCipher)
 
 	retriever := retrieval.NewFileRetriever(cfg.DocsRoot)
 	catalog := execution.DefaultCatalog()
@@ -175,6 +181,7 @@ func main() {
 		&apphttp.RuntimeControls{
 			Modes:     runtimeModes,
 			Reasoning: llmClient,
+			Secrets:   credentialCipher,
 			Providers: apphttp.ProviderStatus{
 				GrafanaConfigured:  grafanaClient.Configured(),
 				LLMConfigured:      llmClient.Configured(),
@@ -228,20 +235,37 @@ func main() {
 	logger.Info("server stopped cleanly")
 }
 
-func applyStoredConnectionProfiles(ctx context.Context, repository storage.Repository, cfg *appconfig.Config, logger *slog.Logger) {
+func applyStoredConnectionProfiles(ctx context.Context, repository storage.Repository, cfg *appconfig.Config, logger *slog.Logger, credentialCipher *secretstore.Cipher) {
 	settings, ok := repository.(storage.SettingsStore)
 	if !ok {
 		return
 	}
-	if raw, err := settings.GetSetting(ctx, appconfig.ReasoningConnectionSettingKey); err == nil {
-		profile, decodeErr := appconfig.DecodeReasoningConnectionProfile(raw)
+	loadedReasoningBundle := false
+	if raw, err := settings.GetSetting(ctx, appconfig.ReasoningConnectionBundleSettingKey); err == nil {
+		bundle, decodeErr := appconfig.DecodeReasoningConnectionBundle(raw)
 		if decodeErr != nil {
-			logger.Warn("ignoring invalid stored reasoning connection profile", slog.String("error", decodeErr.Error()))
+			logger.Warn("ignoring invalid stored reasoning connection bundle", slog.String("error", decodeErr.Error()))
+		} else if credential, decryptErr := credentialCipher.Decrypt(bundle.EncryptedAPIKey); decryptErr != nil {
+			logger.Warn("stored reasoning credential could not be decrypted", slog.String("error", decryptErr.Error()))
 		} else {
-			appconfig.ApplyReasoningConnectionProfile(cfg, profile)
+			appconfig.ApplyReasoningConnectionProfile(cfg, bundle.Profile)
+			cfg.LLMAPIKey = credential
+			loadedReasoningBundle = true
 		}
 	} else if !errors.Is(err, storage.ErrNotFound) {
-		logger.Warn("failed to load stored reasoning connection profile", slog.String("error", err.Error()))
+		logger.Warn("failed to load stored reasoning connection bundle", slog.String("error", err.Error()))
+	}
+	if !loadedReasoningBundle {
+		if raw, err := settings.GetSetting(ctx, appconfig.ReasoningConnectionSettingKey); err == nil {
+			profile, decodeErr := appconfig.DecodeReasoningConnectionProfile(raw)
+			if decodeErr != nil {
+				logger.Warn("ignoring invalid stored reasoning connection profile", slog.String("error", decodeErr.Error()))
+			} else {
+				appconfig.ApplyReasoningConnectionProfile(cfg, profile)
+			}
+		} else if !errors.Is(err, storage.ErrNotFound) {
+			logger.Warn("failed to load stored reasoning connection profile", slog.String("error", err.Error()))
+		}
 	}
 	if raw, err := settings.GetSetting(ctx, appconfig.GrafanaConnectionSettingKey); err == nil {
 		profile, decodeErr := appconfig.DecodeGrafanaConnectionProfile(raw)

@@ -45,6 +45,8 @@ type Config struct {
 	LLMJSONMode                     bool
 	LLMTimeout                      time.Duration
 	LLMAllowHosts                   []string
+	CredentialKeyPath               string
+	CredentialEncryptionKey         string
 	GrafanaBaseURL                  string
 	GrafanaAPIToken                 string
 	GrafanaMetricsSourceUID         string
@@ -99,14 +101,16 @@ func Load() Config {
 		WorkloadControlBaseURL:          getEnv("WORKLOAD_CONTROL_BASE_URL", ""),
 		WorkloadControlToken:            getEnv("WORKLOAD_CONTROL_TOKEN", ""),
 		RedisAddress:                    getEnv("REDIS_ADDRESS", ""),
-		ReasoningMode:                   getEnv("REASONING_MODE", "heuristic"),
+		ReasoningMode:                   getEnv("REASONING_MODE", "llm"),
 		ObservabilityMode:               getEnv("OBSERVABILITY_MODE", "demo"),
 		LLMBaseURL:                      getEnv("LLM_BASE_URL", ""),
 		LLMAPIKey:                       getEnv("LLM_API_KEY", ""),
 		LLMModel:                        getEnv("LLM_MODEL", ""),
 		LLMJSONMode:                     getBoolEnv("LLM_JSON_MODE", true),
-		LLMTimeout:                      getDurationEnv("LLM_TIMEOUT", 20*time.Second),
+		LLMTimeout:                      getDurationEnv("LLM_TIMEOUT", 60*time.Second),
 		LLMAllowHosts:                   splitCSVEnv("LLM_ALLOW_HOSTS"),
+		CredentialKeyPath:               getEnv("CREDENTIAL_KEY_PATH", DefaultCredentialKeyPath()),
+		CredentialEncryptionKey:         getEnv("CREDENTIAL_ENCRYPTION_KEY", ""),
 		GrafanaBaseURL:                  getEnvOrValue("GRAFANA_BASE_URL", profile.BaseURL, ""),
 		GrafanaAPIToken:                 getEnvOrValue("GRAFANA_API_TOKEN", profile.APIToken, ""),
 		GrafanaMetricsSourceUID:         getEnvOrValue("GRAFANA_METRICS_DATASOURCE_UID", profile.MetricsSourceUID, "grafanacloud-prom"),

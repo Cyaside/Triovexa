@@ -11,7 +11,9 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/triovexa ./cmd/server \
  && CGO_ENABLED=0 go build -trimpath -o /out/triovexa-workload ./cmd/workload
 
 FROM alpine:3.22
-RUN addgroup -S triovexa && adduser -S -G triovexa triovexa
+RUN addgroup -S triovexa && adduser -S -G triovexa triovexa \
+ && mkdir -p /app/runtime \
+ && chown -R triovexa:triovexa /app/runtime
 COPY --from=build /out/* /usr/local/bin/
 COPY docs /app/docs
 WORKDIR /app

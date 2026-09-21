@@ -95,7 +95,7 @@ test('accepts an OpenAI-compatible API key without displaying it again', async (
   await page.getByRole('button', { name: 'Save & activate' }).click()
   expect((await request).postDataJSON().api_key).toBe('browser-secret')
   await expect(page.getByLabel('API key')).toHaveValue('')
-  await expect(page.getByText('Provider activated. Reasoning mode is now using the configured LLM.')).toBeVisible()
+  await expect(page.getByText('Provider encrypted, saved, and activated. Reasoning mode is now using the configured LLM.')).toBeVisible()
 })
 
 test('injects a bounded worker stall from the playground', async ({ page }) => {

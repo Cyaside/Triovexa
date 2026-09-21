@@ -6,16 +6,19 @@ import (
 	"encoding/json"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/mode"
+	"github.com/Cyaside/Triovexa/internal/secretstore"
 	"github.com/Cyaside/Triovexa/internal/storage"
 )
 
 func TestReasoningConnectionConfigStoresReferenceOnly(t *testing.T) {
+	t.Setenv("LOCAL_LLM_TOKEN", "environment-secret")
 	repository := storage.NewMemoryStore()
 	mux := stdhttp.NewServeMux()
 	registerConnectionConfigurationAPI(mux, config.Config{}, repository)
@@ -35,14 +38,18 @@ func TestReasoningConnectionConfigStoresReferenceOnly(t *testing.T) {
 	}
 }
 
-func TestReasoningConnectionConfigActivatesInMemoryKeyWithoutPersistingIt(t *testing.T) {
+func TestReasoningConnectionConfigEncryptsAndActivatesWebKey(t *testing.T) {
 	repository := storage.NewMemoryStore()
 	client, err := ai.NewOpenAICompatibleClient(ai.ProviderConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	modes := mode.NewManager("heuristic", "demo")
-	runtime := &RuntimeControls{Modes: modes, Reasoning: client}
+	cipher, err := secretstore.NewCipher(filepath.Join(t.TempDir(), "credential.key"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &RuntimeControls{Modes: modes, Reasoning: client, Secrets: cipher}
 	mux := stdhttp.NewServeMux()
 	registerConnectionConfigurationAPI(mux, config.Config{Environment: "local"}, repository, runtime)
 	payload := `{"provider":"openai-compatible","base_url":"http://127.0.0.1:11434/v1","model":"qwen","credential_ref":"LLM_API_KEY","api_key":"web-secret","json_mode":true}`
@@ -58,15 +65,23 @@ func TestReasoningConnectionConfigActivatesInMemoryKeyWithoutPersistingIt(t *tes
 	if got := modes.Snapshot().Reasoning; got != mode.ReasoningLLM {
 		t.Fatalf("reasoning mode = %q, want llm", got)
 	}
-	raw, err := repository.GetSetting(context.Background(), config.ReasoningConnectionSettingKey)
+	raw, err := repository.GetSetting(context.Background(), config.ReasoningConnectionBundleSettingKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(raw, "web-secret") || strings.Contains(response.Body.String(), "web-secret") {
 		t.Fatal("API key must not be persisted or returned")
 	}
-	if !strings.Contains(raw, "RUNTIME_LLM_API_KEY") {
-		t.Fatalf("stored profile must use the runtime credential marker: %s", raw)
+	bundle, err := config.DecodeReasoningConnectionBundle(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decrypted, err := cipher.Decrypt(bundle.EncryptedAPIKey)
+	if err != nil || decrypted != "web-secret" {
+		t.Fatalf("encrypted credential did not round trip: value=%q err=%v", decrypted, err)
+	}
+	if !strings.Contains(raw, "ENCRYPTED_LLM_API_KEY") {
+		t.Fatalf("stored profile must use the encrypted credential marker: %s", raw)
 	}
 }
 

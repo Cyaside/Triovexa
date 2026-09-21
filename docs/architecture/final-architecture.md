@@ -29,7 +29,9 @@ Two database workers claim jobs with leases. Conditional state transitions preve
 
 ## Decision path
 
-Evidence collection, document retrieval, triage, action generation, and policy evaluation remain separate. Heuristic reasoning is always available. The optional LLM path supports OpenAI-compatible Chat Completions, validates structured output, and falls back to heuristics when the endpoint times out or returns invalid data.
+Evidence collection, document retrieval, triage, action generation, and policy evaluation remain separate. The primary reasoning path uses OpenAI-compatible Chat Completions, validates structured output, and falls back to deterministic development logic when the endpoint times out or returns invalid data.
+
+The provider API key is encrypted with AES-256-GCM before persistence. PostgreSQL stores only ciphertext and non-secret connection metadata; the encryption key is kept in a separate runtime volume or injected by the deployment environment.
 
 Every proposal passes the same catalog validation. Approval binds the exact action type, parameters, target, policy version, and evidence digest for 15 minutes. The server revalidates this snapshot and evidence freshness immediately before dispatch.
 
