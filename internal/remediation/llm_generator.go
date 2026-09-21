@@ -16,16 +16,14 @@ import (
 	"github.com/Cyaside/Triovexa/internal/mode"
 )
 
-type MistralGenerator struct {
+type LLMGenerator struct {
 	catalog execution.Catalog
 	client  ai.JSONCompleter
 	now     func() time.Time
 }
 
-type LLMGenerator = MistralGenerator
-
-func NewMistralGenerator(catalog execution.Catalog, client ai.JSONCompleter) *MistralGenerator {
-	return &MistralGenerator{
+func NewLLMGenerator(catalog execution.Catalog, client ai.JSONCompleter) *LLMGenerator {
+	return &LLMGenerator{
 		catalog: catalog,
 		client:  client,
 		now: func() time.Time {
@@ -34,15 +32,11 @@ func NewMistralGenerator(catalog execution.Catalog, client ai.JSONCompleter) *Mi
 	}
 }
 
-func NewLLMGenerator(catalog execution.Catalog, client ai.JSONCompleter) *LLMGenerator {
-	return NewMistralGenerator(catalog, client)
-}
-
-func (g *MistralGenerator) CatalogMode() string {
+func (g *LLMGenerator) CatalogMode() string {
 	return "llm-constrained"
 }
 
-func (g *MistralGenerator) Generate(
+func (g *LLMGenerator) Generate(
 	ctx context.Context,
 	incident domain.Incident,
 	triage domain.TriageResult,
@@ -169,15 +163,11 @@ func (g *SwitchingGenerator) CatalogMode() string {
 	if g.modes != nil && g.modes.Snapshot().Reasoning == mode.ReasoningLLM {
 		return "llm-constrained"
 	}
-	if g.modes != nil && g.modes.Snapshot().Reasoning == mode.ReasoningMistral {
-		return "mistral-constrained"
-	}
-
 	return "heuristic-constrained"
 }
 
 func isLLMReasoning(reasoning mode.Reasoning) bool {
-	return reasoning == mode.ReasoningLLM || reasoning == mode.ReasoningMistral
+	return reasoning == mode.ReasoningLLM
 }
 
 func buildActionPrompt(

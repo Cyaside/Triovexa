@@ -16,12 +16,12 @@ func TestManagerDefaultsToFallbackModes(t *testing.T) {
 
 func TestManagerSupportsModeUpdates(t *testing.T) {
 	manager := NewManager("heuristic", "demo")
-	manager.SetReasoning("mistral")
+	manager.SetReasoning("llm")
 	manager.SetObservability("grafana")
 
 	snapshot := manager.Snapshot()
-	if snapshot.Reasoning != ReasoningMistral {
-		t.Fatalf("Reasoning = %q, want %q", snapshot.Reasoning, ReasoningMistral)
+	if snapshot.Reasoning != ReasoningLLM {
+		t.Fatalf("Reasoning = %q, want %q", snapshot.Reasoning, ReasoningLLM)
 	}
 	if snapshot.Observability != ObservabilityGrafana {
 		t.Fatalf("Observability = %q, want %q", snapshot.Observability, ObservabilityGrafana)
@@ -29,15 +29,12 @@ func TestManagerSupportsModeUpdates(t *testing.T) {
 }
 
 func TestParseReasoningRejectsUnknownModes(t *testing.T) {
-	parsed, err := ParseReasoning("mistral")
-	if err != nil {
-		t.Fatalf("ParseReasoning() error = %v", err)
-	}
-	if parsed != ReasoningMistral {
-		t.Fatalf("ParseReasoning() = %q, want %q", parsed, ReasoningMistral)
+	parsed, err := ParseReasoning("llm")
+	if err != nil || parsed != ReasoningLLM {
+		t.Fatalf("ParseReasoning() = %q, %v; want %q", parsed, err, ReasoningLLM)
 	}
 
-	if _, err := ParseReasoning("wat"); err == nil {
+	if _, err := ParseReasoning("legacy-provider"); err == nil {
 		t.Fatalf("ParseReasoning() expected error for unknown mode")
 	}
 }

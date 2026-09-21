@@ -173,11 +173,10 @@ func main() {
 		executionService,
 		recorder,
 		&apphttp.RuntimeControls{
-			Modes: runtimeModes,
+			Modes:     runtimeModes,
+			Reasoning: llmClient,
 			Providers: apphttp.ProviderStatus{
-				MistralConfigured:  llmClient.Configured() && llmProvider == "mistral",
 				GrafanaConfigured:  grafanaClient.Configured(),
-				MistralModel:       llmModel,
 				LLMConfigured:      llmClient.Configured(),
 				LLMProvider:        llmProvider,
 				LLMModel:           llmModel,

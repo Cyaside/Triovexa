@@ -164,9 +164,6 @@ func run(casesPath, outputPath, mode, provider, baseURL, model, apiKeyEnv string
 
 	var tracker *usageTracker
 	if mode == "provider" {
-		if provider == "mistral" && strings.TrimSpace(baseURL) == "" {
-			baseURL = "https://api.mistral.ai"
-		}
 		client, clientErr := ai.NewOpenAICompatibleClient(ai.ProviderConfig{
 			Name: provider, BaseURL: baseURL, APIKey: os.Getenv(apiKeyEnv), Model: model,
 			JSONMode: true, Timeout: 30 * time.Second, AllowHTTP: isLoopback(baseURL),

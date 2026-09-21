@@ -8,8 +8,8 @@ import (
 	"github.com/Cyaside/Triovexa/internal/domain"
 )
 
-func TestMistralGeneratorParsesJSONPayload(t *testing.T) {
-	generator := NewMistralGenerator(stubCompleter{
+func TestLLMGeneratorParsesJSONPayload(t *testing.T) {
+	generator := NewLLMGenerator(stubCompleter{
 		content: `{"summary":"Summary","hypotheses":["H1"],"blast_radius":"BR","next_steps":["N1"],"draft_status_update":"DSU","confidence_notes":"high"}`,
 	})
 
@@ -25,8 +25,8 @@ func TestMistralGeneratorParsesJSONPayload(t *testing.T) {
 	}
 }
 
-func TestMistralGeneratorCoercesStructuredLists(t *testing.T) {
-	generator := NewMistralGenerator(stubCompleter{
+func TestLLMGeneratorCoercesStructuredLists(t *testing.T) {
+	generator := NewLLMGenerator(stubCompleter{
 		content: `{"summary":"Summary","hypotheses":[{"text":"H1"},{"summary":"H2"}],"blast_radius":"BR","next_steps":[{"value":"N1"},{"content":"N2"}],"confidence_notes":"high"}`,
 	})
 

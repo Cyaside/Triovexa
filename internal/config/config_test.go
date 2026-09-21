@@ -28,7 +28,6 @@ func TestDatabaseTarget(t *testing.T) {
 func TestLoadConfigIncludesProviderDefaults(t *testing.T) {
 	t.Setenv("REASONING_MODE", "")
 	t.Setenv("OBSERVABILITY_MODE", "")
-	t.Setenv("MISTRAL_MODEL", "")
 	t.Setenv("GRAFANA_METRICS_DATASOURCE_UID", "")
 	t.Setenv("GRAFANA_LOGS_DATASOURCE_UID", "")
 
@@ -40,8 +39,9 @@ func TestLoadConfigIncludesProviderDefaults(t *testing.T) {
 	if cfg.ObservabilityMode != "demo" {
 		t.Fatalf("ObservabilityMode = %q, want %q", cfg.ObservabilityMode, "demo")
 	}
-	if cfg.MistralModel != "mistral-small-latest" {
-		t.Fatalf("MistralModel = %q, want %q", cfg.MistralModel, "mistral-small-latest")
+	provider, baseURL, apiKey, model := cfg.EffectiveLLM()
+	if provider != "openai-compatible" || baseURL != "" || apiKey != "" || model != "" {
+		t.Fatalf("EffectiveLLM() = %q %q %q %q", provider, baseURL, apiKey, model)
 	}
 	if cfg.GrafanaMetricsSourceUID != "grafanacloud-prom" {
 		t.Fatalf("GrafanaMetricsSourceUID = %q, want %q", cfg.GrafanaMetricsSourceUID, "grafanacloud-prom")

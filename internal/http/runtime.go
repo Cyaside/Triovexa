@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 
+	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/auth"
 	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/observability"
@@ -12,6 +13,7 @@ import (
 type RuntimeControls struct {
 	Modes     *mode.Manager
 	Providers ProviderStatus
+	Reasoning *ai.OpenAICompatibleClient
 	Auth      *auth.Service
 	Readiness interface {
 		Check(context.Context) readiness.Report
@@ -19,9 +21,7 @@ type RuntimeControls struct {
 }
 
 type ProviderStatus struct {
-	MistralConfigured  bool
 	GrafanaConfigured  bool
-	MistralModel       string
 	LLMConfigured      bool
 	LLMProvider        string
 	LLMModel           string
@@ -35,9 +35,7 @@ type ProviderStatus struct {
 type runtimeViewData struct {
 	ReasoningMode     string
 	ObservabilityMode string
-	MistralConfigured bool
 	GrafanaConfigured bool
-	MistralModel      string
 	LLMConfigured     bool
 	LLMProvider       string
 	LLMModel          string
@@ -59,9 +57,7 @@ func buildRuntimeViewData(ctx context.Context, controls *RuntimeControls) runtim
 		view.ReasoningMode = string(snapshot.Reasoning)
 		view.ObservabilityMode = string(snapshot.Observability)
 	}
-	view.MistralConfigured = controls.Providers.MistralConfigured
 	view.GrafanaConfigured = controls.Providers.GrafanaConfigured
-	view.MistralModel = controls.Providers.MistralModel
 	view.LLMConfigured = controls.Providers.LLMConfigured
 	view.LLMProvider = controls.Providers.LLMProvider
 	view.LLMModel = controls.Providers.LLMModel

@@ -111,7 +111,8 @@ These external variables are optional for the local demo, but needed when real i
 
 - `GRAFANA_BASE_URL`
 - `GRAFANA_API_TOKEN`
-- `MISTRAL_API_KEY`
-- `MISTRAL_MODEL`
+- `LLM_BASE_URL`
+- `LLM_API_KEY`
+- `LLM_MODEL`
 
 Once those variables are populated, you can switch from local heuristics to real observability and AI providers without changing the core demo flow.

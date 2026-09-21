@@ -43,7 +43,7 @@ func registerAPIV1(
 	executionService *execution.Service,
 	runtime *RuntimeControls,
 ) {
-	registerConnectionConfigurationAPI(mux, cfg, repository)
+	registerConnectionConfigurationAPI(mux, cfg, repository, runtime)
 	registerPlaygroundAPI(mux, cfg)
 	settings, _ := repository.(storage.SettingsStore)
 
@@ -179,6 +179,11 @@ func registerAPIV1(
 		provider := ProviderStatus{}
 		if runtime != nil {
 			provider = runtime.Providers
+			if runtime.Reasoning != nil {
+				provider.LLMConfigured = runtime.Reasoning.Configured()
+				provider.LLMProvider = runtime.Reasoning.Provider()
+				provider.LLMModel = runtime.Reasoning.Model()
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"reasoning":    map[string]any{"configured": provider.LLMConfigured, "provider": provider.LLMProvider, "model": provider.LLMModel},
@@ -195,26 +200,39 @@ func registerAPIV1(
 			return
 		}
 		profile := effectiveReasoningProfile(r.Context(), cfg, settings)
+		requested := reasoningConnectionRequest{ReasoningConnectionProfile: profile}
 		if r.ContentLength != 0 {
-			if err := decodeBoundedJSON(w, r, &profile); err != nil {
+			if err := decodeBoundedJSON(w, r, &requested); err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 				return
 			}
+			profile = requested.ReasoningConnectionProfile
 		}
 		if err := config.ValidateReasoningConnectionProfile(profile); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_connection_profile", err.Error())
 			return
 		}
-		apiKey, available := config.ResolveCredential(profile.CredentialRef)
-		if !available {
-			writeAPIError(w, http.StatusBadRequest, "credential_unavailable", "The credential reference is not available in the server environment.")
+		apiKey := strings.TrimSpace(requested.APIKey)
+		if apiKey == "" {
+			apiKey, _ = config.ResolveCredential(profile.CredentialRef)
+		}
+		if apiKey == "" && runtime != nil && runtime.Reasoning != nil && runtime.Reasoning.Configured() {
+			started := time.Now()
+			testCtx, cancel := context.WithTimeout(r.Context(), cfg.LLMTimeout)
+			defer cancel()
+			_, err := runtime.Reasoning.CompleteJSON(testCtx, []ai.ChatMessage{{Role: "system", Content: "Return a JSON object with status set to ok."}, {Role: "user", Content: "Test this connection."}})
+			if err != nil {
+				writeAPIError(w, http.StatusBadGateway, "provider_test_failed", "The provider did not return a valid JSON response. Check the provider settings.")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"status": "connected", "provider": runtime.Reasoning.Provider(), "model": runtime.Reasoning.Model(), "latency_ms": time.Since(started).Milliseconds()})
 			return
 		}
-		client, err := ai.NewOpenAICompatibleClient(ai.ProviderConfig{
-			Name: profile.Provider, BaseURL: profile.BaseURL, APIKey: apiKey, Model: profile.Model,
-			JSONMode: profile.JSONMode, Timeout: cfg.LLMTimeout,
-			AllowHTTP: !cfg.InternalMode(), AllowHosts: cfg.LLMAllowHosts, RequireAllowlist: cfg.InternalMode(),
-		})
+		if apiKey == "" {
+			writeAPIError(w, http.StatusBadRequest, "credential_unavailable", "Enter an API key or configure the credential in the server environment.")
+			return
+		}
+		client, err := ai.NewOpenAICompatibleClient(reasoningProviderConfig(cfg, profile, apiKey))
 		if err != nil || !client.Configured() {
 			writeAPIError(w, http.StatusBadRequest, "provider_not_configured", "Reasoning provider configuration is incomplete or invalid.")
 			return

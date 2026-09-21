@@ -14,15 +14,13 @@ import (
 	"github.com/Cyaside/Triovexa/internal/mode"
 )
 
-type MistralGenerator struct {
+type LLMGenerator struct {
 	client ai.JSONCompleter
 	now    func() time.Time
 }
 
-type LLMGenerator = MistralGenerator
-
-func NewMistralGenerator(client ai.JSONCompleter) *MistralGenerator {
-	return &MistralGenerator{
+func NewLLMGenerator(client ai.JSONCompleter) *LLMGenerator {
+	return &LLMGenerator{
 		client: client,
 		now: func() time.Time {
 			return time.Now().UTC()
@@ -30,11 +28,7 @@ func NewMistralGenerator(client ai.JSONCompleter) *MistralGenerator {
 	}
 }
 
-func NewLLMGenerator(client ai.JSONCompleter) *LLMGenerator {
-	return NewMistralGenerator(client)
-}
-
-func (g *MistralGenerator) Generate(
+func (g *LLMGenerator) Generate(
 	ctx context.Context,
 	incident domain.Incident,
 	evidence []domain.EvidenceItem,
@@ -170,7 +164,7 @@ func classifyFallback(err error) string {
 }
 
 func isLLMReasoning(reasoning mode.Reasoning) bool {
-	return reasoning == mode.ReasoningLLM || reasoning == mode.ReasoningMistral
+	return reasoning == mode.ReasoningLLM
 }
 
 func buildTriagePrompt(

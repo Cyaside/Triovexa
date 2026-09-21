@@ -136,9 +136,11 @@ Needed when real integrations are enabled:
   Loki query template for general incident logs.
 - `GRAFANA_DEPLOY_LOGS_QUERY`
   Loki query template for deployment-related logs.
-- `MISTRAL_API_KEY`
-  Credentials for the Mistral reasoning provider.
-- `MISTRAL_MODEL`
+- `LLM_BASE_URL`
+  API root for an OpenAI-compatible Chat Completions endpoint.
+- `LLM_API_KEY`
+  Credential used by the configured reasoning endpoint.
+- `LLM_MODEL`
   Model name used for triage and candidate action generation.
 
 When these values are not configured, the application can still run in local demo mode using heuristic reasoning and the built-in demo collector.

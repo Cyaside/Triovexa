@@ -11,8 +11,6 @@ type Reasoning string
 const (
 	ReasoningHeuristic Reasoning = "heuristic"
 	ReasoningLLM       Reasoning = "llm"
-	// ReasoningMistral is retained for compatibility with older configs and API clients.
-	ReasoningMistral Reasoning = "mistral"
 )
 
 type Observability string
@@ -76,8 +74,6 @@ func ParseReasoning(value string) (Reasoning, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case string(ReasoningHeuristic):
 		return ReasoningHeuristic, nil
-	case string(ReasoningMistral):
-		return ReasoningMistral, nil
 	case string(ReasoningLLM):
 		return ReasoningLLM, nil
 	default:

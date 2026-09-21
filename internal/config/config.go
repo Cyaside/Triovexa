@@ -39,9 +39,6 @@ type Config struct {
 	RedisAddress                    string
 	ReasoningMode                   string
 	ObservabilityMode               string
-	MistralAPIKey                   string
-	MistralModel                    string
-	LLMProvider                     string
 	LLMBaseURL                      string
 	LLMAPIKey                       string
 	LLMModel                        string
@@ -104,9 +101,6 @@ func Load() Config {
 		RedisAddress:                    getEnv("REDIS_ADDRESS", ""),
 		ReasoningMode:                   getEnv("REASONING_MODE", "heuristic"),
 		ObservabilityMode:               getEnv("OBSERVABILITY_MODE", "demo"),
-		MistralAPIKey:                   getEnv("MISTRAL_API_KEY", ""),
-		MistralModel:                    getEnv("MISTRAL_MODEL", "mistral-small-latest"),
-		LLMProvider:                     getEnv("LLM_PROVIDER", ""),
 		LLMBaseURL:                      getEnv("LLM_BASE_URL", ""),
 		LLMAPIKey:                       getEnv("LLM_API_KEY", ""),
 		LLMModel:                        getEnv("LLM_MODEL", ""),
@@ -143,17 +137,11 @@ func Load() Config {
 }
 
 func (c Config) EffectiveLLM() (provider string, baseURL string, apiKey string, model string) {
-	provider = strings.ToLower(strings.TrimSpace(c.LLMProvider))
+	provider = "openai-compatible"
 	baseURL = strings.TrimSpace(c.LLMBaseURL)
 	apiKey = strings.TrimSpace(c.LLMAPIKey)
 	model = strings.TrimSpace(c.LLMModel)
-	if provider != "" || baseURL != "" || apiKey != "" || model != "" {
-		if provider == "" {
-			provider = "openai-compatible"
-		}
-		return provider, baseURL, apiKey, model
-	}
-	return "mistral", "https://api.mistral.ai", strings.TrimSpace(c.MistralAPIKey), strings.TrimSpace(c.MistralModel)
+	return provider, baseURL, apiKey, model
 }
 
 func (c Config) HTTPAddress() string {

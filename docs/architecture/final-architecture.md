@@ -18,7 +18,7 @@ flowchart LR
     G[Grafana] --> M
     G --> L[Loki]
     AL[Grafana Alloy] -->|container logs| L
-    T -. optional Chat Completions .-> AI[Mistral or OpenAI-compatible API]
+    T -. optional Chat Completions .-> AI[OpenAI-compatible API]
 ```
 
 ## Accepted alert path
@@ -29,7 +29,7 @@ Two database workers claim jobs with leases. Conditional state transitions preve
 
 ## Decision path
 
-Evidence collection, document retrieval, triage, action generation, and policy evaluation remain separate. Heuristic reasoning is always available. The optional LLM path supports Mistral and OpenAI-compatible Chat Completions, validates structured output, and falls back to heuristics when the endpoint times out or returns invalid data.
+Evidence collection, document retrieval, triage, action generation, and policy evaluation remain separate. Heuristic reasoning is always available. The optional LLM path supports OpenAI-compatible Chat Completions, validates structured output, and falls back to heuristics when the endpoint times out or returns invalid data.
 
 Every proposal passes the same catalog validation. Approval binds the exact action type, parameters, target, policy version, and evidence digest for 15 minutes. The server revalidates this snapshot and evidence freshness immediately before dispatch.
 

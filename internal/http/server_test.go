@@ -916,9 +916,10 @@ func TestServerRuntimeModeEndpointUpdatesModes(t *testing.T) {
 	runtimeControls := &RuntimeControls{
 		Modes: mode.NewManager("heuristic", "demo"),
 		Providers: ProviderStatus{
-			MistralConfigured: true,
 			GrafanaConfigured: true,
-			MistralModel:      "mistral-small-latest",
+			LLMConfigured:     true,
+			LLMProvider:       "openai-compatible",
+			LLMModel:          "test-model",
 			MetricsSourceUID:  "grafanacloud-prom",
 			LogsSourceUID:     "grafanacloud-logs",
 		},
@@ -937,7 +938,7 @@ func TestServerRuntimeModeEndpointUpdatesModes(t *testing.T) {
 	api := httptest.NewServer(server.Handler)
 	defer api.Close()
 
-	payload := strings.NewReader("reasoning_mode=mistral&observability_mode=grafana")
+	payload := strings.NewReader("reasoning_mode=llm&observability_mode=grafana")
 	request, err := http.NewRequest(http.MethodPost, api.URL+"/admin/runtime-modes", payload)
 	if err != nil {
 		t.Fatalf("new runtime mode request: %v", err)
@@ -955,8 +956,8 @@ func TestServerRuntimeModeEndpointUpdatesModes(t *testing.T) {
 	}
 
 	snapshot := runtimeControls.Modes.Snapshot()
-	if snapshot.Reasoning != mode.ReasoningMistral {
-		t.Fatalf("reasoning mode = %q, want %q", snapshot.Reasoning, mode.ReasoningMistral)
+	if snapshot.Reasoning != mode.ReasoningLLM {
+		t.Fatalf("reasoning mode = %q, want %q", snapshot.Reasoning, mode.ReasoningLLM)
 	}
 	if snapshot.Observability != mode.ObservabilityGrafana {
 		t.Fatalf("observability mode = %q, want %q", snapshot.Observability, mode.ObservabilityGrafana)
@@ -968,11 +969,12 @@ func TestServerIncidentWorkbenchShowsRuntimeControls(t *testing.T) {
 
 	repository := storage.NewMemoryStore()
 	runtimeControls := &RuntimeControls{
-		Modes: mode.NewManager("mistral", "grafana"),
+		Modes: mode.NewManager("llm", "grafana"),
 		Providers: ProviderStatus{
-			MistralConfigured: true,
 			GrafanaConfigured: true,
-			MistralModel:      "mistral-small-latest",
+			LLMConfigured:     true,
+			LLMProvider:       "openai-compatible",
+			LLMModel:          "test-model",
 			MetricsSourceUID:  "grafanacloud-prom",
 			LogsSourceUID:     "grafanacloud-logs",
 		},

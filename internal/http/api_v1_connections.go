@@ -10,44 +10,75 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/observability"
 	"github.com/Cyaside/Triovexa/internal/storage"
 )
 
-func registerConnectionConfigurationAPI(mux *http.ServeMux, cfg config.Config, repository storage.Repository) {
+type reasoningConnectionRequest struct {
+	config.ReasoningConnectionProfile
+	APIKey string `json:"api_key"`
+}
+
+func registerConnectionConfigurationAPI(mux *http.ServeMux, cfg config.Config, repository storage.Repository, runtimeControls ...*RuntimeControls) {
 	settings, _ := repository.(storage.SettingsStore)
+	var runtime *RuntimeControls
+	if len(runtimeControls) > 0 {
+		runtime = runtimeControls[0]
+	}
 
 	mux.HandleFunc("/api/v1/connections/reasoning/config", func(w http.ResponseWriter, r *http.Request) {
 		profile := effectiveReasoningProfile(r.Context(), cfg, settings)
 		switch r.Method {
 		case http.MethodGet:
-			writeJSON(w, http.StatusOK, reasoningProfileResponse(profile))
+			writeJSON(w, http.StatusOK, reasoningProfileResponse(profile, runtime))
 		case http.MethodPut:
 			if settings == nil {
 				writeAPIError(w, http.StatusServiceUnavailable, "settings_unavailable", "Connection settings are unavailable.")
 				return
 			}
-			var requested config.ReasoningConnectionProfile
+			requested := reasoningConnectionRequest{ReasoningConnectionProfile: profile}
 			if err := decodeBoundedJSON(w, r, &requested); err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 				return
 			}
-			raw, err := config.EncodeConnectionProfile(requested)
+			profile = requested.ReasoningConnectionProfile
+			if strings.TrimSpace(requested.APIKey) != "" {
+				profile.CredentialRef = "RUNTIME_LLM_API_KEY"
+			}
+			raw, err := config.EncodeConnectionProfile(profile)
 			if err == nil {
-				requested, err = config.DecodeReasoningConnectionProfile(raw)
+				profile, err = config.DecodeReasoningConnectionProfile(raw)
 			}
 			if err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid_connection_profile", err.Error())
 				return
 			}
+			apiKey := strings.TrimSpace(requested.APIKey)
+			if apiKey == "" {
+				apiKey, _ = config.ResolveCredential(profile.CredentialRef)
+			}
+			if runtime != nil && runtime.Reasoning != nil {
+				if apiKey == "" && !runtime.Reasoning.Configured() {
+					writeAPIError(w, http.StatusBadRequest, "credential_unavailable", "Enter an API key to activate this provider.")
+					return
+				}
+				if err := runtime.Reasoning.Reconfigure(reasoningProviderConfig(cfg, profile, apiKey)); err != nil {
+					writeAPIError(w, http.StatusBadRequest, "provider_not_configured", "Reasoning provider configuration is incomplete or invalid.")
+					return
+				}
+			}
 			if err := settings.PutSetting(r.Context(), config.ReasoningConnectionSettingKey, raw); err != nil {
 				writeAPIError(w, http.StatusInternalServerError, "settings_error", "Failed to save the reasoning connection profile.")
 				return
 			}
-			payload := reasoningProfileResponse(requested)
-			payload["restart_required"] = true
+			if runtime != nil && runtime.Modes != nil && runtime.Reasoning != nil && runtime.Reasoning.Configured() {
+				runtime.Modes.SetReasoning("llm")
+			}
+			payload := reasoningProfileResponse(profile, runtime)
+			payload["restart_required"] = false
 			writeJSON(w, http.StatusOK, payload)
 		default:
 			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -205,9 +236,6 @@ func registerPlaygroundAPI(mux *http.ServeMux, cfg config.Config) {
 func effectiveReasoningProfile(ctx context.Context, cfg config.Config, settings storage.SettingsStore) config.ReasoningConnectionProfile {
 	provider, baseURL, _, model := cfg.EffectiveLLM()
 	reference := "LLM_API_KEY"
-	if provider == "mistral" && strings.TrimSpace(cfg.LLMProvider) == "" {
-		reference = "MISTRAL_API_KEY"
-	}
 	profile := config.ReasoningConnectionProfile{Provider: provider, BaseURL: baseURL, Model: model, CredentialRef: reference, JSONMode: cfg.LLMJSONMode}
 	if settings != nil {
 		if raw, err := settings.GetSetting(ctx, config.ReasoningConnectionSettingKey); err == nil {
@@ -235,9 +263,25 @@ func effectiveGrafanaProfile(ctx context.Context, cfg config.Config, settings st
 	return profile
 }
 
-func reasoningProfileResponse(profile config.ReasoningConnectionProfile) map[string]any {
+func reasoningProviderConfig(cfg config.Config, profile config.ReasoningConnectionProfile, apiKey string) ai.ProviderConfig {
+	return ai.ProviderConfig{
+		Name: profile.Provider, BaseURL: profile.BaseURL, APIKey: apiKey, Model: profile.Model,
+		JSONMode: profile.JSONMode, Timeout: cfg.LLMTimeout,
+		AllowHTTP: !cfg.InternalMode(), AllowHosts: cfg.LLMAllowHosts, RequireAllowlist: cfg.InternalMode(),
+	}
+}
+
+func reasoningProfileResponse(profile config.ReasoningConnectionProfile, runtime *RuntimeControls) map[string]any {
 	_, available := config.ResolveCredential(profile.CredentialRef)
-	return map[string]any{"provider": profile.Provider, "base_url": profile.BaseURL, "model": profile.Model, "credential_ref": profile.CredentialRef, "credential_available": available, "json_mode": profile.JSONMode}
+	source := "environment"
+	if runtime != nil && runtime.Reasoning != nil && runtime.Reasoning.Configured() {
+		available = true
+		source = "runtime_memory"
+	}
+	if !available {
+		source = "missing"
+	}
+	return map[string]any{"provider": profile.Provider, "base_url": profile.BaseURL, "model": profile.Model, "credential_ref": profile.CredentialRef, "credential_available": available, "credential_source": source, "json_mode": profile.JSONMode}
 }
 
 func grafanaProfileResponse(profile config.GrafanaConnectionProfile) map[string]any {

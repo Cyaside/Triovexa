@@ -155,8 +155,8 @@ func TestGeneratorCatalogModesReflectReasoningSource(t *testing.T) {
 		t.Fatalf("switching CatalogMode() = %q, want %q", switching.CatalogMode(), "heuristic-constrained")
 	}
 
-	switching.modes.SetReasoning("mistral")
-	if switching.CatalogMode() != "mistral-constrained" {
-		t.Fatalf("switching CatalogMode() after mistral = %q, want %q", switching.CatalogMode(), "mistral-constrained")
+	switching.modes.SetReasoning("llm")
+	if switching.CatalogMode() != "llm-constrained" {
+		t.Fatalf("switching CatalogMode() after llm = %q, want %q", switching.CatalogMode(), "llm-constrained")
 	}
 }

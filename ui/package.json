@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "vitest run",
+    "test": "playwright test",
     "test:e2e": "playwright test",
     "record:demo": "node scripts/record-demo.mjs"
   },

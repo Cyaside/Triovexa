@@ -73,8 +73,8 @@ func DecodeGrafanaConnectionProfile(raw string) (GrafanaConnectionProfile, error
 }
 
 func ValidateReasoningConnectionProfile(profile ReasoningConnectionProfile) error {
-	if profile.Provider != "mistral" && profile.Provider != "openai-compatible" {
-		return fmt.Errorf("provider must be mistral or openai-compatible")
+	if profile.Provider != "openai-compatible" {
+		return fmt.Errorf("provider must be openai-compatible")
 	}
 	if err := validateHTTPURL(profile.BaseURL); err != nil {
 		return fmt.Errorf("invalid provider base URL: %w", err)
@@ -115,7 +115,6 @@ func ResolveCredential(reference string) (string, bool) {
 }
 
 func ApplyReasoningConnectionProfile(cfg *Config, profile ReasoningConnectionProfile) {
-	cfg.LLMProvider = profile.Provider
 	cfg.LLMBaseURL = profile.BaseURL
 	cfg.LLMModel = profile.Model
 	cfg.LLMJSONMode = profile.JSONMode

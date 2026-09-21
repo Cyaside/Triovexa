@@ -2,7 +2,7 @@
 
 Triovexa is an approval-gated incident response system for stalled workers and queue backlogs. It receives Prometheus alerts through Alertmanager, gathers workload evidence, proposes an allowlisted remediation, records an operator approval, executes the action through a constrained supervisor API, and verifies recovery from telemetry.
 
-The repository includes a real local workload: a producer and Redis Streams worker, PostgreSQL persistence, Prometheus, Alertmanager, Grafana, Loki with Grafana Alloy log collection, and a React operator console. The reasoning layer works without an API key through deterministic heuristics and can use Mistral or another OpenAI-compatible Chat Completions endpoint.
+The repository includes a real local workload: a producer and Redis Streams worker, PostgreSQL persistence, Prometheus, Alertmanager, Grafana, Loki with Grafana Alloy log collection, and a React operator console. The reasoning layer works without an API key through deterministic heuristics and can use an OpenAI-compatible Chat Completions endpoint.
 
 ## Proven path
 
@@ -51,7 +51,7 @@ The React + TypeScript console is served as embedded static assets by the Go ser
 - approval and execution controls with explicit conflict handling;
 - Grafana, Prometheus, Alertmanager, Loki, and reasoning-provider status;
 - Grafana onboarding and query preview;
-- Mistral and OpenAI-compatible provider configuration by credential reference;
+- OpenAI-compatible provider configuration with a runtime-only API key;
 - bounded playground controls for worker stall and processing failures;
 - loading, empty, stale, disconnected, forbidden, and `409` conflict states.
 
@@ -68,11 +68,11 @@ npm run build
 Reasoning mode and provider are separate settings:
 
 - `heuristic` runs without external credentials;
-- `llm` uses either `mistral` or `openai-compatible`;
+- `llm` uses the configured OpenAI-compatible endpoint;
 - every generated action is validated against the same action catalog and policy boundaries;
 - provider timeout, malformed output, or missing configuration falls back to heuristics and is recorded.
 
-The OpenAI-compatible adapter uses the Chat Completions contract. Configure an API root, model, credential environment-variable name, timeout, and JSON-mode capability in **Connections**. HTTP endpoints are accepted only on loopback in local mode; internal deployments require HTTPS and an administrator allowlist.
+The adapter uses the Chat Completions contract. Configure an API root, model, API key, and JSON-mode capability in **Connections**. A key entered in the console remains only in server memory until restart. HTTP endpoints are accepted only on loopback in local mode; internal deployments require HTTPS and an administrator allowlist.
 
 ## Safety and durability
 

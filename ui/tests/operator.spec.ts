@@ -19,14 +19,14 @@ test.beforeEach(async ({ page }) => {
   } }))
   await page.route('**/api/v1/actions/a1/approve', (route) => route.fulfill({ json: { status: 'accepted' } }))
   await page.route('**/api/v1/connections', (route) => route.fulfill({ json: {
-    reasoning: { configured: false, provider: 'mistral', model: 'mistral-small-latest' },
+    reasoning: { configured: false, provider: 'openai-compatible', model: '' },
     grafana: { configured: true, metrics_source_uid: 'prometheus', logs_source_uid: 'loki' },
     prometheus: { configured: true, endpoint: 'http://prometheus:9090' },
     alertmanager: { configured: true, endpoint: 'http://alertmanager:9093' },
     loki: { configured: true, endpoint: 'http://loki:3100' },
   } }))
   await page.route('**/api/v1/connections/prometheus/test', (route) => route.fulfill({ json: { status: 'connected', service: 'prometheus', latency_ms: 12 } }))
-  await page.route('**/api/v1/connections/reasoning/config', (route) => route.fulfill({ json: { provider: 'mistral', base_url: 'https://api.mistral.ai', model: 'mistral-small-latest', credential_ref: 'MISTRAL_API_KEY', credential_available: false, json_mode: true } }))
+  await page.route('**/api/v1/connections/reasoning/config', (route) => route.fulfill({ json: { provider: 'openai-compatible', base_url: 'https://api.openai.com/v1', model: 'gpt-4.1-mini', credential_ref: 'LLM_API_KEY', credential_available: route.request().method() === 'PUT', credential_source: route.request().method() === 'PUT' ? 'runtime_memory' : 'missing', json_mode: true } }))
   await page.route('**/api/v1/connections/grafana/config', (route) => route.fulfill({ json: { base_url: 'http://grafana:3000', credential_ref: 'GRAFANA_API_TOKEN', credential_available: false, metrics_source_uid: 'prometheus', logs_source_uid: 'loki', error_rate_query: '', latency_query: '', queue_query: 'triovexa_queue_backlog', replica_query: '', logs_query: '', deploy_logs_query: '' } }))
   await page.route('**/api/v1/settings', (route) => route.fulfill({ json: { deployment_mode: 'local-demo', environment: 'local', kill_switch_enabled: false, runtime: { reasoning: 'heuristic', observability: 'demo' } } }))
   await page.route('**/api/v1/playground', (route) => route.fulfill({ json: { enabled: true, modes: ['healthy', 'stall', 'fail'], state: { target: 'queue-worker', worker_healthy: true, queue_backlog: 3, jobs_processed: 24, generation: 1 } } }))
@@ -87,11 +87,15 @@ test('shows and tests direct monitoring connections', async ({ page }) => {
   await expect(page.getByText('12 ms')).toBeVisible()
 })
 
-test('configures provider references without accepting secret values', async ({ page }) => {
+test('accepts an OpenAI-compatible API key without displaying it again', async ({ page }) => {
   await page.goto('/ui/connections')
-  await expect(page.getByRole('heading', { name: 'Provider and model' })).toBeVisible()
-  await expect(page.getByLabel('Credential reference').first()).toHaveValue('MISTRAL_API_KEY')
-  await expect(page.getByText('Environment variable name; the secret value is never stored.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'OpenAI-compatible API' })).toBeVisible()
+  await page.getByLabel('API key').fill('browser-secret')
+  const request = page.waitForRequest((item) => item.url().endsWith('/api/v1/connections/reasoning/config') && item.method() === 'PUT')
+  await page.getByRole('button', { name: 'Save & activate' }).click()
+  expect((await request).postDataJSON().api_key).toBe('browser-secret')
+  await expect(page.getByLabel('API key')).toHaveValue('')
+  await expect(page.getByText('Provider activated. Reasoning mode is now using the configured LLM.')).toBeVisible()
 })
 
 test('injects a bounded worker stall from the playground', async ({ page }) => {

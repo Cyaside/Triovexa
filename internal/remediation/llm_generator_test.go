@@ -9,8 +9,8 @@ import (
 	"github.com/Cyaside/Triovexa/internal/execution"
 )
 
-func TestMistralGeneratorBuildsCatalogConstrainedActions(t *testing.T) {
-	generator := NewMistralGenerator(execution.DefaultCatalog(), remediationStubCompleter{
+func TestLLMGeneratorBuildsCatalogConstrainedActions(t *testing.T) {
+	generator := NewLLMGenerator(execution.DefaultCatalog(), remediationStubCompleter{
 		content: `{"actions":[{"action_type":"refresh_demo_cache","target_resource":"demo-cache","parameters":{"cache_key":"checkout-session"},"rationale":"aman","evidence_refs":["ev-1"]}]}`,
 	})
 
