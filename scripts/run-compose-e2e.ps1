@@ -6,7 +6,8 @@ param(
     [string]$EvidenceRoot = 'artifacts/e2e',
     [switch]$Reset,
     [switch]$SkipBuild,
-    [switch]$StopAfter
+    [switch]$StopAfter,
+    [switch]$RequireProvider
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,6 +60,17 @@ function Get-PrometheusAlerts {
     } finally { $ErrorActionPreference = $preference }
     if ($exitCode -ne 0) { throw 'Prometheus alert query failed.' }
     ($raw | Out-String) | ConvertFrom-Json
+}
+
+function Get-AlertmanagerAlerts {
+    $preference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $raw = & docker compose -p $ProjectName exec -T alertmanager wget -qO- 'http://127.0.0.1:9093/api/v2/alerts' 2>$null
+        $exitCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $preference }
+    if ($exitCode -ne 0) { throw 'Alertmanager alert query failed.' }
+    @(($raw | Out-String) | ConvertFrom-Json)
 }
 
 $runId = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
@@ -128,12 +140,43 @@ try {
     }
     Add-EvidenceStep 'E2E-01' 'Compose stack passed dependency-aware readiness' $health
 
+    $reasoningConfig = Invoke-Triovexa -Path '/api/v1/connections/reasoning/config'
+    $runtimeSettings = Invoke-Triovexa -Path '/api/v1/settings'
+    $providerEvidence = [ordered]@{
+        mode = $runtimeSettings.runtime.reasoning
+        provider = $reasoningConfig.provider
+        model = $reasoningConfig.model
+        credential_available = $reasoningConfig.credential_available
+        credential_source = $reasoningConfig.credential_source
+    }
+    if ($RequireProvider) {
+        if ($providerEvidence.mode -ne 'llm' -or -not $providerEvidence.credential_available -or [string]::IsNullOrWhiteSpace([string]$providerEvidence.model)) {
+            throw 'A connected OpenAI-compatible provider in llm mode is required for this demo.'
+        }
+        $providerTest = Wait-ForValue -TimeoutSec 330 -IntervalSec 3 -Description 'a valid JSON response from the reasoning provider' -Probe {
+            $candidate = Invoke-Triovexa -Path '/api/v1/connections/reasoning/test' -Method POST -Body @{} -TimeoutSec 310
+            if ($candidate.status -eq 'connected') { $candidate }
+        }
+        $providerEvidence['test'] = $providerTest
+    }
+    $result['reasoning'] = $providerEvidence
+
     Invoke-Triovexa -Path '/api/v1/playground/faults' -Method POST -Body @{ mode = 'healthy' } | Out-Null
     $baseline = Wait-ForValue -TimeoutSec 45 -Description 'a healthy queue baseline' -Probe {
         $candidate = Invoke-Triovexa -Path '/api/v1/playground'
         if ($candidate.enabled -and $candidate.state.worker_healthy -and [int]$candidate.state.queue_backlog -le 5) { $candidate.state }
     }
+    $clearedPipeline = Wait-ForValue -TimeoutSec 180 -Description 'the previous backlog alert to clear from Prometheus and Alertmanager' -Probe {
+        $prometheus = Get-PrometheusAlerts
+        $prometheusMatch = @($prometheus.data.alerts | Where-Object { $_.labels.alertname -eq 'TriovexaQueueBacklogHigh' -and $_.state -eq 'firing' })
+        $alertmanager = Get-AlertmanagerAlerts
+        $alertmanagerMatch = @($alertmanager | Where-Object { $_.labels.alertname -eq 'TriovexaQueueBacklogHigh' -and $_.status.state -eq 'active' })
+        if ($prometheusMatch.Count -eq 0 -and $alertmanagerMatch.Count -eq 0) {
+            [ordered]@{ prometheus_firing = 0; alertmanager_active = 0 }
+        }
+    }
     Add-EvidenceStep 'E2E-02' 'Real Redis Streams worker established a healthy baseline' $baseline
+    $result['alert_pipeline_baseline'] = $clearedPipeline
 
     $generationBefore = [int64]$baseline.generation
     $faultStartedAt = (Get-Date).ToUniversalTime()
@@ -162,13 +205,25 @@ try {
         incident = $incident
     })
 
-    $detail = Wait-ForValue -TimeoutSec 45 -Description 'restart recommendation awaiting approval' -Probe {
+    $reasoningWaitSeconds = if ($RequireProvider) { 660 } else { 45 }
+    $detail = Wait-ForValue -TimeoutSec $reasoningWaitSeconds -Description 'restart recommendation awaiting approval' -Probe {
         $candidate = Invoke-Triovexa -Path "/api/v1/incidents/$($incident.ID)"
         $restart = @($candidate.candidate_actions | Where-Object { $_.ActionType -eq 'restart_worker' -and $_.TargetResource -eq 'queue-worker' -and $_.Status -eq 'awaiting_approval' })
         if ($restart.Count -gt 0) { $candidate }
     }
     $action = @($detail.candidate_actions | Where-Object { $_.ActionType -eq 'restart_worker' -and $_.TargetResource -eq 'queue-worker' })[0]
-    Add-EvidenceStep 'E2E-05' 'Heuristic triage proposed an allowlisted worker restart' ([ordered]@{
+    $reasoningTitle = 'Configured reasoning path proposed an allowlisted worker restart'
+    if ($RequireProvider) {
+        $notes = [string]$detail.triage.ConfidenceNotes
+        if ($notes -match 'llm_fallback=true' -or $notes -notmatch [regex]::Escape("model=$($providerEvidence.model)")) {
+            throw "Triage was not generated by $($providerEvidence.model)."
+        }
+        if ([string]$action.ApprovalHint -notmatch [regex]::Escape("model=$($providerEvidence.model)")) {
+            throw "Remediation was not generated by $($providerEvidence.model)."
+        }
+        $reasoningTitle = "$($providerEvidence.model) proposed an allowlisted worker restart"
+    }
+    Add-EvidenceStep 'E2E-05' $reasoningTitle ([ordered]@{
         triage = $detail.triage
         action = $action
         evidence = $detail.evidence
@@ -225,6 +280,7 @@ try {
     $preference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        try { Invoke-Triovexa -Path '/api/v1/playground/faults' -Method POST -Body @{ mode = 'healthy' } -TimeoutSec 15 | Out-Null } catch {}
         & docker compose -p $ProjectName ps --format json 2>&1 | Set-Content -Encoding utf8 (Join-Path $runDirectory 'compose-ps.jsonl')
         & docker compose -p $ProjectName logs --no-color --tail 500 2>&1 | Set-Content -Encoding utf8 (Join-Path $runDirectory 'compose.log')
     } finally { $ErrorActionPreference = $preference }
