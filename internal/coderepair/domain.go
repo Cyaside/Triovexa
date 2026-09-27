@@ -1,0 +1,195 @@
+package coderepair
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
+
+type State string
+
+const (
+	StateProposed                      State = "proposed"
+	StateAwaitingInvestigationApproval State = "awaiting_investigation_approval"
+	StateInvestigating                 State = "investigating"
+	StatePatchReady                    State = "patch_ready"
+	StateAwaitingPublishApproval       State = "awaiting_publish_approval"
+	StatePublishing                    State = "publishing"
+	StatePROpen                        State = "pr_open"
+	StateMerged                        State = "merged"
+	StateAwaitingDeployment            State = "awaiting_deployment"
+	StateVerifying                     State = "verifying"
+	StateRecovered                     State = "recovered"
+	StateInconclusive                  State = "inconclusive"
+	StateBlocked                       State = "blocked"
+	StateFailed                        State = "failed"
+	StateCancelled                     State = "cancelled"
+	StateClosedWithoutMerge            State = "closed_without_merge"
+)
+
+var transitions = map[State]map[State]struct{}{
+	StateProposed:                      {StateAwaitingInvestigationApproval: {}, StateCancelled: {}},
+	StateAwaitingInvestigationApproval: {StateInvestigating: {}, StateCancelled: {}},
+	StateInvestigating:                 {StatePatchReady: {}, StateBlocked: {}, StateFailed: {}, StateCancelled: {}},
+	StatePatchReady:                    {StateAwaitingPublishApproval: {}, StateCancelled: {}},
+	StateAwaitingPublishApproval:       {StatePublishing: {}, StateCancelled: {}},
+	StatePublishing:                    {StatePROpen: {}, StateBlocked: {}, StateFailed: {}},
+	StatePROpen:                        {StateMerged: {}, StateClosedWithoutMerge: {}},
+	StateMerged:                        {StateAwaitingDeployment: {}},
+	StateAwaitingDeployment:            {StateVerifying: {}, StateInconclusive: {}},
+	StateVerifying:                     {StateRecovered: {}, StateInconclusive: {}, StateFailed: {}},
+	StateBlocked:                       {StateAwaitingInvestigationApproval: {}, StateAwaitingPublishApproval: {}, StateCancelled: {}},
+	StateInconclusive:                  {StateVerifying: {}, StateCancelled: {}},
+}
+
+func CanTransition(from, to State) bool {
+	_, ok := transitions[from][to]
+	return ok
+}
+
+type RepositoryBinding struct {
+	ID            string
+	ServiceName   string
+	Environment   string
+	RepositoryURL string
+	BaseRef       string
+	AllowedPaths  []string
+	TestRecipes   []string
+	PolicyVersion string
+	Enabled       bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+func (b RepositoryBinding) Validate() error {
+	if b.ID == "" || b.ServiceName == "" || b.Environment == "" || b.RepositoryURL == "" || b.BaseRef == "" || b.PolicyVersion == "" {
+		return errors.New("repository binding has missing required fields")
+	}
+	if !strings.HasPrefix(b.RepositoryURL, "https://") {
+		return errors.New("repository URL must use HTTPS")
+	}
+	if len(b.AllowedPaths) == 0 || len(b.TestRecipes) == 0 {
+		return errors.New("repository binding requires allowed paths and test recipes")
+	}
+	return nil
+}
+
+type Case struct {
+	ID            string
+	IncidentID    string
+	BindingID     string
+	BaseSHA       string
+	DeployedSHA   string
+	ScopeDigest   string
+	PolicyVersion string
+	State         State
+	Version       int64
+	CreatedBy     string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type Attempt struct {
+	ID            string
+	CaseID        string
+	Number        int
+	Status        string
+	Provider      string
+	Model         string
+	PromptVersion string
+	ErrorCode     string
+	ErrorMessage  string
+	StartedAt     time.Time
+	FinishedAt    time.Time
+	CreatedAt     time.Time
+}
+
+type Approval struct {
+	ID            string
+	CaseID        string
+	CaseVersion   int64
+	Phase         string
+	ActorID       string
+	Decision      string
+	ScopeDigest   string
+	PolicyVersion string
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+}
+
+type Event struct {
+	ID          string
+	CaseID      string
+	ActorID     string
+	Type        string
+	DetailsJSON string
+	CreatedAt   time.Time
+}
+
+type Artifact struct {
+	ID            string
+	AttemptID     string
+	Kind          string
+	ContentSHA256 string
+	ArtifactRef   string
+	ByteSize      int64
+	CreatedAt     time.Time
+}
+
+type Job struct {
+	ID          string
+	CaseID      string
+	AttemptID   string
+	Type        string
+	DedupKey    string
+	PayloadJSON string
+	Status      string
+	Attempts    int
+	MaxAttempts int
+	AvailableAt time.Time
+	LeaseOwner  string
+	LeaseToken  string
+	LeaseUntil  time.Time
+	LastError   string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+const (
+	JobTypeInvestigation = "investigation"
+	JobQueued            = "queued"
+	JobRunning           = "running"
+	JobSucceeded         = "succeeded"
+	JobDeadLetter        = "dead_letter"
+)
+
+func ScopeDigest(c Case, b RepositoryBinding) (string, error) {
+	if c.ID == "" || c.IncidentID == "" || c.BindingID != b.ID || c.BaseSHA == "" || c.DeployedSHA == "" || c.PolicyVersion != b.PolicyVersion {
+		return "", errors.New("repair scope is incomplete or binding policy changed")
+	}
+	data, err := json.Marshal(struct {
+		CaseID, IncidentID, BindingID, BaseSHA, DeployedSHA string
+		RepositoryURL, BaseRef, PolicyVersion               string
+		AllowedPaths, TestRecipes                           []string
+	}{
+		CaseID:        c.ID,
+		IncidentID:    c.IncidentID,
+		BindingID:     c.BindingID,
+		BaseSHA:       c.BaseSHA,
+		DeployedSHA:   c.DeployedSHA,
+		RepositoryURL: b.RepositoryURL,
+		BaseRef:       b.BaseRef,
+		PolicyVersion: b.PolicyVersion,
+		AllowedPaths:  b.AllowedPaths,
+		TestRecipes:   b.TestRecipes,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode repair scope: %w", err)
+	}
+	digest := sha256.Sum256(data)
+	return hex.EncodeToString(digest[:]), nil
+}
