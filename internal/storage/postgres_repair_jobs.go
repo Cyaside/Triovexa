@@ -79,13 +79,37 @@ func (s *PostgresStore) CompleteRepairJob(ctx context.Context, jobID, leaseToken
 	if jobID == "" || leaseToken == "" || now.IsZero() {
 		return false, errors.New("invalid repair job completion")
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE repair_jobs SET status='succeeded',lease_owner='',lease_token='',lease_until=NULL,updated_at=$1
-		WHERE id=$2 AND status='running' AND lease_token=$3 AND lease_until > $1`, now.UTC(), jobID, leaseToken)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
-	rows, err := result.RowsAffected()
-	return rows == 1, err
+	defer tx.Rollback()
+	job, err := scanRepairJob(tx.QueryRowContext(ctx, `SELECT `+repairJobColumns+` FROM repair_jobs WHERE id=$1 FOR UPDATE`, jobID))
+	if err != nil {
+		return false, err
+	}
+	if job.Status != coderepair.JobRunning || job.LeaseToken != leaseToken || !job.LeaseUntil.After(now) {
+		return false, nil
+	}
+	var state coderepair.State
+	if err := tx.QueryRowContext(ctx, `SELECT state FROM repair_cases WHERE id=$1`, job.CaseID).Scan(&state); err != nil {
+		return false, err
+	}
+	if !repairCaseHasCompletedInvestigation(state) {
+		return false, errors.New("repair handler returned without a durable investigation outcome")
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE repair_jobs SET status='succeeded',lease_owner='',lease_token='',
+		lease_until=NULL,updated_at=$1 WHERE id=$2`, now.UTC(), jobID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE repair_attempts SET status='succeeded',finished_at=$1
+		WHERE id=$2 AND status IN ('queued','running')`, now.UTC(), job.AttemptID); err != nil {
+		return false, err
+	}
+	if err := insertRepairEventTx(ctx, tx, repairEvent(job.CaseID, "investigation_job_completed", "patch outcome persisted", now)); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // FailRepairJob requeues a transient failure or records a terminal failure in

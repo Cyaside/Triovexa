@@ -184,6 +184,9 @@ func TestRepairApprovalAndLeaseFencingIntegration(t *testing.T) {
 	if err != nil || claimed.CaseID != c.ID || claimed.Attempts != 1 {
 		t.Fatalf("first claim=%+v err=%v", claimed, err)
 	}
+	if ok, err := store.CompleteRepairJob(ctx, claimed.ID, claimed.LeaseToken, now.Add(50*time.Millisecond)); err == nil || ok {
+		t.Fatalf("job completed without a persisted case outcome: ok=%v err=%v", ok, err)
+	}
 	if ok, err := store.RenewRepairJobLease(ctx, claimed.ID, "wrong-token", now.Add(100*time.Millisecond), time.Second); err != nil || ok {
 		t.Fatalf("wrong token renewed lease: ok=%v err=%v", ok, err)
 	}
@@ -302,6 +305,10 @@ func TestRepairRunnerRenewsLeaseUntilHandlerCompletesIntegration(t *testing.T) {
 		if result.Status == coderepair.JobSucceeded {
 			if result.Attempts != 1 {
 				t.Fatalf("renewed job was reclaimed: attempts=%d", result.Attempts)
+			}
+			var status string
+			if err := store.db.QueryRowContext(ctx, `SELECT status FROM repair_attempts WHERE id=$1`, attempt.ID).Scan(&status); err != nil || status != "succeeded" {
+				t.Fatalf("completed attempt status=%q err=%v", status, err)
 			}
 			return
 		}
