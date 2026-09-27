@@ -63,6 +63,12 @@ try {
     & docker info --format '{{.ServerVersion}}' *> $null
     if ($LASTEXITCODE -ne 0) { throw 'Docker Desktop is unavailable; this script did not touch any running project.' }
 
+    $regressionOutput = & go test -tags repair_regression ./internal/workload -run '^TestRepairFixtureAcceptsSchemaTwo$' -count=1 2>&1
+    if ($LASTEXITCODE -eq 0) { throw 'Fixture regression test unexpectedly passed before the source patch.' }
+    if (($regressionOutput | Out-String) -notmatch 'unsupported job schema version 2') {
+        throw "Fixture regression failed for an unrelated reason: $($regressionOutput | Out-String)"
+    }
+
     $serviceArgs = @('redis', 'workload-supervisor', 'producer', 'prometheus', 'alertmanager')
     if (-not $SkipBuild) { Invoke-Compose build workload-supervisor producer | Out-Null }
     Invoke-Compose up -d --no-build @serviceArgs | Out-Null
@@ -97,6 +103,7 @@ try {
         project = $ProjectName
         source_revision = $env:REPAIR_FIXTURE_REVISION
         fixture_schema = 2
+        regression_test_before_patch = 'failed_as_expected'
         prometheus_alert = $alert.labels.alertname
         before_restart = $before
         restart_operation_id = $operationID

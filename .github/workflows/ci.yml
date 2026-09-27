@@ -71,3 +71,21 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+
+  repair-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify source bug survives a real worker restart
+        shell: pwsh
+        run: ./scripts/verify-repair-fixture.ps1 -StopAfter
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-repair-fixture-evidence
+          path: artifacts/code-repair/*.json
+          if-no-files-found: ignore
