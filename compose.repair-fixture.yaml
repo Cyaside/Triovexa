@@ -1,0 +1,8 @@
+# Use with docker-compose.yml in a dedicated local project. This deliberately runs
+# a worker revision that rejects the fixture's valid schema version.
+services:
+  workload-supervisor:
+    environment:
+      APP_ENV: local
+      WORKLOAD_REPAIR_FIXTURE_SCHEMA: "2"
+      WORKLOAD_DEPLOYED_REVISION: ${REPAIR_FIXTURE_REVISION:-repair-fixture-v1}
