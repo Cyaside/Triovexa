@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -167,10 +168,18 @@ const (
 	JobDeadLetter        = "dead_letter"
 )
 
+func InvestigationDedupKey(caseID string, attemptNumber int) string {
+	return fmt.Sprintf("repair:investigation:%s:%d", caseID, attemptNumber)
+}
+
 func ScopeDigest(c Case, b RepositoryBinding) (string, error) {
 	if c.ID == "" || c.IncidentID == "" || c.BindingID != b.ID || c.BaseSHA == "" || c.DeployedSHA == "" || c.PolicyVersion != b.PolicyVersion {
 		return "", errors.New("repair scope is incomplete or binding policy changed")
 	}
+	paths := append([]string(nil), b.AllowedPaths...)
+	recipes := append([]string(nil), b.TestRecipes...)
+	sort.Strings(paths)
+	sort.Strings(recipes)
 	data, err := json.Marshal(struct {
 		CaseID, IncidentID, BindingID, BaseSHA, DeployedSHA string
 		RepositoryURL, BaseRef, PolicyVersion               string
@@ -184,8 +193,8 @@ func ScopeDigest(c Case, b RepositoryBinding) (string, error) {
 		RepositoryURL: b.RepositoryURL,
 		BaseRef:       b.BaseRef,
 		PolicyVersion: b.PolicyVersion,
-		AllowedPaths:  b.AllowedPaths,
-		TestRecipes:   b.TestRecipes,
+		AllowedPaths:  paths,
+		TestRecipes:   recipes,
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode repair scope: %w", err)

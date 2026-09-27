@@ -63,4 +63,16 @@ func TestScopeDigestChangesWithAuthorizationInputs(t *testing.T) {
 	if _, err := ScopeDigest(caseRecord, binding); err == nil {
 		t.Fatal("policy version change must invalidate scope")
 	}
+	caseRecord.PolicyVersion = binding.PolicyVersion
+	binding.AllowedPaths = []string{"internal/workload", "internal/coderepair"}
+	reordered := binding
+	reordered.AllowedPaths = []string{"internal/coderepair", "internal/workload"}
+	one, err := ScopeDigest(caseRecord, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := ScopeDigest(caseRecord, reordered)
+	if err != nil || one != two {
+		t.Fatalf("path order changed scope digest: first=%s second=%s err=%v", one, two, err)
+	}
 }
