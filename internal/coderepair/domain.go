@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -70,11 +69,34 @@ func (b RepositoryBinding) Validate() error {
 	if b.ID == "" || b.ServiceName == "" || b.Environment == "" || b.RepositoryURL == "" || b.BaseRef == "" || b.PolicyVersion == "" {
 		return errors.New("repository binding has missing required fields")
 	}
-	if !strings.HasPrefix(b.RepositoryURL, "https://") {
-		return errors.New("repository URL must use HTTPS")
+	if err := ValidateRepositoryURL(b.RepositoryURL); err != nil {
+		return err
+	}
+	if !validateBaseRef(b.BaseRef) {
+		return errors.New("repository binding has invalid base ref")
 	}
 	if len(b.AllowedPaths) == 0 || len(b.TestRecipes) == 0 {
 		return errors.New("repository binding requires allowed paths and test recipes")
+	}
+	seenPaths := make(map[string]struct{}, len(b.AllowedPaths))
+	for _, name := range b.AllowedPaths {
+		if err := ValidateRepoPath(name); err != nil {
+			return err
+		}
+		if _, exists := seenPaths[name]; exists {
+			return errors.New("repository binding contains duplicate allowed path")
+		}
+		seenPaths[name] = struct{}{}
+	}
+	seenRecipes := make(map[string]struct{}, len(b.TestRecipes))
+	for _, id := range b.TestRecipes {
+		if !validateRecipeID(id) {
+			return errors.New("repository binding contains invalid test recipe ID")
+		}
+		if _, exists := seenRecipes[id]; exists {
+			return errors.New("repository binding contains duplicate test recipe ID")
+		}
+		seenRecipes[id] = struct{}{}
 	}
 	return nil
 }
