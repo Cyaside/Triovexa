@@ -27,7 +27,7 @@ func TestRepositoryBindingRejectsUnsafeInputs(t *testing.T) {
 	}
 	for _, name := range []string{
 		".", "../workload", "internal/../.github", "/etc/passwd", "C:/secrets",
-		`internal\workload`, "internal//workload", ".github/workflows", ".env.local", "secrets/key.pem",
+		`internal\workload`, "internal//workload", "internal/workload\tsecret", ".github/workflows", ".env.local", "secrets/key.pem",
 	} {
 		binding := base
 		binding.AllowedPaths = []string{name}

@@ -6,6 +6,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 var (
@@ -49,7 +50,7 @@ func validateBaseRef(ref string) bool {
 // files before any file operation. Paths always use Git's forward slashes.
 func ValidateRepoPath(name string) error {
 	if name == "" || name == "." || strings.HasPrefix(name, "/") || path.Clean(name) != name ||
-		strings.ContainsAny(name, "\\:\x00\r\n*?<>|") {
+		strings.ContainsAny(name, "\\:*?<>|") || strings.IndexFunc(name, unicode.IsControl) >= 0 {
 		return errors.New("repository path must be a clean relative path")
 	}
 	for _, part := range strings.Split(name, "/") {

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -30,11 +31,12 @@ type SearchHit struct {
 // Workspace exposes only typed, bounded read operations inside a checked-out
 // repository. It does not provide a command or arbitrary write operation.
 type Workspace struct {
-	root    *os.Root
-	binding coderepair.RepositoryBinding
-	limits  Limits
-	mu      sync.Mutex
-	read    int64
+	root     *os.Root
+	rootPath string
+	binding  coderepair.RepositoryBinding
+	limits   Limits
+	mu       sync.Mutex
+	read     int64
 }
 
 func Open(rootPath string, binding coderepair.RepositoryBinding, limits Limits) (*Workspace, error) {
@@ -43,6 +45,10 @@ func Open(rootPath string, binding coderepair.RepositoryBinding, limits Limits) 
 	}
 	if limits.MaxFileBytes <= 0 || limits.MaxTotalBytes < limits.MaxFileBytes || limits.MaxListedFiles <= 0 || limits.MaxSearchHits <= 0 {
 		return nil, errors.New("workspace requires positive, consistent limits")
+	}
+	rootPath, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, err
 	}
 	info, err := os.Lstat(rootPath)
 	if err != nil {
@@ -55,7 +61,7 @@ func Open(rootPath string, binding coderepair.RepositoryBinding, limits Limits) 
 	if err != nil {
 		return nil, err
 	}
-	return &Workspace{root: root, binding: binding, limits: limits}, nil
+	return &Workspace{root: root, rootPath: rootPath, binding: binding, limits: limits}, nil
 }
 
 func (w *Workspace) Close() error { return w.root.Close() }

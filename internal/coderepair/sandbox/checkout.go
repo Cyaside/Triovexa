@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -52,7 +53,7 @@ func checkoutGitRepository(ctx context.Context, parent, repositoryURL, baseRef, 
 	if err := os.Mkdir(hooksPath, 0700); err != nil {
 		return "", err
 	}
-	if _, err := git(ctx, "clone", "--quiet", "--no-checkout", "--depth=1", "--single-branch", "--branch", baseRef,
+	if _, err := git(ctx, "-c", "http.followRedirects=false", "clone", "--quiet", "--no-checkout", "--no-tags", "--depth=1", "--single-branch", "--branch", baseRef,
 		"--", repositoryURL, checkoutPath); err != nil {
 		return "", err
 	}
@@ -84,7 +85,14 @@ func childOf(parent, child string) bool {
 }
 
 func git(ctx context.Context, args ...string) (string, error) {
+	return gitInput(ctx, nil, args...)
+}
+
+func gitInput(ctx context.Context, input []byte, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", args...)
+	if input != nil {
+		command.Stdin = bytes.NewReader(input)
+	}
 	command.Env = []string{}
 	for _, key := range []string{"PATH", "SystemRoot", "WINDIR", "TMP", "TEMP", "TMPDIR"} {
 		if value := os.Getenv(key); value != "" {
