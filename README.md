@@ -3,7 +3,7 @@
   <p><strong>Approval-gated incident response for stalled workers and queue backlogs.</strong></p>
   <p>Triovexa turns monitoring alerts into evidence-backed, policy-constrained remediation and verifies recovery from live telemetry.</p>
   <p>
-    <a href="go.mod"><img src="https://img.shields.io/badge/Go-1.23-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.23" /></a>
+    <a href="go.mod"><img src="https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.24" /></a>
     <a href="ui/package.json"><img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&amp;logoColor=111" alt="React 19" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2ea44f" alt="MIT License" /></a>
   </p>

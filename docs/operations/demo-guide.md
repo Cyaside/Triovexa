@@ -5,7 +5,7 @@ This guide helps other people run and demo Triovexa without needing a long verba
 ## Prerequisites
 
 - Docker Desktop running for local PostgreSQL
-- Go 1.23+ installed
+- Go 1.24+ installed
 - PowerShell able to run local scripts
 
 ## Starting The Environment
