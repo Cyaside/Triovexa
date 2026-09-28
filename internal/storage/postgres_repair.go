@@ -81,6 +81,25 @@ func getRepairBindingTx(ctx context.Context, tx *sql.Tx, id string) (coderepair.
 }
 
 func (s *PostgresStore) CreateRepairCase(ctx context.Context, repairCase coderepair.Case, event coderepair.Event) error {
+	if repairCase.State != coderepair.StateProposed {
+		return errors.New("direct case creation requires proposed state")
+	}
+	return s.createRepairCase(ctx, repairCase, event, nil)
+}
+
+// CreateRepairProposal commits the approval-ready case, audit and sanitized
+// evidence snapshot together. A case cannot be approved without its snapshot.
+func (s *PostgresStore) CreateRepairProposal(ctx context.Context, repairCase coderepair.Case, event coderepair.Event, snapshot coderepair.EvidenceSnapshot) error {
+	if repairCase.State != coderepair.StateAwaitingInvestigationApproval || !snapshot.VerifyDigest() ||
+		snapshot.IncidentID != repairCase.IncidentID || snapshot.DeployedRevision != repairCase.DeployedSHA ||
+		snapshot.CapturedAt.IsZero() || time.Since(snapshot.CapturedAt) > time.Minute ||
+		snapshot.CapturedAt.After(time.Now().Add(5*time.Second)) {
+		return errors.New("repair proposal requires fresh matching evidence snapshot")
+	}
+	return s.createRepairCase(ctx, repairCase, event, &snapshot)
+}
+
+func (s *PostgresStore) createRepairCase(ctx context.Context, repairCase coderepair.Case, event coderepair.Event, snapshot *coderepair.EvidenceSnapshot) error {
 	if repairCase.ID == "" || repairCase.IncidentID == "" || repairCase.BindingID == "" || repairCase.CreatedBy == "" ||
 		(repairCase.State != coderepair.StateProposed && repairCase.State != coderepair.StateAwaitingInvestigationApproval) ||
 		repairCase.Version != 1 || repairCase.CreatedAt.IsZero() || repairCase.UpdatedAt.IsZero() {
@@ -112,8 +131,18 @@ func (s *PostgresStore) CreateRepairCase(ctx context.Context, repairCase coderep
 	if service != binding.ServiceName || environment != binding.Environment {
 		return errors.New("incident target does not match repository binding")
 	}
+	if snapshot != nil && (snapshot.ServiceName != service || snapshot.Environment != environment) {
+		return errors.New("repair evidence target does not match incident")
+	}
 	if incidentState != "escalated" && incidentState != "failed_remediation" {
 		return errors.New("incident is not eligible for code repair")
+	}
+	if snapshot != nil {
+		incident := domain.Incident{ID: repairCase.IncidentID, ServiceName: service,
+			Environment: environment, State: domain.IncidentState(incidentState)}
+		if err := coderepair.CheckInvestigationEvidence(incident, binding, *snapshot, time.Now().UTC()); err != nil {
+			return err
+		}
 	}
 	if !coderepair.ValidGitRevision(repairCase.BaseSHA) || !coderepair.ValidGitRevision(repairCase.DeployedSHA) {
 		return errors.New("repair case requires complete Git revision IDs")
@@ -121,6 +150,15 @@ func (s *PostgresStore) CreateRepairCase(ctx context.Context, repairCase coderep
 	deployed, err := trustedDeployedRevisionTx(ctx, tx, repairCase.IncidentID, service, time.Now().UTC())
 	if err != nil || deployed != repairCase.DeployedSHA {
 		return errors.New("repair case deployed revision does not match fresh workload evidence")
+	}
+	if snapshot != nil {
+		freshLog, err := hasFreshRepairLogTx(ctx, tx, repairCase.IncidentID, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		if !freshLog {
+			return errors.New("repair proposal requires fresh stored log evidence")
+		}
 	}
 	digest, err := coderepair.ScopeDigest(repairCase, binding)
 	if err != nil || digest != repairCase.ScopeDigest {
@@ -137,7 +175,39 @@ func (s *PostgresStore) CreateRepairCase(ctx context.Context, repairCase coderep
 	if err := insertRepairEventTx(ctx, tx, event); err != nil {
 		return err
 	}
+	if snapshot != nil {
+		content, err := json.Marshal(snapshot)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO repair_evidence
+			(id,case_id,source,observed_at,complete,content_sha256,artifact_ref,created_at,snapshot_json)
+			VALUES ($1,$2,'incident_snapshot',$3,true,$4,'database',$5,$6::jsonb)`,
+			uuid.NewString(), repairCase.ID, snapshot.CapturedAt.UTC(), snapshot.SHA256,
+			repairCase.CreatedAt.UTC(), string(content)); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+func (s *PostgresStore) GetRepairEvidenceSnapshot(ctx context.Context, caseID string) (coderepair.EvidenceSnapshot, error) {
+	var content, digest, incidentID string
+	err := s.db.QueryRowContext(ctx, `SELECT e.snapshot_json::text,e.content_sha256,c.incident_id
+		FROM repair_evidence e JOIN repair_cases c ON c.id=e.case_id
+		WHERE e.case_id=$1 AND e.source='incident_snapshot'`, caseID).Scan(&content, &digest, &incidentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return coderepair.EvidenceSnapshot{}, ErrNotFound
+	}
+	if err != nil {
+		return coderepair.EvidenceSnapshot{}, err
+	}
+	var snapshot coderepair.EvidenceSnapshot
+	if err := json.Unmarshal([]byte(content), &snapshot); err != nil || !snapshot.VerifyDigest() ||
+		snapshot.SHA256 != digest || snapshot.IncidentID != incidentID {
+		return coderepair.EvidenceSnapshot{}, errors.New("repair evidence snapshot is corrupt")
+	}
+	return snapshot, nil
 }
 
 func trustedDeployedRevisionTx(ctx context.Context, tx *sql.Tx, incidentID, service string, now time.Time) (string, error) {
@@ -162,6 +232,14 @@ func trustedDeployedRevisionTx(ctx context.Context, tx *sql.Tx, incidentID, serv
 	}
 	rows.Close()
 	return coderepair.TrustedDeployedRevision(domain.Incident{ID: incidentID, ServiceName: service}, items, now)
+}
+
+func hasFreshRepairLogTx(ctx context.Context, tx *sql.Tx, incidentID string, now time.Time) (bool, error) {
+	var fresh bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM evidence_items
+		WHERE incident_id=$1 AND type='log' AND snippet<>'' AND timestamp >= $2 AND timestamp <= $3)`,
+		incidentID, now.Add(-time.Minute), now.Add(5*time.Second)).Scan(&fresh)
+	return fresh, err
 }
 
 const repairCaseColumns = `id, incident_id, binding_id, base_sha, deployed_sha, scope_digest,
@@ -298,9 +376,31 @@ func (s *PostgresStore) ApproveRepairInvestigation(ctx context.Context, approval
 	if err != nil || !binding.Enabled || digest != c.ScopeDigest || approval.ScopeDigest != digest || approval.PolicyVersion != c.PolicyVersion {
 		return false, errors.New("repair approval no longer matches repository, revision or policy")
 	}
+	var snapshotJSON, snapshotDigest string
+	if err := tx.QueryRowContext(ctx, `SELECT snapshot_json::text,content_sha256 FROM repair_evidence
+		WHERE case_id=$1 AND source='incident_snapshot'`, c.ID).Scan(&snapshotJSON, &snapshotDigest); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, errors.New("repair approval requires a captured evidence snapshot")
+		}
+		return false, err
+	}
+	var snapshot coderepair.EvidenceSnapshot
+	if err := json.Unmarshal([]byte(snapshotJSON), &snapshot); err != nil || !snapshot.VerifyDigest() ||
+		snapshot.SHA256 != snapshotDigest || snapshot.IncidentID != c.IncidentID ||
+		snapshot.ServiceName != binding.ServiceName || snapshot.Environment != binding.Environment ||
+		snapshot.DeployedRevision != c.DeployedSHA {
+		return false, errors.New("repair approval evidence snapshot is corrupt or mismatched")
+	}
 	deployed, err := trustedDeployedRevisionTx(ctx, tx, c.IncidentID, binding.ServiceName, time.Now().UTC())
 	if err != nil || deployed != c.DeployedSHA {
 		return false, errors.New("repair approval requires fresh matching deployed revision")
+	}
+	freshLog, err := hasFreshRepairLogTx(ctx, tx, c.IncidentID, time.Now().UTC())
+	if err != nil {
+		return false, err
+	}
+	if !freshLog {
+		return false, errors.New("repair approval requires fresh log evidence")
 	}
 	if !approval.ExpiresAt.After(time.Now().UTC()) {
 		return false, errors.New("repair approval expired")

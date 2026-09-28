@@ -14,6 +14,8 @@ type CaseStore interface {
 	CreateRepositoryBinding(context.Context, RepositoryBinding) error
 	GetActiveRepositoryBinding(context.Context, string, string) (RepositoryBinding, error)
 	CreateRepairCase(context.Context, Case, Event) error
+	CreateRepairProposal(context.Context, Case, Event, EvidenceSnapshot) error
+	GetRepairEvidenceSnapshot(context.Context, string) (EvidenceSnapshot, error)
 	GetRepairCase(context.Context, string) (Case, error)
 	TransitionRepairCase(context.Context, string, State, int64, State, Event) (bool, error)
 	ApproveRepairInvestigation(context.Context, Approval, Attempt, Job, Event) (bool, error)

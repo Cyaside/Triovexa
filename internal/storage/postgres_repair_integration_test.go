@@ -78,10 +78,14 @@ func makeInvestigationTestCase(t *testing.T, store *PostgresStore, maxAttempts i
 	}
 	deployedSHA := strings.Repeat("b", 40)
 	evidenceMetadata, _ := json.Marshal(map[string]any{"target": incident.ServiceName, "complete": true, "deployed_revision": deployedSHA})
-	if err := store.SaveEvidenceItems(ctx, []domain.EvidenceItem{{
+	evidenceItems := []domain.EvidenceItem{{
 		ID: uuid.NewString(), IncidentID: incidentID, Type: "metric", Source: "workload-control",
 		Snippet: "worker unhealthy", Timestamp: now, MetadataJSON: string(evidenceMetadata),
-	}}); err != nil {
+	}, {
+		ID: uuid.NewString(), IncidentID: incidentID, Type: "log", Source: "grafana-loki",
+		Snippet: "worker failed to process job", Timestamp: now, MetadataJSON: `{}`,
+	}}
+	if err := store.SaveEvidenceItems(ctx, evidenceItems); err != nil {
 		t.Fatal(err)
 	}
 	c := coderepair.Case{ID: uuid.NewString(), IncidentID: incidentID, BindingID: binding.ID,
@@ -93,6 +97,21 @@ func makeInvestigationTestCase(t *testing.T, store *PostgresStore, maxAttempts i
 		t.Fatal(err)
 	}
 	if err := store.CreateRepairCase(ctx, c, repairTestEvent(c.ID, "case_proposed", now)); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := coderepair.BuildEvidenceSnapshot(incident, evidenceItems, now,
+		coderepair.EvidenceLimits{MaxItems: 10, MaxSnippetBytes: 2048, MaxTotalBytes: 4096, MaxAge: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO repair_evidence
+		(id,case_id,source,observed_at,complete,content_sha256,artifact_ref,created_at,snapshot_json)
+		VALUES ($1,$2,'incident_snapshot',$3,true,$4,'database',$3,$5::jsonb)`,
+		uuid.NewString(), c.ID, now, snapshot.SHA256, string(snapshotJSON)); err != nil {
 		t.Fatal(err)
 	}
 	changed, err := store.TransitionRepairCase(ctx, c.ID, coderepair.StateProposed, 1,
@@ -139,6 +158,67 @@ func TestRepairCaseRejectsRevisionNotObservedByWorkloadIntegration(t *testing.T)
 	}
 }
 
+func TestRepairProposalStoresEvidenceWithCaseAndAuditIntegration(t *testing.T) {
+	store := isolatedRepairStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	incidentID := uuid.NewString()
+	incident := domain.Incident{ID: incidentID, ExternalAlertID: incidentID, AlertSource: "repair-test",
+		Title: "worker processing failure", ServiceName: "queue-worker-" + incidentID[:8], Environment: "staging",
+		Severity: "high", State: domain.IncidentStateEscalated, CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateIncident(ctx, incident); err != nil {
+		t.Fatal(err)
+	}
+	binding := coderepair.RepositoryBinding{ID: uuid.NewString(), ServiceName: incident.ServiceName,
+		Environment: incident.Environment, RepositoryURL: "https://github.com/Cyaside/Triovexa",
+		BaseRef: "repair-code-workflow", AllowedPaths: []string{"internal/workload"},
+		TestRecipes: []string{"go-test-workload"}, PolicyVersion: "repair-v1", Enabled: true,
+		CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateRepositoryBinding(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	deployedSHA := strings.Repeat("b", 40)
+	metadata, _ := json.Marshal(map[string]any{"target": incident.ServiceName, "complete": true, "deployed_revision": deployedSHA})
+	items := []domain.EvidenceItem{
+		{ID: uuid.NewString(), IncidentID: incident.ID, Type: "metric", Source: "workload-control",
+			Snippet: "backlog rising", Timestamp: now, MetadataJSON: string(metadata)},
+		{ID: uuid.NewString(), IncidentID: incident.ID, Type: "log", Source: "grafana-loki",
+			Snippet: "decode failed", Timestamp: now, MetadataJSON: `{}`},
+	}
+	if err := store.SaveEvidenceItems(ctx, items); err != nil {
+		t.Fatal(err)
+	}
+	limits := coderepair.EvidenceLimits{MaxItems: 10, MaxSnippetBytes: 2048, MaxTotalBytes: 4096, MaxAge: time.Minute}
+	service, err := coderepair.NewProposalService(store, func(context.Context, coderepair.RepositoryBinding) (string, error) {
+		return strings.Repeat("a", 40), nil
+	}, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, expected, err := service.Propose(ctx, incident.ID, "operator-test", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.State != coderepair.StateAwaitingInvestigationApproval {
+		t.Fatalf("proposal state = %q", c.State)
+	}
+	stored, err := store.GetRepairEvidenceSnapshot(ctx, c.ID)
+	if err != nil || !stored.VerifyDigest() || stored.SHA256 != expected.SHA256 {
+		t.Fatalf("stored evidence does not match proposal: %+v, %v", stored, err)
+	}
+	events, err := store.ListRepairEvents(ctx, c.ID)
+	if err != nil || len(events) != 1 || events[0].Type != "investigation_requested" {
+		t.Fatalf("proposal audit missing: %+v, %v", events, err)
+	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE repair_evidence SET snapshot_json=jsonb_set(snapshot_json,
+		'{deployed_revision}', '"tampered"') WHERE case_id=$1`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetRepairEvidenceSnapshot(ctx, c.ID); err == nil {
+		t.Fatal("tampered evidence snapshot was accepted")
+	}
+}
+
 func TestRepairApprovalRejectsStaleDeployedRevisionIntegration(t *testing.T) {
 	store := isolatedRepairStore(t)
 	ctx := context.Background()
@@ -155,6 +235,35 @@ func TestRepairApprovalRejectsStaleDeployedRevisionIntegration(t *testing.T) {
 	current, err := store.GetRepairCase(ctx, c.ID)
 	if err != nil || current.State != coderepair.StateAwaitingInvestigationApproval {
 		t.Fatalf("approval mutated case after stale evidence: case=%+v err=%v", current, err)
+	}
+}
+
+func TestRepairApprovalRejectsStaleLogIntegration(t *testing.T) {
+	store := isolatedRepairStore(t)
+	ctx := context.Background()
+	c, approval, attempt, job := makeInvestigationTestCase(t, store, 1)
+	if _, err := store.db.ExecContext(ctx, `UPDATE evidence_items SET timestamp=$1
+		WHERE incident_id=$2 AND type='log'`, time.Now().UTC().Add(-2*time.Minute), c.IncidentID); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := store.ApproveRepairInvestigation(ctx, approval, attempt, job,
+		repairTestEvent(c.ID, "investigation_approved", time.Now().UTC()))
+	if ok || err == nil || !strings.Contains(err.Error(), "fresh log evidence") {
+		t.Fatalf("stale log approved: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestRepairApprovalRejectsMissingSnapshotIntegration(t *testing.T) {
+	store := isolatedRepairStore(t)
+	ctx := context.Background()
+	c, approval, attempt, job := makeInvestigationTestCase(t, store, 1)
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM repair_evidence WHERE case_id=$1`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := store.ApproveRepairInvestigation(ctx, approval, attempt, job,
+		repairTestEvent(c.ID, "investigation_approved", time.Now().UTC()))
+	if ok || err == nil || !strings.Contains(err.Error(), "captured evidence snapshot") {
+		t.Fatalf("case without snapshot approved: ok=%v err=%v", ok, err)
 	}
 }
 

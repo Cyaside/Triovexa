@@ -17,7 +17,7 @@ type ProposalRepository interface {
 	GetIncident(context.Context, string) (domain.Incident, error)
 	GetActiveRepositoryBinding(context.Context, string, string) (RepositoryBinding, error)
 	ListEvidenceItems(context.Context, string) ([]domain.EvidenceItem, error)
-	CreateRepairCase(context.Context, Case, Event) error
+	CreateRepairProposal(context.Context, Case, Event, EvidenceSnapshot) error
 }
 
 type BaseRevisionResolver func(context.Context, RepositoryBinding) (string, error)
@@ -86,7 +86,7 @@ func (s *ProposalService) Propose(ctx context.Context, incidentID, actorID strin
 	}
 	event := Event{ID: uuid.NewString(), CaseID: repairCase.ID, ActorID: actorID,
 		Type: "investigation_requested", DetailsJSON: string(details), CreatedAt: now.UTC()}
-	if err := s.repository.CreateRepairCase(ctx, repairCase, event); err != nil {
+	if err := s.repository.CreateRepairProposal(ctx, repairCase, event, snapshot); err != nil {
 		return Case{}, snapshot, err
 	}
 	return repairCase, snapshot, nil

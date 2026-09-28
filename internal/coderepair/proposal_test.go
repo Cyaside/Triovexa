@@ -11,11 +11,12 @@ import (
 )
 
 type proposalRepository struct {
-	incident domain.Incident
-	binding  RepositoryBinding
-	items    []domain.EvidenceItem
-	created  []Case
-	events   []Event
+	incident  domain.Incident
+	binding   RepositoryBinding
+	items     []domain.EvidenceItem
+	created   []Case
+	events    []Event
+	snapshots []EvidenceSnapshot
 }
 
 func (r *proposalRepository) GetIncident(_ context.Context, id string) (domain.Incident, error) {
@@ -39,9 +40,10 @@ func (r *proposalRepository) ListEvidenceItems(_ context.Context, incidentID str
 	return r.items, nil
 }
 
-func (r *proposalRepository) CreateRepairCase(_ context.Context, c Case, event Event) error {
+func (r *proposalRepository) CreateRepairProposal(_ context.Context, c Case, event Event, snapshot EvidenceSnapshot) error {
 	r.created = append(r.created, c)
 	r.events = append(r.events, event)
+	r.snapshots = append(r.snapshots, snapshot)
 	return nil
 }
 
@@ -65,7 +67,7 @@ func TestProposalCreatesApprovalReadyCaseFromTrustedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != 1 || len(repo.created) != 1 || len(repo.events) != 1 {
+	if resolved != 1 || len(repo.created) != 1 || len(repo.events) != 1 || len(repo.snapshots) != 1 {
 		t.Fatalf("resolver calls=%d, cases=%d, events=%d", resolved, len(repo.created), len(repo.events))
 	}
 	if c.State != StateAwaitingInvestigationApproval || c.Version != 1 || c.BaseSHA != baseSHA ||
