@@ -13,7 +13,7 @@ $env:REPAIR_FIXTURE_REVISION = (git rev-parse HEAD).Trim()
 $composeArgs = @('compose', '-f', 'docker-compose.yml', '-f', 'compose.repair-fixture.yaml', '-p', $ProjectName)
 
 function Invoke-Compose {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
+    param([string[]]$Arguments)
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
@@ -25,7 +25,7 @@ function Invoke-Compose {
 }
 
 function Get-WorkloadMetrics {
-    $raw = Invoke-Compose exec -T workload-supervisor wget -qO- 'http://127.0.0.1:8091/metrics'
+    $raw = Invoke-Compose -Arguments @('exec', '-T', 'workload-supervisor', 'wget', '-qO-', 'http://127.0.0.1:8091/metrics')
     $values = @{}
     foreach ($line in ($raw | Out-String) -split "`n") {
         if ($line -match '^(triovexa_[a-z_]+)(?:\{[^}]+\})?\s+([0-9]+)') {
@@ -52,7 +52,7 @@ function Wait-For {
 }
 
 function Get-FiringBacklogAlert {
-    $raw = Invoke-Compose exec -T prometheus wget -qO- 'http://127.0.0.1:9090/api/v1/alerts'
+    $raw = Invoke-Compose -Arguments @('exec', '-T', 'prometheus', 'wget', '-qO-', 'http://127.0.0.1:9090/api/v1/alerts')
     $response = ($raw | Out-String) | ConvertFrom-Json
     return @($response.data.alerts | Where-Object {
         $_.labels.alertname -eq 'TriovexaQueueBacklogHigh' -and $_.state -eq 'firing'
@@ -70,8 +70,8 @@ try {
     }
 
     $serviceArgs = @('redis', 'workload-supervisor', 'producer', 'prometheus', 'alertmanager')
-    if (-not $SkipBuild) { Invoke-Compose build workload-supervisor producer | Out-Null }
-    Invoke-Compose up -d --no-build @serviceArgs | Out-Null
+    if (-not $SkipBuild) { Invoke-Compose -Arguments @('build', 'workload-supervisor', 'producer') | Out-Null }
+    Invoke-Compose -Arguments (@('up', '-d', '--no-build') + $serviceArgs) | Out-Null
 
     $before = Wait-For -TimeoutSec 90 -Description 'fixture backlog above 20 with an unhealthy worker' -Probe {
         $metrics = Get-WorkloadMetrics
@@ -84,7 +84,7 @@ try {
 
     $operationID = 'repair-fixture-' + [guid]::NewGuid().ToString('N')
     $request = @{ operation_id = $operationID; operation = 'restart_worker'; target = 'queue-worker'; requested_by = 'fixture-verification' } | ConvertTo-Json -Compress
-    $restartRaw = Invoke-Compose exec -T workload-supervisor wget -qO- '--header=Authorization: Bearer local-control-token' '--header=Content-Type: application/json' "--post-data=$request" 'http://127.0.0.1:8091/operations'
+    $restartRaw = Invoke-Compose -Arguments @('exec', '-T', 'workload-supervisor', 'wget', '-qO-', '--header=Authorization: Bearer local-control-token', '--header=Content-Type: application/json', "--post-data=$request", 'http://127.0.0.1:8091/operations')
     $restart = ($restartRaw | Out-String) | ConvertFrom-Json
     if ($restart.status -ne 'succeeded') { throw "Supervisor did not accept restart: $($restartRaw | Out-String)" }
     Start-Sleep -Seconds 12
@@ -115,6 +115,6 @@ try {
     Write-Host "Fixture verified: alert fired, restart happened, worker stayed unhealthy, backlog grew. Evidence: $path" -ForegroundColor Green
 } finally {
     if ($StopAfter) {
-        try { Invoke-Compose down | Out-Null } catch { Write-Warning $_.Exception.Message }
+        try { Invoke-Compose -Arguments @('down') | Out-Null } catch { Write-Warning $_.Exception.Message }
     }
 }

@@ -31,7 +31,9 @@ services:
       retries: 10
 
   workload-supervisor:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.workload
     restart: unless-stopped
     entrypoint: ["triovexa-workload", "supervisor"]
     environment:
@@ -43,7 +45,9 @@ services:
         condition: service_healthy
 
   producer:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.workload
     restart: unless-stopped
     entrypoint: ["triovexa-workload", "producer"]
     environment:
