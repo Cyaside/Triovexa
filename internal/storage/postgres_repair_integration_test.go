@@ -76,8 +76,16 @@ func makeInvestigationTestCase(t *testing.T, store *PostgresStore, maxAttempts i
 	if err := store.CreateRepositoryBinding(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
+	deployedSHA := strings.Repeat("b", 40)
+	evidenceMetadata, _ := json.Marshal(map[string]any{"target": incident.ServiceName, "complete": true, "deployed_revision": deployedSHA})
+	if err := store.SaveEvidenceItems(ctx, []domain.EvidenceItem{{
+		ID: uuid.NewString(), IncidentID: incidentID, Type: "metric", Source: "workload-control",
+		Snippet: "worker unhealthy", Timestamp: now, MetadataJSON: string(evidenceMetadata),
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	c := coderepair.Case{ID: uuid.NewString(), IncidentID: incidentID, BindingID: binding.ID,
-		BaseSHA: uuid.NewString(), DeployedSHA: uuid.NewString(), PolicyVersion: binding.PolicyVersion,
+		BaseSHA: strings.Repeat("a", 40), DeployedSHA: deployedSHA, PolicyVersion: binding.PolicyVersion,
 		State: coderepair.StateProposed, Version: 1, CreatedBy: "operator-test", CreatedAt: now, UpdatedAt: now}
 	var err error
 	c.ScopeDigest, err = coderepair.ScopeDigest(c, binding)
@@ -106,6 +114,48 @@ func makeInvestigationTestCase(t *testing.T, store *PostgresStore, maxAttempts i
 		ScopeDigest: c.ScopeDigest, PolicyVersion: c.PolicyVersion,
 		CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
 	return c, approval, attempt, job
+}
+
+func TestRepairCaseRejectsRevisionNotObservedByWorkloadIntegration(t *testing.T) {
+	store := isolatedRepairStore(t)
+	ctx := context.Background()
+	c, _, _, _ := makeInvestigationTestCase(t, store, 1)
+	binding, err := store.GetActiveRepositoryBinding(ctx, "queue-worker-"+c.IncidentID[:8], "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := c
+	bad.ID = uuid.NewString()
+	bad.State = coderepair.StateProposed
+	bad.Version = 1
+	bad.DeployedSHA = strings.Repeat("c", 40)
+	bad.ScopeDigest, err = coderepair.ScopeDigest(bad, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateRepairCase(ctx, bad, repairTestEvent(bad.ID, "case_proposed", time.Now().UTC())); err == nil ||
+		!strings.Contains(err.Error(), "deployed revision") {
+		t.Fatalf("case accepted unobserved deployed revision: %v", err)
+	}
+}
+
+func TestRepairApprovalRejectsStaleDeployedRevisionIntegration(t *testing.T) {
+	store := isolatedRepairStore(t)
+	ctx := context.Background()
+	c, approval, attempt, job := makeInvestigationTestCase(t, store, 1)
+	if _, err := store.db.ExecContext(ctx, `UPDATE evidence_items SET timestamp=$1 WHERE incident_id=$2`,
+		time.Now().UTC().Add(-2*time.Minute), c.IncidentID); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := store.ApproveRepairInvestigation(ctx, approval, attempt, job,
+		repairTestEvent(c.ID, "investigation_approved", time.Now().UTC()))
+	if ok || err == nil || !strings.Contains(err.Error(), "fresh matching deployed revision") {
+		t.Fatalf("stale deployed revision approved: ok=%v err=%v", ok, err)
+	}
+	current, err := store.GetRepairCase(ctx, c.ID)
+	if err != nil || current.State != coderepair.StateAwaitingInvestigationApproval {
+		t.Fatalf("approval mutated case after stale evidence: case=%+v err=%v", current, err)
+	}
 }
 
 func TestRepairApprovalAndLeaseFencingIntegration(t *testing.T) {
@@ -273,7 +323,7 @@ func TestRepairRunnerRenewsLeaseUntilHandlerCompletesIntegration(t *testing.T) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(650 * time.Millisecond):
+		case <-time.After(2500 * time.Millisecond):
 		}
 		changed, err := store.TransitionRepairCase(ctx, c.ID, coderepair.StateInvestigating, 3,
 			coderepair.StatePatchReady, repairTestEvent(c.ID, "patch_ready", time.Now().UTC()))
@@ -282,8 +332,8 @@ func TestRepairRunnerRenewsLeaseUntilHandlerCompletesIntegration(t *testing.T) {
 		}
 		handled <- struct{}{}
 		return nil
-	}, nil, repairrunner.Config{Workers: 1, Lease: 300 * time.Millisecond,
-		MaxRun: 3 * time.Second, PollInterval: 20 * time.Millisecond})
+	}, nil, repairrunner.Config{Workers: 1, Lease: time.Second,
+		MaxRun: 10 * time.Second, PollInterval: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,10 +343,10 @@ func TestRepairRunnerRenewsLeaseUntilHandlerCompletesIntegration(t *testing.T) {
 	defer func() { cancel(); <-done }()
 	select {
 	case <-handled:
-	case <-time.After(5 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("repair handler did not complete across multiple lease periods")
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		result, err := store.GetRepairJob(ctx, job.ID)
 		if err != nil {

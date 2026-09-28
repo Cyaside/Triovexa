@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Cyaside/Triovexa/internal/coderepair"
+	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/security"
 )
 
@@ -113,6 +114,13 @@ func (s *PostgresStore) CreateRepairCase(ctx context.Context, repairCase coderep
 	if incidentState != "escalated" && incidentState != "failed_remediation" {
 		return errors.New("incident is not eligible for code repair")
 	}
+	if !coderepair.ValidGitRevision(repairCase.BaseSHA) || !coderepair.ValidGitRevision(repairCase.DeployedSHA) {
+		return errors.New("repair case requires complete Git revision IDs")
+	}
+	deployed, err := trustedDeployedRevisionTx(ctx, tx, repairCase.IncidentID, service, time.Now().UTC())
+	if err != nil || deployed != repairCase.DeployedSHA {
+		return errors.New("repair case deployed revision does not match fresh workload evidence")
+	}
 	digest, err := coderepair.ScopeDigest(repairCase, binding)
 	if err != nil || digest != repairCase.ScopeDigest {
 		return errors.New("repair case scope does not match active binding")
@@ -129,6 +137,30 @@ func (s *PostgresStore) CreateRepairCase(ctx context.Context, repairCase coderep
 		return err
 	}
 	return tx.Commit()
+}
+
+func trustedDeployedRevisionTx(ctx context.Context, tx *sql.Tx, incidentID, service string, now time.Time) (string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id,incident_id,type,source,snippet,timestamp,metadata_json::text
+		FROM evidence_items WHERE incident_id=$1 AND source='workload-control' AND type='metric'
+		AND timestamp >= $2 ORDER BY timestamp DESC LIMIT 20`, incidentID, now.Add(-time.Minute))
+	if err != nil {
+		return "", err
+	}
+	var items []domain.EvidenceItem
+	for rows.Next() {
+		var item domain.EvidenceItem
+		if err := rows.Scan(&item.ID, &item.IncidentID, &item.Type, &item.Source, &item.Snippet, &item.Timestamp, &item.MetadataJSON); err != nil {
+			rows.Close()
+			return "", err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return "", err
+	}
+	rows.Close()
+	return coderepair.TrustedDeployedRevision(domain.Incident{ID: incidentID, ServiceName: service}, items, now)
 }
 
 const repairCaseColumns = `id, incident_id, binding_id, base_sha, deployed_sha, scope_digest,
@@ -264,6 +296,10 @@ func (s *PostgresStore) ApproveRepairInvestigation(ctx context.Context, approval
 	digest, err := coderepair.ScopeDigest(c, binding)
 	if err != nil || !binding.Enabled || digest != c.ScopeDigest || approval.ScopeDigest != digest || approval.PolicyVersion != c.PolicyVersion {
 		return false, errors.New("repair approval no longer matches repository, revision or policy")
+	}
+	deployed, err := trustedDeployedRevisionTx(ctx, tx, c.IncidentID, binding.ServiceName, time.Now().UTC())
+	if err != nil || deployed != c.DeployedSHA {
+		return false, errors.New("repair approval requires fresh matching deployed revision")
 	}
 	if !approval.ExpiresAt.After(time.Now().UTC()) {
 		return false, errors.New("repair approval expired")

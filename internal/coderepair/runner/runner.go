@@ -115,6 +115,12 @@ func (r *Runner) processJob(ctx context.Context, job coderepair.Job) {
 			case <-ticker.C:
 				ok, err := r.store.RenewRepairJobLease(jobCtx, job.ID, job.LeaseToken, time.Now().UTC(), r.config.Lease)
 				if err != nil || !ok {
+					// The handler cancels jobCtx when it finishes. A renewal
+					// interrupted by that cancellation did not lose the lease;
+					// completion still has to perform its fenced database check.
+					if jobCtx.Err() != nil {
+						return
+					}
 					if err != nil {
 						r.logger.Error("renew repair lease", "job_id", job.ID, "error", security.Redact(err.Error()))
 					}

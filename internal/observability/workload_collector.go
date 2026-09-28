@@ -38,17 +38,18 @@ func (c *WorkloadCollector) Collect(ctx context.Context, incident domain.Inciden
 		return nil, fmt.Errorf("workload evidence returned %d", response.StatusCode)
 	}
 	var state struct {
-		Target         string    `json:"target"`
-		Source         string    `json:"source"`
-		Timestamp      time.Time `json:"timestamp"`
-		Complete       bool      `json:"complete"`
-		WorkerHealthy  bool      `json:"worker_healthy"`
-		ConsumerPaused bool      `json:"consumer_paused"`
-		QueueBacklog   int       `json:"queue_backlog"`
-		JobsProcessed  int64     `json:"jobs_processed"`
-		JobsProduced   int64     `json:"jobs_produced"`
-		Errors         int64     `json:"errors"`
-		Generation     int64     `json:"generation"`
+		Target           string    `json:"target"`
+		Source           string    `json:"source"`
+		Timestamp        time.Time `json:"timestamp"`
+		Complete         bool      `json:"complete"`
+		WorkerHealthy    bool      `json:"worker_healthy"`
+		ConsumerPaused   bool      `json:"consumer_paused"`
+		QueueBacklog     int       `json:"queue_backlog"`
+		JobsProcessed    int64     `json:"jobs_processed"`
+		JobsProduced     int64     `json:"jobs_produced"`
+		Errors           int64     `json:"errors"`
+		Generation       int64     `json:"generation"`
+		DeployedRevision string    `json:"deployed_revision"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&state); err != nil {
 		return nil, fmt.Errorf("decode workload evidence: %w", err)
@@ -67,6 +68,7 @@ func (c *WorkloadCollector) Collect(ctx context.Context, incident domain.Inciden
 		"mode": mode, "workerHealthy": state.WorkerHealthy, "consumer_paused": state.ConsumerPaused,
 		"queue_backlog": state.QueueBacklog, "jobs_processed": state.JobsProcessed, "jobs_produced": state.JobsProduced,
 		"error_rate": float64(state.Errors), "latency_ms": 0, "replica_count": 1, "generation": state.Generation,
+		"deployed_revision": state.DeployedRevision,
 	})
 	return []domain.EvidenceItem{{
 		ID: uuid.NewString(), IncidentID: incident.ID, Type: "metric", Source: "workload-control",
