@@ -42,6 +42,10 @@ func TestCheckoutPinsBranchAndCleansMismatch(t *testing.T) {
 	revision := runTestGit(t, source, "rev-parse", "HEAD")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	resolved, err := resolveGitBaseRevision(ctx, source, "main")
+	if err != nil || resolved != revision {
+		t.Fatalf("resolved base revision=%q want=%q err=%v", resolved, revision, err)
+	}
 	checkout, err := checkoutGitRepository(ctx, parent, source, "main", revision)
 	if err != nil {
 		t.Fatal(err)

@@ -17,6 +17,28 @@ import (
 
 // Checkout creates a private, detached checkout of the registered branch at
 // the exact approved base commit. A branch movement blocks the investigation.
+func ResolveBaseRevision(ctx context.Context, binding coderepair.RepositoryBinding) (string, error) {
+	if err := binding.Validate(); err != nil {
+		return "", err
+	}
+	if _, bounded := ctx.Deadline(); !bounded {
+		return "", errors.New("base revision lookup requires a deadline")
+	}
+	return resolveGitBaseRevision(ctx, binding.RepositoryURL, binding.BaseRef)
+}
+
+func resolveGitBaseRevision(ctx context.Context, repositoryURL, baseRef string) (string, error) {
+	output, err := git(ctx, "-c", "http.followRedirects=false", "ls-remote", "--heads", repositoryURL, "refs/heads/"+baseRef)
+	if err != nil {
+		return "", err
+	}
+	parts := strings.Split(strings.TrimSpace(output), "\t")
+	if len(parts) != 2 || parts[1] != "refs/heads/"+baseRef || !coderepair.ValidGitRevision(parts[0]) {
+		return "", errors.New("registered base branch has no unique complete revision")
+	}
+	return parts[0], nil
+}
+
 func Checkout(ctx context.Context, parent string, binding coderepair.RepositoryBinding, baseSHA string) (string, error) {
 	if err := binding.Validate(); err != nil {
 		return "", err

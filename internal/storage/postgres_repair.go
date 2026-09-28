@@ -82,7 +82,8 @@ func getRepairBindingTx(ctx context.Context, tx *sql.Tx, id string) (coderepair.
 
 func (s *PostgresStore) CreateRepairCase(ctx context.Context, repairCase coderepair.Case, event coderepair.Event) error {
 	if repairCase.ID == "" || repairCase.IncidentID == "" || repairCase.BindingID == "" || repairCase.CreatedBy == "" ||
-		repairCase.State != coderepair.StateProposed || repairCase.Version != 1 || repairCase.CreatedAt.IsZero() || repairCase.UpdatedAt.IsZero() {
+		(repairCase.State != coderepair.StateProposed && repairCase.State != coderepair.StateAwaitingInvestigationApproval) ||
+		repairCase.Version != 1 || repairCase.CreatedAt.IsZero() || repairCase.UpdatedAt.IsZero() {
 		return errors.New("invalid initial repair case")
 	}
 	if err := validateRepairEvent(event, repairCase.ID); err != nil {
