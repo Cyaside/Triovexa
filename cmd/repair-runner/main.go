@@ -15,9 +15,8 @@ import (
 	repairrunner "github.com/Cyaside/Triovexa/internal/coderepair/runner"
 	"github.com/Cyaside/Triovexa/internal/coderepair/sandbox"
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
-	"github.com/Cyaside/Triovexa/internal/secretstore"
+	"github.com/Cyaside/Triovexa/internal/connections"
 	"github.com/Cyaside/Triovexa/internal/security"
-	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 )
 
@@ -43,7 +42,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer store.Close()
-	if err := loadReasoningConnection(context.Background(), store, &cfg); err != nil {
+	if err := connections.LoadReasoning(context.Background(), store, &cfg); err != nil {
 		return err
 	}
 	provider, baseURL, apiKey, model := cfg.EffectiveLLM()
@@ -82,50 +81,4 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	logger.Info("repair investigation runner started", "provider", provider, "model", model)
 	return runner.Run(ctx)
-}
-
-type settingReader interface {
-	GetSetting(context.Context, string) (string, error)
-}
-
-func loadReasoningConnection(ctx context.Context, store settingReader, cfg *appconfig.Config) error {
-	raw, err := store.GetSetting(ctx, appconfig.ReasoningConnectionBundleSettingKey)
-	if errors.Is(err, storage.ErrNotFound) {
-		profileRaw, profileErr := store.GetSetting(ctx, appconfig.ReasoningConnectionSettingKey)
-		if errors.Is(profileErr, storage.ErrNotFound) {
-			return nil // Environment configuration remains the source in this case.
-		}
-		if profileErr != nil {
-			return profileErr
-		}
-		profile, decodeErr := appconfig.DecodeReasoningConnectionProfile(profileRaw)
-		if decodeErr != nil {
-			return decodeErr
-		}
-		appconfig.ApplyReasoningConnectionProfile(cfg, profile)
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	bundle, err := appconfig.DecodeReasoningConnectionBundle(raw)
-	if err != nil {
-		return err
-	}
-	if cfg.CredentialEncryptionKey == "" {
-		if _, err := os.Stat(cfg.CredentialKeyPath); err != nil {
-			return errors.New("stored reasoning connection requires the existing credential key file")
-		}
-	}
-	cipher, err := secretstore.NewCipher(cfg.CredentialKeyPath, cfg.CredentialEncryptionKey)
-	if err != nil {
-		return err
-	}
-	apiKey, err := cipher.Decrypt(bundle.EncryptedAPIKey)
-	if err != nil {
-		return errors.New("stored reasoning credential could not be decrypted")
-	}
-	appconfig.ApplyReasoningConnectionProfile(cfg, bundle.Profile)
-	cfg.LLMAPIKey = apiKey
-	return nil
 }
