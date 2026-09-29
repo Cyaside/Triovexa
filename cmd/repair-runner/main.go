@@ -83,10 +83,26 @@ func run(logger *slog.Logger) error {
 	return runner.Run(ctx)
 }
 
-func loadReasoningConnection(ctx context.Context, store *storage.PostgresStore, cfg *appconfig.Config) error {
+type settingReader interface {
+	GetSetting(context.Context, string) (string, error)
+}
+
+func loadReasoningConnection(ctx context.Context, store settingReader, cfg *appconfig.Config) error {
 	raw, err := store.GetSetting(ctx, appconfig.ReasoningConnectionBundleSettingKey)
 	if errors.Is(err, storage.ErrNotFound) {
-		return nil // Environment configuration remains the source in this case.
+		profileRaw, profileErr := store.GetSetting(ctx, appconfig.ReasoningConnectionSettingKey)
+		if errors.Is(profileErr, storage.ErrNotFound) {
+			return nil // Environment configuration remains the source in this case.
+		}
+		if profileErr != nil {
+			return profileErr
+		}
+		profile, decodeErr := appconfig.DecodeReasoningConnectionProfile(profileRaw)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		appconfig.ApplyReasoningConnectionProfile(cfg, profile)
+		return nil
 	}
 	if err != nil {
 		return err
@@ -94,6 +110,11 @@ func loadReasoningConnection(ctx context.Context, store *storage.PostgresStore, 
 	bundle, err := appconfig.DecodeReasoningConnectionBundle(raw)
 	if err != nil {
 		return err
+	}
+	if cfg.CredentialEncryptionKey == "" {
+		if _, err := os.Stat(cfg.CredentialKeyPath); err != nil {
+			return errors.New("stored reasoning connection requires the existing credential key file")
+		}
 	}
 	cipher, err := secretstore.NewCipher(cfg.CredentialKeyPath, cfg.CredentialEncryptionKey)
 	if err != nil {
