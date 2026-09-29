@@ -22,10 +22,6 @@ type Runner struct {
 	pollInterval time.Duration
 }
 
-func NewRunner(store storage.DurableJobStore, handler Handler, logger *slog.Logger, workers int) *Runner {
-	return NewRunnerWithLease(store, handler, logger, workers, 45*time.Second)
-}
-
 func NewRunnerWithLease(store storage.DurableJobStore, handler Handler, logger *slog.Logger, workers int, lease time.Duration) *Runner {
 	if workers <= 0 {
 		workers = 2

@@ -79,27 +79,6 @@ func NewService(
 	}
 }
 
-func (s *Service) IngestGrafanaWebhook(ctx context.Context, payload alerting.GrafanaWebhookPayload) (domain.Incident, error) {
-	incident, shouldRunTriage, err := s.acceptGrafanaWebhook(ctx, payload, false)
-	if err != nil {
-		return domain.Incident{}, err
-	}
-	if !shouldRunTriage {
-		return incident, nil
-	}
-
-	if _, err := s.runReadOnlyTriage(ctx, incident); err != nil {
-		return incident, err
-	}
-
-	latest, err := s.repository.GetIncident(ctx, incident.ID)
-	if err != nil {
-		return domain.Incident{}, fmt.Errorf("reload incident after triage: %w", err)
-	}
-
-	return latest, nil
-}
-
 func (s *Service) IngestGrafanaWebhookAsync(ctx context.Context, payload alerting.GrafanaWebhookPayload) (domain.Incident, error) {
 	incident, shouldRunTriage, err := s.acceptGrafanaWebhook(ctx, payload, true)
 	if err != nil {

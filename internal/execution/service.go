@@ -22,6 +22,7 @@ const (
 	ExecutionStatusFailed       = "failed"
 	ExecutionStatusTimedOut     = "timed_out"
 	ExecutionStatusInconclusive = "inconclusive"
+	evidenceMaxAge              = time.Minute
 )
 
 type KillSwitchReader interface {
@@ -73,17 +74,16 @@ func (e RetryableError) Unwrap() error {
 }
 
 type Service struct {
-	repository     storage.Repository
-	catalog        Catalog
-	adapter        Adapter
-	killSwitch     KillSwitchReader
-	verifier       VerificationWorkflow
-	metrics        *telemetry.Recorder
-	timeout        time.Duration
-	retries        int
-	cooldown       time.Duration
-	evidenceMaxAge time.Duration
-	now            func() time.Time
+	repository storage.Repository
+	catalog    Catalog
+	adapter    Adapter
+	killSwitch KillSwitchReader
+	verifier   VerificationWorkflow
+	metrics    *telemetry.Recorder
+	timeout    time.Duration
+	retries    int
+	cooldown   time.Duration
+	now        func() time.Time
 }
 
 func NewService(
@@ -107,26 +107,18 @@ func NewService(
 	}
 
 	return &Service{
-		repository:     repository,
-		catalog:        catalog,
-		adapter:        adapter,
-		killSwitch:     killSwitch,
-		verifier:       verifier,
-		timeout:        timeout,
-		retries:        retries,
-		cooldown:       cooldown,
-		evidenceMaxAge: time.Minute,
+		repository: repository,
+		catalog:    catalog,
+		adapter:    adapter,
+		killSwitch: killSwitch,
+		verifier:   verifier,
+		timeout:    timeout,
+		retries:    retries,
+		cooldown:   cooldown,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
 	}
-}
-
-func (s *Service) WithEvidenceMaxAge(maxAge time.Duration) *Service {
-	if maxAge > 0 {
-		s.evidenceMaxAge = maxAge
-	}
-	return s
 }
 
 func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
@@ -471,7 +463,7 @@ func (s *Service) validateEvidenceFreshness(ctx context.Context, action domain.C
 		if !ok {
 			return fmt.Errorf("referenced evidence %q is missing", reference)
 		}
-		if item.Timestamp.IsZero() || s.now().Sub(item.Timestamp) > s.evidenceMaxAge {
+		if item.Timestamp.IsZero() || s.now().Sub(item.Timestamp) > evidenceMaxAge {
 			return fmt.Errorf("referenced evidence %q is stale", reference)
 		}
 		var metadata map[string]any

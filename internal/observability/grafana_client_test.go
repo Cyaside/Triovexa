@@ -53,10 +53,10 @@ func TestGrafanaClientLokiLines(t *testing.T) {
 
 func TestRenderQueryTemplate(t *testing.T) {
 	incident := domainFixture()
-	rendered := renderQueryTemplate(`rate(http_requests_total{service="{{service}}",environment="{{environment}}"}[5m])`, incident)
+	rendered := NewQueryRenderer().Render(`rate(http_requests_total{service="{{service}}",environment="{{environment}}"}[5m])`, incident)
 
 	if rendered != `rate(http_requests_total{service="checkout-service",environment="staging"}[5m])` {
-		t.Fatalf("renderQueryTemplate() = %q", rendered)
+		t.Fatalf("QueryRenderer.Render() = %q", rendered)
 	}
 }
 

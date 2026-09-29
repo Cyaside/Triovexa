@@ -22,10 +22,23 @@ import (
 	"github.com/Cyaside/Triovexa/internal/policy"
 	"github.com/Cyaside/Triovexa/internal/remediation"
 	"github.com/Cyaside/Triovexa/internal/retrieval"
+	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/storage/memory"
 	"github.com/Cyaside/Triovexa/internal/triage"
 	"github.com/Cyaside/Triovexa/internal/verification"
 )
+
+func NewServer(
+	cfg config.Config,
+	logger *slog.Logger,
+	repository storage.Repository,
+	incidentService *incident.Service,
+	approvalService *approval.Service,
+	executionService *execution.Service,
+	runtimeControls ...*RuntimeControls,
+) *http.Server {
+	return NewServerWithTelemetry(cfg, logger, repository, incidentService, approvalService, executionService, nil, runtimeControls...)
+}
 
 func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	t.Parallel()

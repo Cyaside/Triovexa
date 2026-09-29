@@ -54,39 +54,6 @@ func LoadObservabilityProfile(path string) (ObservabilityProfile, bool, error) {
 	return profile, true, nil
 }
 
-func SaveObservabilityProfile(path string, profile ObservabilityProfile) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return fmt.Errorf("observability profile path is empty")
-	}
-
-	profile = normalizeObservabilityProfile(profile)
-	content, err := json.MarshalIndent(profile, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode observability profile: %w", err)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create observability profile directory: %w", err)
-	}
-	if err := os.WriteFile(path, append(content, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write observability profile: %w", err)
-	}
-
-	return nil
-}
-
-func ClearObservabilityProfile(path string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove observability profile: %w", err)
-	}
-	return nil
-}
-
 func normalizeObservabilityProfile(profile ObservabilityProfile) ObservabilityProfile {
 	profile.BaseURL = strings.TrimSpace(profile.BaseURL)
 	profile.APIToken = strings.TrimSpace(profile.APIToken)

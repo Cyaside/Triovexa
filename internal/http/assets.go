@@ -12,11 +12,6 @@ var uiAssetFiles embed.FS
 
 var uiAssetHandler = newUIAssetHandler()
 
-func uiAppAvailable() bool {
-	_, err := uiAssetFiles.ReadFile("assets/app/index.html")
-	return err == nil
-}
-
 func serveUIApp(w http.ResponseWriter, r *http.Request) {
 	body, err := uiAssetFiles.ReadFile("assets/app/index.html")
 	if err != nil {

@@ -29,18 +29,6 @@ type ServerInfo struct {
 	Timestamp           string   `json:"timestamp"`
 }
 
-func NewServer(
-	cfg config.Config,
-	logger *slog.Logger,
-	repository storage.Repository,
-	incidentService *incident.Service,
-	approvalService *approval.Service,
-	executionService *execution.Service,
-	runtimeControls ...*RuntimeControls,
-) *http.Server {
-	return NewServerWithTelemetry(cfg, logger, repository, incidentService, approvalService, executionService, nil, runtimeControls...)
-}
-
 func NewServerWithTelemetry(
 	cfg config.Config,
 	logger *slog.Logger,

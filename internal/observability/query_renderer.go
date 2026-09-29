@@ -33,7 +33,3 @@ func escapeQueryLabel(value string) string {
 	value = strings.ReplaceAll(value, "\r", `\r`)
 	return value
 }
-
-func renderQueryTemplate(template string, incident domain.Incident) string {
-	return NewQueryRenderer().Render(template, incident)
-}

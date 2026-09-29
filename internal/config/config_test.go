@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,15 +60,13 @@ func TestLoadConfigIncludesProviderDefaults(t *testing.T) {
 
 func TestLoadUsesLocalObservabilityProfileWhenEnvUnset(t *testing.T) {
 	profilePath := filepath.Join(t.TempDir(), "observability-profile.json")
-	if err := SaveObservabilityProfile(profilePath, ObservabilityProfile{
+	writeObservabilityProfile(t, profilePath, ObservabilityProfile{
 		BaseURL:          "https://grafana.example.com",
 		APIToken:         "local-token",
 		MetricsSourceUID: "metrics-uid",
 		LogsSourceUID:    "logs-uid",
 		ErrorRateQuery:   "vector(0.12)",
-	}); err != nil {
-		t.Fatalf("SaveObservabilityProfile() error = %v", err)
-	}
+	})
 
 	t.Setenv("LOCAL_OBSERVABILITY_PROFILE_PATH", profilePath)
 	t.Setenv("GRAFANA_BASE_URL", "")
@@ -100,13 +99,11 @@ func TestLoadUsesLocalObservabilityProfileWhenEnvUnset(t *testing.T) {
 
 func TestLoadPrefersEnvOverLocalObservabilityProfile(t *testing.T) {
 	profilePath := filepath.Join(t.TempDir(), "observability-profile.json")
-	if err := SaveObservabilityProfile(profilePath, ObservabilityProfile{
+	writeObservabilityProfile(t, profilePath, ObservabilityProfile{
 		BaseURL:        "https://grafana.example.com",
 		APIToken:       "local-token",
 		ErrorRateQuery: "vector(0.12)",
-	}); err != nil {
-		t.Fatalf("SaveObservabilityProfile() error = %v", err)
-	}
+	})
 
 	t.Setenv("LOCAL_OBSERVABILITY_PROFILE_PATH", profilePath)
 	t.Setenv("GRAFANA_BASE_URL", "https://override.example.com")
@@ -135,9 +132,7 @@ func TestObservabilityProfileRoundTrip(t *testing.T) {
 		LogsSourceUID:    " logs-uid ",
 	}
 
-	if err := SaveObservabilityProfile(profilePath, input); err != nil {
-		t.Fatalf("SaveObservabilityProfile() error = %v", err)
-	}
+	writeObservabilityProfile(t, profilePath, input)
 
 	info, err := os.Stat(profilePath)
 	if err != nil {
@@ -161,10 +156,21 @@ func TestObservabilityProfileRoundTrip(t *testing.T) {
 		t.Fatalf("APIToken = %q, want trimmed value", loaded.APIToken)
 	}
 
-	if err := ClearObservabilityProfile(profilePath); err != nil {
-		t.Fatalf("ClearObservabilityProfile() error = %v", err)
+	if err := os.Remove(profilePath); err != nil {
+		t.Fatalf("remove profile: %v", err)
 	}
 	if _, ok, err := LoadObservabilityProfile(profilePath); err != nil || ok {
 		t.Fatalf("profile should be cleared, got ok=%v err=%v", ok, err)
+	}
+}
+
+func writeObservabilityProfile(t *testing.T, path string, profile ObservabilityProfile) {
+	t.Helper()
+	content, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
