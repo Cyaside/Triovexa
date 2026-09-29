@@ -514,7 +514,11 @@ func redactRepairError(message string) string {
 }
 
 func repairEvent(caseID, eventType, message string, now time.Time) coderepair.Event {
+	return repairEventActor(caseID, "repair-runner", eventType, message, now)
+}
+
+func repairEventActor(caseID, actorID, eventType, message string, now time.Time) coderepair.Event {
 	details, _ := json.Marshal(map[string]string{"reason": redactRepairError(message)})
-	return coderepair.Event{ID: uuid.NewString(), CaseID: caseID, ActorID: "repair-runner", Type: eventType,
+	return coderepair.Event{ID: uuid.NewString(), CaseID: caseID, ActorID: actorID, Type: eventType,
 		DetailsJSON: string(details), CreatedAt: now.UTC()}
 }
