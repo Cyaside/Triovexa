@@ -117,6 +117,15 @@ func remoteHost(address string) string {
 func securityMiddleware(cfg config.Config, service *auth.Service, metrics *telemetry.Recorder, next http.Handler) http.Handler {
 	webhookLimiter := newLoginLimiter()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/webhooks/github/repair" || r.URL.Path == "/webhooks/deployment/repair" {
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			if cfg.WebhookRateLimit > 0 && !webhookLimiter.allowWindow("github:"+remoteHost(r.RemoteAddr), time.Now(), cfg.WebhookRateLimit, cfg.WebhookRateWindow) {
+				writeAPIError(w, http.StatusTooManyRequests, "webhook_rate_limited", "Webhook rate limit exceeded.")
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == "/webhooks/grafana" {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 			secret := strings.TrimSpace(cfg.GrafanaWebhookSecret)

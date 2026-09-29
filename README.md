@@ -185,6 +185,7 @@ CI also runs the Go race detector, PostgreSQL and Redis integration tests, migra
 - [Action catalog](docs/operations/action-catalog-v1.md)
 - [Policy rules](docs/operations/policy-rules-v1.md)
 - [Testing strategy](docs/operations/testing-strategy.md)
+- [Code repair (staging)](docs/operations/code-repair.md)
 - [Verified end-to-end evidence](docs/evidence/README.md)
 - [Release notes](docs/releases/v1.0.0-rc1.md)
 
@@ -192,25 +193,23 @@ CI also runs the Go race detector, PostgreSQL and Redis integration tests, migra
 
 Triovexa currently supports a single-tenant deployment and one bounded Redis worker integration. The same workflow can be extended through typed adapters, but compatibility and recovery semantics must be established for each target system. OpenAI-compatible endpoints also vary; Triovexa supports the Chat Completions subset described above.
 
-## Future scope
+## Code repair (staging)
 
-### Code-repair workflow
-
-Triovexa could extend its incident workflow to help repair source-level defects when operational remediation does not restore the service:
+A staging workflow now links an unresolved incident to bounded repository investigation, a reviewed patch, and a draft pull request. Its deployment correlation and telemetry verification are separate from PR creation. See [Code repair (staging)](docs/operations/code-repair.md) for its controls, setup, and current limitations.
 
 ```text
 Unresolved incident
 → collect logs, traces, deployed commit, and evidence
 → operator authorizes code investigation
-→ coding agent creates an isolated branch or worktree
+→ coding agent investigates an isolated checkout
 → agent proposes a patch and runs the relevant tests
-→ agent opens a pull request
+→ operator approves the exact patch; publisher opens a draft pull request
 → CI and human reviewers validate the change
 → deployment pipeline rolls out the approved fix
-→ Triovexa verifies recovery from production telemetry
+→ Triovexa verifies recovery from workload telemetry
 ```
 
-This workflow would preserve explicit authorization, existing repository protections, CI, human review, and deployment controls. Triovexa would connect the original incident to the resulting pull request, deployment, and recovery evidence without directly merging or deploying generated code.
+Repository protections, CI, human review, and deployment controls remain in place. Triovexa does not directly merge or deploy generated code.
 
 ## License
 

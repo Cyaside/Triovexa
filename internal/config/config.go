@@ -29,6 +29,8 @@ type Config struct {
 	SessionTTL                      time.Duration
 	AllowedOrigins                  []string
 	GrafanaWebhookSecret            string
+	RepairGitHubWebhookSecret       string
+	RepairDeploymentToken           string
 	WebhookRateLimit                int
 	WebhookRateWindow               time.Duration
 	DatabaseURL                     string
@@ -93,6 +95,8 @@ func Load() Config {
 		SessionTTL:                      getDurationEnv("SESSION_TTL", 12*time.Hour),
 		AllowedOrigins:                  splitCSVEnv("BROWSER_ALLOWED_ORIGINS"),
 		GrafanaWebhookSecret:            getEnv("GRAFANA_WEBHOOK_SECRET", ""),
+		RepairGitHubWebhookSecret:       getEnv("REPAIR_GITHUB_WEBHOOK_SECRET", ""),
+		RepairDeploymentToken:           getEnv("REPAIR_DEPLOYMENT_TOKEN", ""),
 		WebhookRateLimit:                getIntEnv("WEBHOOK_RATE_LIMIT", 60),
 		WebhookRateWindow:               getDurationEnv("WEBHOOK_RATE_WINDOW", time.Minute),
 		DatabaseURL:                     getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/triovexa?sslmode=disable"),

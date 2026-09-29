@@ -68,6 +68,7 @@ func NewServerWithTelemetry(
 	}
 	registerSessionRoutes(mux, cfg, authService)
 	registerAPIV1(mux, cfg, repository, approvalService, executionService, runtimeControl)
+	registerRepairRoutes(mux, cfg, repository, runtimeControl, approvalService)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {

@@ -40,6 +40,7 @@ services:
       REDIS_ADDRESS: redis:6379
       CONTROL_PORT: "8091"
       CONTROL_API_TOKEN: ${WORKLOAD_CONTROL_TOKEN:-local-control-token}
+      WORKLOAD_DEPLOYED_REVISION: ${WORKLOAD_DEPLOYED_REVISION:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -77,6 +78,8 @@ services:
       REASONING_MODE: llm
       LLM_TIMEOUT: 5m
       CREDENTIAL_KEY_PATH: /app/runtime/credential.key
+      REPAIR_GITHUB_WEBHOOK_SECRET: ${REPAIR_GITHUB_WEBHOOK_SECRET:-}
+      REPAIR_DEPLOYMENT_TOKEN: ${REPAIR_DEPLOYMENT_TOKEN:-}
       OBSERVABILITY_MODE: demo
     volumes:
       - triovexa-runtime-data:/app/runtime
@@ -90,6 +93,34 @@ services:
       prometheus:
         condition: service_started
       alertmanager:
+        condition: service_started
+
+  repair-publisher:
+    profiles: ["code-repair"]
+    build: .
+    restart: unless-stopped
+    entrypoint: ["triovexa-repair-publisher"]
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/triovexa?sslmode=disable
+      REPAIR_GITHUB_TOKEN: ${REPAIR_GITHUB_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  repair-verifier:
+    profiles: ["code-repair"]
+    build: .
+    restart: unless-stopped
+    entrypoint: ["triovexa-repair-verifier"]
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/triovexa?sslmode=disable
+      WORKLOAD_CONTROL_BASE_URL: http://workload-supervisor:8091
+      WORKLOAD_CONTROL_TOKEN: ${WORKLOAD_CONTROL_TOKEN:-local-control-token}
+      PROMETHEUS_BASE_URL: http://prometheus:9090
+    depends_on:
+      postgres:
+        condition: service_healthy
+      workload-supervisor:
         condition: service_started
 
   prometheus:

@@ -3,6 +3,7 @@ import * as Tabs from '@radix-ui/react-tabs'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { Action, api, APIError, Detail, Incident } from './api'
+import { CodeRepairPanel } from './CodeRepair'
 
 type User = { id: string; username: string; role: string }
 type ReasoningProfile = { provider: string; base_url: string; model: string; credential_ref: string; credential_available: boolean; credential_source?: string; json_mode: boolean; restart_required?: boolean }
@@ -44,7 +45,7 @@ function Shell({ user }: { user: User }) {
       <NavItem to="/ui/incidents" icon="incident">Incidents</NavItem><NavItem to="/ui/approvals" icon="approval">Approvals</NavItem><NavItem to="/ui/connections" icon="connection">Connections</NavItem><NavItem to="/ui/playground" icon="playground">Playground</NavItem><NavItem to="/ui/settings" icon="settings">Settings</NavItem>
     </nav><div className="account"><span className="avatar">{user.username.slice(0, 1).toUpperCase()}</span><div><strong>{user.username}</strong><small>{user.role}</small></div><button className="icon-button" aria-label="Sign out" title="Sign out" onClick={() => logout.mutate()}><Icon name="logout" /></button></div></aside>
     <main id="main-content" tabIndex={-1} className={`content${incidentDetail ? ' incident-route' : ''}`}><Routes>
-      <Route path="/ui/incidents" element={<Incidents />} /><Route path="/ui/incidents/:id" element={<IncidentDetail />} /><Route path="/ui/approvals" element={<Approvals />} /><Route path="/ui/connections" element={<Connections />} /><Route path="/ui/playground" element={<Playground />} /><Route path="/ui/settings" element={<Settings />} /><Route path="*" element={<Navigate to="/ui/incidents" replace />} />
+      <Route path="/ui/incidents" element={<Incidents />} /><Route path="/ui/incidents/:id" element={<IncidentDetail user={user} />} /><Route path="/ui/approvals" element={<Approvals />} /><Route path="/ui/connections" element={<Connections />} /><Route path="/ui/playground" element={<Playground />} /><Route path="/ui/settings" element={<Settings />} /><Route path="*" element={<Navigate to="/ui/incidents" replace />} />
     </Routes></main>
   </div>
 }
@@ -74,8 +75,9 @@ function Incidents() {
 function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) { return <label className="filter-control"><span>{label}</span><select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}><option value="">All</option>{options.map((option) => <option key={option} value={option}>{humanize(option)}</option>)}</select></label> }
 function IncidentRow({ item }: { item: Incident }) { return <Link className="incident-row" to={`/ui/incidents/${item.ID}`}><span className={`severity-line severity-line-${item.Severity}`} aria-hidden /><span className="incident-identity"><strong>{item.Title}</strong><span><code>{item.ID.slice(0, 8)}</code> · {item.AlertSource || 'unknown source'}</span></span><span className="target-cell"><strong>{item.ServiceName || 'Unknown service'}</strong><small>{item.Environment || 'No environment'}</small></span><Status value={item.Severity} /><Status value={item.State} /><span className="time-cell"><RelativeTime value={item.UpdatedAt} /><Icon name="arrow" /></span></Link> }
 
-function IncidentDetail() {
+function IncidentDetail({ user }: { user: User }) {
   const { id = '' } = useParams()
+  const location = useLocation()
   const client = useQueryClient()
   const detail = useQuery({ queryKey: ['incident', id], queryFn: () => api<Detail>(`/api/v1/incidents/${id}`), refetchInterval: document.visibilityState === 'visible' ? 5000 : false })
   const actionMutation = useMutation({ mutationFn: ({ action, operation }: { action: Action; operation: string }) => api(`/api/v1/actions/${action.ID}/${operation}`, { method: 'POST', body: '{}' }), onSuccess: () => client.invalidateQueries({ queryKey: ['incident', id] }), retry: false })
@@ -86,10 +88,11 @@ function IncidentDetail() {
   return <div className="incident-workspace">
     <header className="incident-header"><Link className="back" to="/ui/incidents">← All incidents</Link><div className="incident-kicker"><Status value={data.incident.Severity} /><span>{data.incident.AlertSource || 'Alert'}</span><Status value={data.incident.State} /></div><h1>{data.incident.Title}</h1><div className="incident-meta"><span><Icon name="target" />{data.incident.ServiceName}</span><span>{data.incident.Environment}</span><span><Icon name="clock" /><RelativeTime value={data.incident.CreatedAt} /></span><code>{data.incident.ID}</code></div></header>
     {detail.isRefetchError && <SystemState kind="stale" title="Incident data may be stale" text="The background refresh failed. Verify the server connection before acting." retry={() => detail.refetch()} compact />}{actionMutation.isError && <RequestState error={actionMutation.error} retry={() => { actionMutation.reset(); detail.refetch() }} />}
-    <div className="incident-body"><Tabs.Root className="investigation" defaultValue="overview"><Tabs.List aria-label="Incident information"><Tabs.Trigger value="overview">Overview</Tabs.Trigger><Tabs.Trigger value="evidence">Evidence <Count value={data.evidence.length} /></Tabs.Trigger><Tabs.Trigger value="actions">Actions <Count value={data.candidate_actions.length} /></Tabs.Trigger><Tabs.Trigger value="activity">Activity <Count value={data.audit_events.length} /></Tabs.Trigger></Tabs.List>
+    <div className="incident-body"><Tabs.Root className="investigation" defaultValue={new URLSearchParams(location.search).get('tab') === 'code-repair' ? 'code-repair' : 'overview'}><Tabs.List aria-label="Incident information"><Tabs.Trigger value="overview">Overview</Tabs.Trigger><Tabs.Trigger value="evidence">Evidence <Count value={data.evidence.length} /></Tabs.Trigger><Tabs.Trigger value="actions">Actions <Count value={data.candidate_actions.length} /></Tabs.Trigger><Tabs.Trigger value="code-repair">Code repair</Tabs.Trigger><Tabs.Trigger value="activity">Activity <Count value={data.audit_events.length} /></Tabs.Trigger></Tabs.List>
       <Tabs.Content value="overview"><TriageSummary triage={data.triage} /><SectionHeading title="Recovery status" meta={data.verification_results.length ? `${data.verification_results.length} checks` : 'Waiting for execution'} /><VerificationList items={data.verification_results} /></Tabs.Content>
       <Tabs.Content value="evidence"><EvidenceList items={data.evidence} /></Tabs.Content>
       <Tabs.Content value="actions"><ActionList actions={data.candidate_actions} mutate={(action, operation) => actionMutation.mutate({ action, operation })} busy={actionMutation.isPending} /></Tabs.Content>
+      <Tabs.Content value="code-repair"><CodeRepairPanel incident={data.incident} user={user} /></Tabs.Content>
       <Tabs.Content value="activity"><Timeline items={data.audit_events} /></Tabs.Content>
     </Tabs.Root><aside className="incident-rail"><section className="rail-section action-rail"><div className="rail-title"><div><p className="eyebrow">Decision required</p><h2>Operator actions</h2></div><Icon name="shield" /></div><p className="muted">Confirm the target and evidence before changing workload state.</p><ActionList actions={activeActions} mutate={(action, operation) => actionMutation.mutate({ action, operation })} busy={actionMutation.isPending} compact /></section><section className="rail-section"><div className="rail-title"><div><p className="eyebrow">Latest events</p><h2>Activity</h2></div><Icon name="activity" /></div><Timeline items={data.audit_events.slice(-5)} compact /></section></aside></div>
   </div>

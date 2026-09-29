@@ -114,6 +114,37 @@ test('renders an actionable conflict state for concurrent approval', async ({ pa
   await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible()
 })
 
+test('shows code repair evidence and publishes only the reviewed digest', async ({ page }) => {
+  const repairCase = { ID: 'case-123456789', IncidentID: incident.ID, BindingID: 'binding-1', BaseSHA: '1'.repeat(40),
+    DeployedSHA: '1'.repeat(40), State: 'awaiting_publish_approval', Version: 4, CreatedBy: 'u1' }
+  await page.route('**/api/v1/incidents/incident-123456789', (route) => route.fulfill({ json: {
+    incident: { ...incident, State: 'escalated' }, triage: { Summary: 'Worker stopped on an unsupported job schema.' },
+    evidence: [], documents: [], candidate_actions: [], policy_decisions: [], approval_records: [],
+    execution_records: [], verification_results: [], rollback_records: [], audit_events: [],
+  } }))
+  await page.route('**/api/v1/repair/incidents/incident-123456789', (route) => route.fulfill({ json: { items: [repairCase] } }))
+  await page.route('**/api/v1/repair/cases/case-123456789', (route) => route.fulfill({ json: {
+    case: repairCase, binding: { RepositoryURL: 'https://github.com/acme/worker', BaseRef: 'main', AllowedPaths: ['internal/workload'], TestRecipes: ['go-test-workload'] },
+    evidence: { captured_at: '2026-09-19T10:00:00Z', sha256: 'e'.repeat(64), entries: [{ id: 'e1', type: 'log', source: 'loki', status: 'complete', text: 'unsupported job schema' }] },
+    attempt: { ID: 'attempt-1', Status: 'succeeded', Provider: 'openai-compatible', Model: 'glm-5.3-flash', ErrorCode: '', ErrorMessage: '' },
+    report: { status: 'patch_ready', hypothesis: 'Worker rejects schema 2.', recipe_id: 'go-test-workload', before_exit: 1, after_exit: 0, patch_sha256: 'a'.repeat(64), evidence_ids: ['e1'] },
+    patch: 'diff --git a/internal/workload/repair_fixture.go b/internal/workload/repair_fixture.go', review_digest: 'd'.repeat(64),
+    deployments: [], events: [{ ID: 'event-1', Type: 'publication_review_requested', ActorID: 'u1', DetailsJSON: '{"attempt_id":"attempt-1"}', CreatedAt: '2026-09-19T10:02:00Z' }],
+  } }))
+  await page.route('**/api/v1/repair/cases/case-123456789/publish', (route) => route.fulfill({ status: 202, json: { state: 'queued' } }))
+  await page.goto('/ui/incidents/incident-123456789')
+  await page.getByRole('tab', { name: 'Code repair' }).click()
+  await page.getByText('loki', { exact: true }).click()
+  await expect(page.getByText('unsupported job schema')).toBeVisible()
+  await expect(page.getByText('Worker rejects schema 2.')).toBeVisible()
+  await expect(page.getByText('diff --git a/internal/workload/repair_fixture.go b/internal/workload/repair_fixture.go')).toBeVisible()
+  const accessibility = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
+  expect(accessibility.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([])
+  const publish = page.waitForRequest((request) => request.url().endsWith('/api/v1/repair/cases/case-123456789/publish'))
+  await page.getByRole('button', { name: 'Approve draft PR publication' }).click()
+  expect((await publish).postDataJSON()).toEqual({ expected_version: 4, review_digest: 'd'.repeat(64) })
+})
+
 for (const path of ['/ui/incidents', '/ui/incidents/incident-123456789', '/ui/connections', '/ui/playground', '/ui/settings']) {
   test(`has no serious accessibility violations on ${path}`, async ({ page }) => {
     await page.goto(path)
