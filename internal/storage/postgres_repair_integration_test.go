@@ -210,6 +210,23 @@ func TestRepairProposalStoresEvidenceWithCaseAndAuditIntegration(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].Type != "investigation_requested" {
 		t.Fatalf("proposal audit missing: %+v, %v", events, err)
 	}
+	authorizer, err := coderepair.NewInvestigationAuthorizationService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, attempt, job, err := authorizer.Authorize(ctx, c.ID, "operator-test",
+		coderepair.AgentSelection{Provider: "openai-compatible", Model: "glm-5.3-flash", PromptVersion: "repair-v1"},
+		time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempt.Status != coderepair.JobQueued || job.AttemptID != attempt.ID {
+		t.Fatalf("approval did not create a queued investigation: %+v %+v", attempt, job)
+	}
+	storedJob, err := store.GetRepairJob(ctx, job.ID)
+	if err != nil || storedJob.ID != job.ID {
+		t.Fatalf("investigation job was not committed: %+v, %v", storedJob, err)
+	}
 	if _, err := store.db.ExecContext(ctx, `UPDATE repair_evidence SET snapshot_json=jsonb_set(snapshot_json,
 		'{deployed_revision}', '"tampered"') WHERE case_id=$1`, c.ID); err != nil {
 		t.Fatal(err)
