@@ -82,7 +82,7 @@ func loopFixture(t *testing.T) (*sandbox.Workspace, coderepair.RepositoryBinding
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("package workload\nfunc accepts(version int) bool { return version != 1 }\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("package workload\n\nfunc accepts(version int) bool { return version != 1 }\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "internal", "workload", "repair_regression_test.go"),
@@ -148,7 +148,7 @@ func TestInvestigationProducesGroundedRedToGreenPatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := loop.Investigate(context.Background(), w, binding, snapshot, coderepair.AgentSelection{
-		Provider: "openai-compatible", Model: "fixture-model", PromptVersion: promptVersion}, "go-test-workload")
+		Provider: "openai-compatible", Model: "fixture-model", PromptVersion: PromptVersion}, "go-test-workload")
 	if result.Status != coderepair.StatePatchReady || result.Code != "PATCH_VERIFIED" || result.Before.ExitCode != 1 ||
 		result.After.ExitCode != 0 || tests.calls != 2 || len(result.EvidenceIDs) != 2 ||
 		result.PatchReport.SHA256 == "" || result.Usage.TotalTokens != 28 {
@@ -176,7 +176,7 @@ func TestInvestigationFailsClosedWithoutFallbackPatch(t *testing.T) {
 				t.Fatal(err)
 			}
 			result := loop.Investigate(context.Background(), w, binding, snapshot, coderepair.AgentSelection{
-				Provider: "openai-compatible", Model: "fixture-model", PromptVersion: promptVersion}, "go-test-workload")
+				Provider: "openai-compatible", Model: "fixture-model", PromptVersion: PromptVersion}, "go-test-workload")
 			if result.Status != scenario.wantStatus || result.Code != scenario.wantCode || result.Patch != "" {
 				t.Fatalf("unexpected fail-closed result: %+v", result)
 			}
@@ -200,12 +200,72 @@ func TestInvestigationCannotEditRegressionTest(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := loop.Investigate(context.Background(), w, binding, snapshot, coderepair.AgentSelection{
-		Provider: "openai-compatible", Model: "fixture-model", PromptVersion: promptVersion}, "go-test-workload")
+		Provider: "openai-compatible", Model: "fixture-model", PromptVersion: PromptVersion}, "go-test-workload")
 	if result.Status != coderepair.StateFailed || result.Code != "UNGROUNDED_PATCH" || tests.calls != 1 {
 		t.Fatalf("test tampering was not blocked: %+v", result)
 	}
 	if changed := runLoopGit(t, root, "status", "--porcelain"); changed != "" {
 		t.Fatalf("test tampering modified checkout: %s", changed)
+	}
+}
+
+func TestInvestigationDoesNotPublishPatchWhenPostTestFails(t *testing.T) {
+	w, binding, snapshot, root := loopFixture(t)
+	patch := fixturePatch(t, root, "internal/workload/repair_fixture.go")
+	model := &scriptedCompleter{decisions: []string{
+		`{"operation":"read_file","path":"internal/workload/repair_fixture.go"}`,
+		`{"operation":"propose_patch","hypothesis":"schema 2 fails at version check","evidence_ids":["log-1"],"patch":` + jsonString(t, patch) + `}`,
+	}}
+	tests := &sourceAwareTester{forceFailure: true}
+	loop, err := NewLoop(model, tests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := loop.Investigate(context.Background(), w, binding, snapshot, coderepair.AgentSelection{
+		Provider: "openai-compatible", Model: "fixture-model", PromptVersion: PromptVersion}, "go-test-workload")
+	if result.Status != coderepair.StateFailed || result.Code != "TESTS_FAILED" || result.Patch != "" || tests.calls != 2 {
+		t.Fatalf("failed regression produced publishable patch: %+v, calls=%d", result, tests.calls)
+	}
+}
+
+func TestInvestigationBlocksWhenBaselineDoesNotMatchBug(t *testing.T) {
+	w, binding, snapshot, root := loopFixture(t)
+	file := filepath.Join(root, "internal", "workload", "repair_fixture.go")
+	if err := os.WriteFile(file, []byte("package workload\n\nfunc accepts(version int) bool { return version != 2 }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	model := &scriptedCompleter{decisions: []string{`{"operation":"cannot_determine","reason":"unknown"}`}}
+	loop, err := NewLoop(model, &sourceAwareTester{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := loop.Investigate(context.Background(), w, binding, snapshot, coderepair.AgentSelection{
+		Provider: "openai-compatible", Model: "fixture-model", PromptVersion: PromptVersion}, "go-test-workload")
+	if result.Status != coderepair.StateBlocked || result.Code != "BASELINE_MISMATCH" || model.calls != 0 {
+		t.Fatalf("baseline mismatch reached model: %+v calls=%d", result, model.calls)
+	}
+}
+
+func TestInvestigationRejectsUnformattedPatch(t *testing.T) {
+	w, binding, snapshot, root := loopFixture(t)
+	file := filepath.Join(root, "internal", "workload", "repair_fixture.go")
+	if err := os.WriteFile(file, []byte("package workload\n\nfunc accepts(version int) bool {return version != 2}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	patch := runLoopGit(t, root, "diff", "--", "internal/workload/repair_fixture.go")
+	runLoopGit(t, root, "checkout", "--", "internal/workload/repair_fixture.go")
+	model := &scriptedCompleter{decisions: []string{
+		`{"operation":"read_file","path":"internal/workload/repair_fixture.go"}`,
+		`{"operation":"propose_patch","hypothesis":"schema 2 fails at version check","evidence_ids":["log-1"],"patch":` + jsonString(t, patch) + `}`,
+	}}
+	loop, err := NewLoop(model, &sourceAwareTester{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := loop.Investigate(context.Background(), w, binding, snapshot, coderepair.AgentSelection{
+		Provider: "openai-compatible", Model: "fixture-model", PromptVersion: PromptVersion}, "go-test-workload")
+	if result.Status != coderepair.StateFailed || result.Code != "FORMAT_FAILED" || result.Patch != "" {
+		t.Fatalf("unformatted patch became publishable: %+v", result)
 	}
 }
 

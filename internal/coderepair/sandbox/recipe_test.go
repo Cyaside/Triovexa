@@ -8,7 +8,7 @@ func TestResolveTestRecipeUsesFixedRegisteredArguments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recipe.Executable != "/usr/local/go/bin/go" || len(recipe.Arguments) != 7 || recipe.Arguments[2] != "repair_regression" || recipe.Timeout <= 0 {
+	if recipe.Executable != "/usr/local/go/bin/go" || len(recipe.Arguments) != 5 || recipe.Arguments[2] != "repair_regression" || recipe.Timeout <= 0 {
 		t.Fatalf("unexpected workload recipe: %+v", recipe)
 	}
 	recipe.Arguments[0] = "curl"

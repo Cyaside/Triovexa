@@ -86,7 +86,7 @@ func TestInvestigationDockerRedGreenIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	result := loop.Investigate(ctx, workspace, binding, snapshot, coderepair.AgentSelection{
-		Provider: "openai-compatible", Model: "fixture-model", PromptVersion: promptVersion}, "go-test-workload")
+		Provider: "openai-compatible", Model: "fixture-model", PromptVersion: PromptVersion}, "go-test-workload")
 	if result.Status != coderepair.StatePatchReady || result.Before.ExitCode != 1 || result.After.ExitCode != 0 ||
 		result.PatchReport.SHA256 == "" {
 		t.Fatalf("real container regression did not turn red to green: status=%s code=%s reason=%s before=%q after=%q",

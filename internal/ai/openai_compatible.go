@@ -60,6 +60,18 @@ type OpenAICompatibleClient struct {
 	client *http.Client
 }
 
+// Snapshot returns an independent client configuration for a multi-step run.
+// Later UI reconfiguration cannot change its endpoint, model or credential.
+func (c *OpenAICompatibleClient) Snapshot() (*OpenAICompatibleClient, error) {
+	if c == nil {
+		return nil, fmt.Errorf("provider is not configured")
+	}
+	c.mu.RLock()
+	config := c.config
+	c.mu.RUnlock()
+	return NewOpenAICompatibleClient(config)
+}
+
 func NewOpenAICompatibleClient(config ProviderConfig) (*OpenAICompatibleClient, error) {
 	normalized, err := normalizeProviderConfig(config)
 	if err != nil {
