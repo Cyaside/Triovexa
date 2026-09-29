@@ -2,7 +2,12 @@ package storage
 
 import (
 	"context"
+	"database/sql"
+	"io/fs"
+	"net/url"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,5 +56,73 @@ func TestPostgresMigrationsAndAtomicIntakeIntegration(t *testing.T) {
 	}
 	if err := store.migrate(context.Background()); err != nil {
 		t.Fatalf("idempotent migration upgrade failed: %v", err)
+	}
+}
+
+func TestPostgresConcurrentStartupAppliesMigrationsOnceIntegration(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not configured")
+	}
+	admin, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	schema := "startup_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err := admin.Exec(`CREATE SCHEMA ` + schema); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec(`DROP SCHEMA ` + schema + ` CASCADE`) })
+	parsed, err := url.Parse(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	query.Set("search_path", schema)
+	parsed.RawQuery = query.Encode()
+	var wg sync.WaitGroup
+	results := make(chan *PostgresStore, 2)
+	errorsCh := make(chan error, 2)
+	start := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			store, err := NewPostgresStore(parsed.String())
+			results <- store
+			errorsCh <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errorsCh)
+	for err := range errorsCh {
+		if err != nil {
+			t.Fatalf("concurrent startup failed: %v", err)
+		}
+	}
+	var stores []*PostgresStore
+	for store := range results {
+		if store != nil {
+			stores = append(stores, store)
+			t.Cleanup(func() { _ = store.Close() })
+		}
+	}
+	if len(stores) != 2 {
+		t.Fatalf("concurrent startup produced %d stores", len(stores))
+	}
+	entries, err := fs.ReadDir(migrationFS, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count, uniqueCount int
+	if err := stores[0].db.QueryRow(`SELECT count(*),count(DISTINCT version) FROM schema_migrations`).Scan(&count, &uniqueCount); err != nil || count != len(entries) || uniqueCount != count {
+		t.Fatalf("migrations applied %d times, unique=%d want=%d err=%v", count, uniqueCount, len(entries), err)
+	}
+	if err := stores[1].migrate(context.Background()); err != nil {
+		t.Fatalf("migration re-entry failed: %v", err)
 	}
 }

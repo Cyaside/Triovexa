@@ -39,7 +39,9 @@ func NewPostgresStore(databaseURL string) (*PostgresStore, error) {
 	}
 
 	store := &PostgresStore{db: db}
-	if err := store.migrate(context.Background()); err != nil {
+	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), time.Minute)
+	defer migrationCancel()
+	if err := store.migrate(migrationCtx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate postgres database: %w", err)
 	}
@@ -54,7 +56,18 @@ func (s *PostgresStore) Close() error {
 func (s *PostgresStore) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
 func (s *PostgresStore) migrate(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin migrations: %w", err)
+	}
+	defer tx.Rollback()
+	// Keep the initial table creation and version checks behind the same lock.
+	// Concurrent server startups then observe a fully committed migration set.
+	var lock any
+	if err := tx.QueryRowContext(ctx, `SELECT pg_advisory_xact_lock(1433770068, hashtext(current_schema()))`).Scan(&lock); err != nil {
+		return fmt.Errorf("lock migrations: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version TEXT PRIMARY KEY,
 		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 	)`); err != nil {
@@ -72,7 +85,7 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		}
 		version := strings.TrimSuffix(entry.Name(), ".sql")
 		var applied bool
-		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, version).Scan(&applied); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, version).Scan(&applied); err != nil {
 			return fmt.Errorf("check migration %s: %w", version, err)
 		}
 		if applied {
@@ -82,21 +95,15 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", version, err)
 		}
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin migration %s: %w", version, err)
-		}
 		if _, err = tx.ExecContext(ctx, string(body)); err != nil {
-			_ = tx.Rollback()
 			return fmt.Errorf("apply migration %s: %w", version, err)
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, version); err != nil {
-			_ = tx.Rollback()
 			return fmt.Errorf("record migration %s: %w", version, err)
 		}
-		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration %s: %w", version, err)
-		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migrations: %w", err)
 	}
 	return nil
 }
