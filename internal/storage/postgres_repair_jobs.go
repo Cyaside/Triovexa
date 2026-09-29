@@ -48,17 +48,46 @@ func (s *PostgresStore) ClaimRepairJob(ctx context.Context, workerID string, now
 	if workerID == "" || lease <= 0 || now.IsZero() {
 		return coderepair.Job{}, errors.New("invalid repair job lease")
 	}
-	leaseToken := uuid.NewString()
-	return scanRepairJob(s.db.QueryRowContext(ctx, `WITH candidate AS (
-		SELECT j.id FROM repair_jobs j JOIN repair_cases c ON c.id=j.case_id
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return coderepair.Job{}, err
+	}
+	defer tx.Rollback()
+	var jobID string
+	err = tx.QueryRowContext(ctx, `SELECT j.id FROM repair_jobs j JOIN repair_cases c ON c.id=j.case_id
 		WHERE c.state='investigating' AND j.attempts < j.max_attempts AND j.available_at <= $1
 		  AND (j.status='queued' OR (j.status='running' AND j.lease_until <= $1))
-		ORDER BY j.available_at,j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1
-	)
-	UPDATE repair_jobs j SET status='running', attempts=j.attempts+1, lease_owner=$2,
-		lease_token=$3, lease_until=$4, updated_at=$1
-	FROM candidate WHERE j.id=candidate.id
-	RETURNING `+repairJobReturning, now.UTC(), workerID, leaseToken, now.Add(lease).UTC()))
+		ORDER BY j.available_at,j.created_at FOR UPDATE OF j,c SKIP LOCKED LIMIT 1`, now.UTC()).Scan(&jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return coderepair.Job{}, coderepair.ErrNoJobAvailable
+	}
+	if err != nil {
+		return coderepair.Job{}, err
+	}
+	leaseToken := uuid.NewString()
+	job, err := scanRepairJob(tx.QueryRowContext(ctx, `UPDATE repair_jobs j SET status='running',
+		attempts=j.attempts+1,lease_owner=$1,lease_token=$2,lease_until=$3,updated_at=$4
+		WHERE j.id=$5 RETURNING `+repairJobReturning,
+		workerID, leaseToken, now.Add(lease).UTC(), now.UTC(), jobID))
+	if err != nil {
+		return coderepair.Job{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE repair_attempts SET status='running',started_at=COALESCE(started_at,$1)
+		WHERE id=$2 AND case_id=$3 AND status IN ('queued','running')`, now.UTC(), job.AttemptID, job.CaseID)
+	if err != nil {
+		return coderepair.Job{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return coderepair.Job{}, err
+	}
+	if changed != 1 {
+		return coderepair.Job{}, errors.New("repair job attempt is no longer claimable")
+	}
+	if err := tx.Commit(); err != nil {
+		return coderepair.Job{}, err
+	}
+	return job, nil
 }
 
 func (s *PostgresStore) RenewRepairJobLease(ctx context.Context, jobID, leaseToken string, now time.Time, lease time.Duration) (bool, error) {
@@ -143,6 +172,19 @@ func (s *PostgresStore) FailRepairJob(ctx context.Context, jobID, leaseToken, me
 	if status == coderepair.JobDeadLetter {
 		if err := blockRepairAttemptTx(ctx, tx, job.CaseID, job.AttemptID, message, now); err != nil {
 			return false, err
+		}
+	} else {
+		result, err := tx.ExecContext(ctx, `UPDATE repair_attempts SET status='queued'
+			WHERE id=$1 AND case_id=$2 AND status='running'`, job.AttemptID, job.CaseID)
+		if err != nil {
+			return false, err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		if changed != 1 {
+			return false, errors.New("repair attempt could not be requeued")
 		}
 	}
 	return true, tx.Commit()

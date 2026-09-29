@@ -57,6 +57,27 @@ func isolatedRepairStore(t *testing.T) *PostgresStore {
 	return store
 }
 
+func reopenRepairStore(t *testing.T, previous *PostgresStore) *PostgresStore {
+	t.Helper()
+	var schema string
+	if err := previous.db.QueryRow(`SELECT current_schema()`).Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	query.Set("search_path", schema)
+	parsed.RawQuery = query.Encode()
+	store, err := NewPostgresStore(parsed.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
 func makeInvestigationTestCase(t *testing.T, store *PostgresStore, maxAttempts int) (coderepair.Case, coderepair.Approval, coderepair.Attempt, coderepair.Job) {
 	t.Helper()
 	ctx := context.Background()
@@ -360,6 +381,10 @@ func TestRepairApprovalAndLeaseFencingIntegration(t *testing.T) {
 	if err != nil || claimed.CaseID != c.ID || claimed.Attempts != 1 {
 		t.Fatalf("first claim=%+v err=%v", claimed, err)
 	}
+	var attemptStatus string
+	if err := store.db.QueryRowContext(ctx, `SELECT status FROM repair_attempts WHERE id=$1`, claimed.AttemptID).Scan(&attemptStatus); err != nil || attemptStatus != "running" {
+		t.Fatalf("claimed attempt status=%q err=%v", attemptStatus, err)
+	}
 	if ok, err := store.CompleteRepairJob(ctx, claimed.ID, claimed.LeaseToken, now.Add(50*time.Millisecond)); err == nil || ok {
 		t.Fatalf("job completed without a persisted case outcome: ok=%v err=%v", ok, err)
 	}
@@ -389,6 +414,169 @@ func TestRepairApprovalAndLeaseFencingIntegration(t *testing.T) {
 	finalJob, err := store.GetRepairJob(ctx, reclaimed.ID)
 	if err != nil || finalJob.Status != coderepair.JobDeadLetter || finalJob.LastError != "provider token=[REDACTED]" {
 		t.Fatalf("job after failure=%+v err=%v", finalJob, err)
+	}
+}
+
+func TestRepairTransientFailureRequeuesAttemptIntegration(t *testing.T) {
+	store := isolatedRepairStore(t)
+	ctx := context.Background()
+	c, approval, attempt, job := makeInvestigationTestCase(t, store, 2)
+	if ok, err := store.ApproveRepairInvestigation(ctx, approval, attempt, job,
+		repairTestEvent(c.ID, "investigation_approved", time.Now().UTC())); err != nil || !ok {
+		t.Fatalf("approve investigation: ok=%v err=%v", ok, err)
+	}
+	now := time.Now().UTC()
+	first, err := store.ClaimRepairJob(ctx, "worker-one", now, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := store.FailRepairJob(ctx, first.ID, first.LeaseToken, "transient provider outage",
+		now.Add(time.Second), now.Add(2*time.Second), false); err != nil || !ok {
+		t.Fatalf("requeue transient failure: ok=%v err=%v", ok, err)
+	}
+	var status string
+	var startedAt time.Time
+	if err := store.db.QueryRowContext(ctx, `SELECT status,started_at FROM repair_attempts WHERE id=$1`, attempt.ID).
+		Scan(&status, &startedAt); err != nil || status != "queued" || startedAt.IsZero() {
+		t.Fatalf("requeued attempt status=%q started=%v err=%v", status, startedAt, err)
+	}
+	second, err := store.ClaimRepairJob(ctx, "worker-two", now.Add(2*time.Second), 10*time.Second)
+	if err != nil || second.Attempts != 2 || second.LeaseToken == first.LeaseToken {
+		t.Fatalf("retry claim=%+v err=%v", second, err)
+	}
+	if err := store.db.QueryRowContext(ctx, `SELECT status FROM repair_attempts WHERE id=$1`, attempt.ID).
+		Scan(&status); err != nil || status != "running" {
+		t.Fatalf("retried attempt status=%q err=%v", status, err)
+	}
+}
+
+func TestRepairCaseSurvivesRestartAtDurabilityBoundariesIntegration(t *testing.T) {
+	firstStore := isolatedRepairStore(t)
+	ctx := context.Background()
+	c, approval, attempt, job := makeInvestigationTestCase(t, firstStore, 2)
+	secondStore := reopenRepairStore(t, firstStore)
+	if got, err := secondStore.GetRepairCase(ctx, c.ID); err != nil || got.State != coderepair.StateAwaitingInvestigationApproval {
+		t.Fatalf("case lost before approval: %+v, %v", got, err)
+	}
+	if _, err := secondStore.GetRepairEvidenceSnapshot(ctx, c.ID); err != nil {
+		t.Fatalf("evidence lost before approval: %v", err)
+	}
+	if ok, err := secondStore.ApproveRepairInvestigation(ctx, approval, attempt, job,
+		repairTestEvent(c.ID, "investigation_approved", time.Now().UTC())); err != nil || !ok {
+		t.Fatalf("approval after restart: ok=%v err=%v", ok, err)
+	}
+	thirdStore := reopenRepairStore(t, secondStore)
+	if got, err := thirdStore.GetRepairJob(ctx, job.ID); err != nil || got.Status != coderepair.JobQueued {
+		t.Fatalf("job lost after approval: %+v, %v", got, err)
+	}
+	now := time.Now().UTC()
+	firstClaim, err := thirdStore.ClaimRepairJob(ctx, "worker-before-crash", now, 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fourthStore := reopenRepairStore(t, thirdStore)
+	if count, err := fourthStore.RecoverRepairJobs(ctx, now.Add(2*time.Second)); err != nil || count != 0 {
+		t.Fatalf("recovery stole unexpired lease: count=%d err=%v", count, err)
+	}
+	if _, err := fourthStore.ClaimRepairJob(ctx, "worker-after-crash", now.Add(2*time.Second), time.Second); !errors.Is(err, coderepair.ErrNoJobAvailable) {
+		t.Fatalf("unexpired job was claimed: %v", err)
+	}
+	if count, err := fourthStore.RecoverRepairJobs(ctx, now.Add(4*time.Second)); err != nil || count != 0 {
+		t.Fatalf("recoverable lease was prematurely dead-lettered: count=%d err=%v", count, err)
+	}
+	secondClaim, err := fourthStore.ClaimRepairJob(ctx, "worker-after-crash", now.Add(4*time.Second), 3*time.Second)
+	if err != nil || secondClaim.ID != firstClaim.ID || secondClaim.LeaseToken == firstClaim.LeaseToken || secondClaim.Attempts != 2 {
+		t.Fatalf("reclaimed job=%+v err=%v", secondClaim, err)
+	}
+	if ok, err := fourthStore.FailRepairJob(ctx, firstClaim.ID, firstClaim.LeaseToken, "stale worker",
+		now.Add(5*time.Second), now.Add(6*time.Second), true); err != nil || ok {
+		t.Fatalf("stale worker changed job: ok=%v err=%v", ok, err)
+	}
+	fifthStore := reopenRepairStore(t, fourthStore)
+	if count, err := fifthStore.RecoverRepairJobs(ctx, now.Add(8*time.Second)); err != nil || count != 1 {
+		t.Fatalf("final crashed lease was not reconciled: count=%d err=%v", count, err)
+	}
+	if count, err := fifthStore.RecoverRepairJobs(ctx, now.Add(9*time.Second)); err != nil || count != 0 {
+		t.Fatalf("repeated recovery changed state: count=%d err=%v", count, err)
+	}
+	finalCase, caseErr := fifthStore.GetRepairCase(ctx, c.ID)
+	finalJob, jobErr := fifthStore.GetRepairJob(ctx, job.ID)
+	if caseErr != nil || jobErr != nil || finalCase.State != coderepair.StateBlocked || finalJob.Status != coderepair.JobDeadLetter {
+		t.Fatalf("durable final state: case=%+v (%v), job=%+v (%v)", finalCase, caseErr, finalJob, jobErr)
+	}
+	for table := range map[string]bool{"repair_approvals": true, "repair_attempts": true, "repair_jobs": true} {
+		var count int
+		if err := fifthStore.db.QueryRowContext(ctx, `SELECT count(*) FROM `+table+` WHERE case_id=$1`, c.ID).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("%s rows=%d err=%v; restart duplicated work", table, count, err)
+		}
+	}
+}
+
+func TestRepairApprovalRollsBackEveryRecordWhenJobInsertFailsIntegration(t *testing.T) {
+	store := isolatedRepairStore(t)
+	ctx := context.Background()
+	firstCase, firstApproval, firstAttempt, firstJob := makeInvestigationTestCase(t, store, 1)
+	if ok, err := store.ApproveRepairInvestigation(ctx, firstApproval, firstAttempt, firstJob,
+		repairTestEvent(firstCase.ID, "investigation_approved", time.Now().UTC())); err != nil || !ok {
+		t.Fatalf("seed approval: ok=%v err=%v", ok, err)
+	}
+	secondCase, secondApproval, secondAttempt, secondJob := makeInvestigationTestCase(t, store, 1)
+	secondJob.ID = firstJob.ID // failure occurs after approval and attempt inserts
+	if ok, err := store.ApproveRepairInvestigation(ctx, secondApproval, secondAttempt, secondJob,
+		repairTestEvent(secondCase.ID, "investigation_approved", time.Now().UTC())); err == nil || ok {
+		t.Fatalf("duplicate job ID did not fail atomically: ok=%v err=%v", ok, err)
+	}
+	current, err := store.GetRepairCase(ctx, secondCase.ID)
+	if err != nil || current.State != coderepair.StateAwaitingInvestigationApproval || current.Version != 2 {
+		t.Fatalf("failed transaction moved case: %+v, %v", current, err)
+	}
+	for table := range map[string]bool{"repair_approvals": true, "repair_attempts": true, "repair_jobs": true} {
+		var count int
+		if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM `+table+` WHERE case_id=$1`, secondCase.ID).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("failed transaction left %s rows=%d err=%v", table, count, err)
+		}
+	}
+	events, err := store.ListRepairEvents(ctx, secondCase.ID)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("failed transaction left approval audit: %+v, %v", events, err)
+	}
+	secondJob.ID = uuid.NewString()
+	if ok, err := store.ApproveRepairInvestigation(ctx, secondApproval, secondAttempt, secondJob,
+		repairTestEvent(secondCase.ID, "investigation_approved", time.Now().UTC())); err != nil || !ok {
+		t.Fatalf("valid retry after rollback: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestRepairArtifactAndAuditRollbackTogetherIntegration(t *testing.T) {
+	store := isolatedRepairStore(t)
+	ctx := context.Background()
+	c, approval, attempt, job := makeInvestigationTestCase(t, store, 1)
+	if ok, err := store.ApproveRepairInvestigation(ctx, approval, attempt, job,
+		repairTestEvent(c.ID, "investigation_approved", time.Now().UTC())); err != nil || !ok {
+		t.Fatalf("approve investigation: ok=%v err=%v", ok, err)
+	}
+	events, err := store.ListRepairEvents(ctx, c.ID)
+	if err != nil || len(events) == 0 {
+		t.Fatalf("load seed audit events: %+v, %v", events, err)
+	}
+	digest := sha256.Sum256([]byte("bounded patch"))
+	artifact := coderepair.Artifact{ID: uuid.NewString(), AttemptID: attempt.ID, Kind: "diff",
+		ContentSHA256: hex.EncodeToString(digest[:]), ArtifactRef: "artifacts/code-repair/diff.patch",
+		ByteSize: 13, CreatedAt: time.Now().UTC()}
+	duplicateAudit := repairTestEvent(c.ID, "artifact_recorded", time.Now().UTC())
+	duplicateAudit.ID = events[0].ID
+	if err := store.AddRepairArtifact(ctx, artifact, duplicateAudit); err == nil {
+		t.Fatal("duplicate audit ID did not roll back artifact insert")
+	}
+	var count int
+	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM repair_artifacts WHERE attempt_id=$1`, attempt.ID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("failed artifact transaction left %d manifests: %v", count, err)
+	}
+	if err := store.AddRepairArtifact(ctx, artifact, repairTestEvent(c.ID, "artifact_recorded", time.Now().UTC())); err != nil {
+		t.Fatalf("artifact insert after rollback: %v", err)
+	}
+	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM repair_artifacts WHERE attempt_id=$1`, attempt.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("committed artifact manifests=%d: %v", count, err)
 	}
 }
 
