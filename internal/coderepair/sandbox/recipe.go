@@ -29,6 +29,9 @@ func ResolveTestRecipe(binding coderepair.RepositoryBinding, id string) (TestRec
 	if err := binding.Validate(); err != nil {
 		return TestRecipe{}, err
 	}
+	if !binding.Enabled {
+		return TestRecipe{}, errors.New("repository binding is disabled")
+	}
 	allowed := false
 	for _, configured := range binding.TestRecipes {
 		if configured == id {

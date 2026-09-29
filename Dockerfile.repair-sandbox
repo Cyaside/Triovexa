@@ -1,0 +1,18 @@
+FROM golang:1.24-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY internal/coderepair ./internal/coderepair
+COPY internal/domain ./internal/domain
+COPY internal/security ./internal/security
+COPY cmd/repair-sandbox ./cmd/repair-sandbox
+RUN CGO_ENABLED=0 go build -trimpath -o /out/triovexa-repair-sandbox ./cmd/repair-sandbox
+
+FROM golang:1.24-alpine
+RUN addgroup -S repair && adduser -S -G repair -u 10001 repair
+COPY --from=build /out/triovexa-repair-sandbox /usr/local/bin/triovexa-repair-sandbox
+COPY --from=build /go/pkg/mod /go/pkg/mod
+ENV GOPATH=/go GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOWORK=off GOENV=off CGO_ENABLED=0
+WORKDIR /workspace
+USER repair
+ENTRYPOINT ["triovexa-repair-sandbox"]

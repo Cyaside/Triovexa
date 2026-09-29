@@ -26,4 +26,9 @@ func TestResolveTestRecipeUsesFixedRegisteredArguments(t *testing.T) {
 	if _, err := ResolveTestRecipe(unknown, "future-recipe"); err == nil {
 		t.Fatal("accepted recipe ID without a fixed implementation")
 	}
+	disabled := binding
+	disabled.Enabled = false
+	if _, err := ResolveTestRecipe(disabled, "go-test-workload"); err == nil {
+		t.Fatal("accepted recipe on a disabled repository binding")
+	}
 }

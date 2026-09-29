@@ -14,6 +14,7 @@ func testBinding() coderepair.RepositoryBinding {
 		ID: "binding-1", ServiceName: "queue-worker", Environment: "staging",
 		RepositoryURL: "https://github.com/Cyaside/Triovexa", BaseRef: "main",
 		AllowedPaths: []string{"internal/workload"}, TestRecipes: []string{"go-test-workload"}, PolicyVersion: "repair-v1",
+		Enabled: true,
 	}
 }
 
