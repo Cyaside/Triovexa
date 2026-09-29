@@ -17,7 +17,7 @@ type TestRecipe struct {
 
 var builtinTestRecipes = map[string]TestRecipe{
 	"go-test-workload": {
-		ID: "go-test-workload", Executable: "go",
+		ID: "go-test-workload", Executable: "/usr/local/go/bin/go",
 		Arguments: []string{"test", "-tags", "repair_regression", "./internal/workload", "-run", "^TestRepairFixtureAcceptsSchemaTwo$", "-count=1"},
 		Timeout:   2 * time.Minute, MaxOutputBytes: 32 * 1024,
 	},

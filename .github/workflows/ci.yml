@@ -89,3 +89,17 @@ jobs:
           name: code-repair-fixture-evidence
           path: artifacts/code-repair/*.json
           if-no-files-found: ignore
+
+  repair-sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify isolated repair recipe and rejected commands
+        shell: pwsh
+        run: ./scripts/verify-repair-sandbox.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-repair-sandbox-evidence
+          path: artifacts/code-repair/sandbox-*.json
+          if-no-files-found: ignore

@@ -85,15 +85,15 @@ func (d Decision) validate(snapshot coderepair.EvidenceSnapshot) error {
 	}
 	switch d.Operation {
 	case ListFiles:
-		if d.Prefix == "" || d.Path != "" || d.Query != "" || d.Patch != "" || d.RecipeID != "" || d.Reason != "" {
+		if d.Prefix == "" || d.Path != "" || d.Query != "" || d.Patch != "" || d.RecipeID != "" || d.Reason != "" || d.Hypothesis != "" || len(d.EvidenceIDs) != 0 {
 			return errors.New("list_files requires only an allowed prefix")
 		}
 	case ReadFile:
-		if d.Path == "" || d.Prefix != "" || d.Query != "" || d.Patch != "" || d.RecipeID != "" || d.Reason != "" {
+		if d.Path == "" || d.Prefix != "" || d.Query != "" || d.Patch != "" || d.RecipeID != "" || d.Reason != "" || d.Hypothesis != "" || len(d.EvidenceIDs) != 0 {
 			return errors.New("read_file requires only a path")
 		}
 	case SearchText:
-		if d.Prefix == "" || d.Query == "" || d.Path != "" || d.Patch != "" || d.RecipeID != "" || d.Reason != "" {
+		if d.Prefix == "" || d.Query == "" || d.Path != "" || d.Patch != "" || d.RecipeID != "" || d.Reason != "" || d.Hypothesis != "" || len(d.EvidenceIDs) != 0 {
 			return errors.New("search_text requires a prefix and literal query")
 		}
 	case ProposePatch:
@@ -102,11 +102,11 @@ func (d Decision) validate(snapshot coderepair.EvidenceSnapshot) error {
 			return errors.New("propose_patch requires a grounded hypothesis and diff")
 		}
 	case RunAllowedTest:
-		if d.RecipeID == "" || d.Path != "" || d.Prefix != "" || d.Query != "" || d.Patch != "" || d.Reason != "" {
+		if d.RecipeID == "" || d.Path != "" || d.Prefix != "" || d.Query != "" || d.Patch != "" || d.Reason != "" || d.Hypothesis != "" || len(d.EvidenceIDs) != 0 {
 			return errors.New("run_allowed_test requires only a recipe ID")
 		}
 	case CannotDetermine:
-		if d.Reason == "" || d.Path != "" || d.Prefix != "" || d.Query != "" || d.Patch != "" || d.RecipeID != "" {
+		if d.Reason == "" || d.Path != "" || d.Prefix != "" || d.Query != "" || d.Patch != "" || d.RecipeID != "" || d.Hypothesis != "" || len(d.EvidenceIDs) != 0 {
 			return errors.New("cannot_determine requires a reason without an action")
 		}
 	default:

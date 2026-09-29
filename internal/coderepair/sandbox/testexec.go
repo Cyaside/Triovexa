@@ -75,15 +75,16 @@ func RunAllowedTest(ctx context.Context, rootPath string, binding coderepair.Rep
 }
 
 func recipeEnvironment() []string {
-	keys := []string{"PATH", "SystemRoot", "WINDIR", "TMP", "TEMP", "TMPDIR", "GOPATH", "GOMODCACHE"}
-	env := make([]string, 0, len(keys)+7)
+	keys := []string{"PATH", "SystemRoot", "WINDIR"}
+	env := make([]string, 0, len(keys)+11)
 	for _, key := range keys {
 		if value := os.Getenv(key); value != "" {
 			env = append(env, key+"="+value)
 		}
 	}
-	temp := os.TempDir()
+	temp := "/tmp"
 	return append(env, "HOME="+temp, "GOCACHE="+filepath.Join(temp, "triovexa-repair-go-cache"),
+		"GOPATH=/go", "GOMODCACHE=/go/pkg/mod", "TMPDIR=/tmp",
 		"GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local", "GOWORK=off", "GOENV=off", "CGO_ENABLED=0",
 		"GOMAXPROCS=2", "GOFLAGS=-mod=readonly -p=1")
 }
