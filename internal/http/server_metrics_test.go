@@ -22,7 +22,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/policy"
 	"github.com/Cyaside/Triovexa/internal/remediation"
 	"github.com/Cyaside/Triovexa/internal/retrieval"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 	"github.com/Cyaside/Triovexa/internal/telemetry"
 	"github.com/Cyaside/Triovexa/internal/triage"
 	"github.com/Cyaside/Triovexa/internal/verification"
@@ -31,7 +31,7 @@ import (
 func TestServerActionEndpointsReturnNotFoundForMissingCandidateAction(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	catalog := execution.DefaultCatalog()
 	killSwitch := approval.NewKillSwitch(false)
 	policyService := approval.NewService(repository, policy.NewEvaluator(catalog), killSwitch)
@@ -121,7 +121,7 @@ func TestServerMetricsEndpointExposesWorkflowMetrics(t *testing.T) {
 	}))
 	defer demoServer.Close()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	recorder := telemetry.NewRecorder()
 	collector := observability.NewDemoCollector(demoServer.URL)
 	retriever := retrieval.NewFileRetriever(docsRoot)

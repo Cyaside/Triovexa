@@ -1,4 +1,4 @@
-package storage
+package repair
 
 import (
 	"context"
@@ -13,21 +13,7 @@ import (
 	repairverify "github.com/Cyaside/Triovexa/internal/coderepair/verification"
 )
 
-type RepairDeployment struct {
-	ID                 string
-	CaseID             string
-	Environment        string
-	RevisionSHA        string
-	DeploymentID       string
-	ObservedAt         time.Time
-	Phase              string
-	VerificationStatus string
-	Baseline           repairverify.Sample
-	CompletedAt        time.Time
-	LeaseToken         string
-	LeaseUntil         time.Time
-	Attempts           int
-}
+type RepairDeployment = repairverify.Deployment
 
 const deploymentColumns = `id,case_id,environment,revision_sha,deployment_id,observed_at,phase,
 	verification_status,baseline_json::text,completed_at,lease_token,lease_until,attempts`
@@ -59,13 +45,13 @@ func scanDeployment(row repairScanner) (RepairDeployment, error) {
 	return d, nil
 }
 
-func (s *PostgresStore) GetRepairDeployment(ctx context.Context, deploymentID string) (RepairDeployment, error) {
+func (s *Store) GetRepairDeployment(ctx context.Context, deploymentID string) (RepairDeployment, error) {
 	return scanDeployment(s.db.QueryRowContext(ctx, `SELECT `+deploymentColumns+` FROM repair_deployments WHERE deployment_id=$1`, deploymentID))
 }
 
 // StartRepairDeployment records a fresh pre-rollout baseline only for the
 // exact revision GitHub reported as merged. A PR alone cannot verify recovery.
-func (s *PostgresStore) StartRepairDeployment(ctx context.Context, caseID, deploymentID, environment, revision string, baseline repairverify.Sample, now time.Time) (bool, error) {
+func (s *Store) StartRepairDeployment(ctx context.Context, caseID, deploymentID, environment, revision string, baseline repairverify.Sample, now time.Time) (bool, error) {
 	if caseID == "" || deploymentID == "" || environment == "" || !coderepair.ValidGitRevision(revision) ||
 		now.IsZero() || !baseline.Valid(now) || baseline.DeployedRevision == revision {
 		return false, errors.New("deployment requires a fresh pre-rollout baseline and new revision")
@@ -115,7 +101,7 @@ func (s *PostgresStore) StartRepairDeployment(ctx context.Context, caseID, deplo
 	return true, tx.Commit()
 }
 
-func (s *PostgresStore) CompleteRepairDeployment(ctx context.Context, caseID, deploymentID, environment, revision string, now time.Time) (bool, error) {
+func (s *Store) CompleteRepairDeployment(ctx context.Context, caseID, deploymentID, environment, revision string, now time.Time) (bool, error) {
 	if caseID == "" || deploymentID == "" || environment == "" || !coderepair.ValidGitRevision(revision) || now.IsZero() {
 		return false, errors.New("invalid deployment completion")
 	}
@@ -150,7 +136,7 @@ func (s *PostgresStore) CompleteRepairDeployment(ctx context.Context, caseID, de
 	return true, tx.Commit()
 }
 
-func (s *PostgresStore) ClaimRepairVerification(ctx context.Context, now time.Time, lease time.Duration) (RepairDeployment, error) {
+func (s *Store) ClaimRepairVerification(ctx context.Context, now time.Time, lease time.Duration) (RepairDeployment, error) {
 	if now.IsZero() || lease <= 0 {
 		return RepairDeployment{}, errors.New("invalid verification lease")
 	}
@@ -180,7 +166,7 @@ func (s *PostgresStore) ClaimRepairVerification(ctx context.Context, now time.Ti
 	return d, tx.Commit()
 }
 
-func (s *PostgresStore) RecordRepairVerificationSample(ctx context.Context, d RepairDeployment, sample repairverify.Sample, passed bool, now time.Time) error {
+func (s *Store) RecordRepairVerificationSample(ctx context.Context, d RepairDeployment, sample repairverify.Sample, passed bool, now time.Time) error {
 	if d.DeploymentID == "" || d.LeaseToken == "" || now.IsZero() || !sample.Valid(now) ||
 		!sample.Timestamp.After(d.CompletedAt) || passed != repairverify.Check(d.Baseline, sample, d.RevisionSHA) {
 		return errors.New("invalid repair verification sample")
@@ -207,7 +193,7 @@ func (s *PostgresStore) RecordRepairVerificationSample(ctx context.Context, d Re
 	return nil
 }
 
-func (s *PostgresStore) FinishRepairVerification(ctx context.Context, d RepairDeployment, recovered bool, reason string, now time.Time) (bool, error) {
+func (s *Store) FinishRepairVerification(ctx context.Context, d RepairDeployment, recovered bool, reason string, now time.Time) (bool, error) {
 	if d.DeploymentID == "" || d.LeaseToken == "" || now.IsZero() {
 		return false, errors.New("invalid verification result")
 	}

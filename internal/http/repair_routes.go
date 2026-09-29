@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Cyaside/Triovexa/internal/approval"
+	"github.com/Cyaside/Triovexa/internal/coderepair"
 	repairverify "github.com/Cyaside/Triovexa/internal/coderepair/verification"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/storage"
@@ -22,7 +23,7 @@ import (
 func registerRepairRoutes(mux *http.ServeMux, cfg config.Config, repository storage.Repository, runtime *RuntimeControls, approvalService *approval.Service) {
 	registerRepairAPI(mux, cfg, repository, runtime, approvalService)
 	store, _ := repository.(interface {
-		ApplyRepairPREvent(context.Context, storage.RepairPREvent) (bool, error)
+		ApplyRepairPREvent(context.Context, coderepair.PREvent) (bool, error)
 	})
 	mux.HandleFunc("/webhooks/github/repair", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -81,7 +82,7 @@ func registerRepairRoutes(mux *http.ServeMux, cfg config.Config, repository stor
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		applied, err := store.ApplyRepairPREvent(r.Context(), storage.RepairPREvent{
+		applied, err := store.ApplyRepairPREvent(r.Context(), coderepair.PREvent{
 			DeliveryID: delivery, Repository: payload.Repository.FullName,
 			Branch: payload.PullRequest.Head.Ref, BaseRef: payload.PullRequest.Base.Ref,
 			HeadSHA: payload.PullRequest.Head.SHA, Number: payload.PullRequest.Number,

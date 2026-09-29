@@ -11,6 +11,7 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 type staticKillSwitch struct {
@@ -34,7 +35,7 @@ func (f *fakeAdapter) Execute(ctx context.Context, action domain.CandidateAction
 func TestServiceExecuteActionSuccess(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentRecord, action := seedApprovedExecutionFixture(t, repository)
 
 	adapter := &fakeAdapter{
@@ -76,7 +77,7 @@ func TestServiceExecuteActionSuccess(t *testing.T) {
 }
 
 func TestServiceRejectsStaleEvidenceBeforeDispatch(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	_, action := seedApprovedExecutionFixture(t, repository)
 	adapter := &fakeAdapter{exec: func(context.Context, domain.CandidateAction, AdapterRequest) (AdapterResult, error) {
 		return AdapterResult{ExecutorType: "fake"}, nil
@@ -93,7 +94,7 @@ func TestServiceRejectsStaleEvidenceBeforeDispatch(t *testing.T) {
 }
 
 func TestServiceRejectsExpiredApprovalBeforeDispatch(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	_, action := seedApprovedExecutionFixture(t, repository)
 	adapter := &fakeAdapter{exec: func(context.Context, domain.CandidateAction, AdapterRequest) (AdapterResult, error) {
 		return AdapterResult{ExecutorType: "fake"}, nil
@@ -110,7 +111,7 @@ func TestServiceRejectsExpiredApprovalBeforeDispatch(t *testing.T) {
 }
 
 func TestServiceRejectsActionModifiedAfterApproval(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	_, action := seedApprovedExecutionFixture(t, repository)
 	action.ParametersJSON = `{"worker_id":"different-worker"}`
 	if err := repository.SaveCandidateActions(context.Background(), []domain.CandidateAction{action}); err != nil {
@@ -132,7 +133,7 @@ func TestServiceRejectsActionModifiedAfterApproval(t *testing.T) {
 func TestServiceExecuteActionRetriesRetryableError(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	_, action := seedApprovedExecutionFixture(t, repository)
 
 	adapter := &fakeAdapter{
@@ -163,7 +164,7 @@ func TestServiceExecuteActionRetriesRetryableError(t *testing.T) {
 func TestServiceExecuteActionBlocksKillSwitchAndDuplicates(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	_, action := seedApprovedExecutionFixture(t, repository)
 
 	service := NewService(repository, DefaultCatalog(), &fakeAdapter{
@@ -203,7 +204,7 @@ func TestServiceExecuteActionBlocksKillSwitchAndDuplicates(t *testing.T) {
 func TestServiceExecuteActionAllowsApprovedMediumRisk(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentRecord := domain.Incident{
 		ID:          "incident-medium-1",
 		Environment: "staging",
@@ -282,7 +283,7 @@ func TestServiceExecuteActionRevalidatesScopeBeforeExecution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			repository := storage.NewMemoryStore()
+			repository := memory.NewMemoryStore()
 			incidentRecord := domain.Incident{
 				ID:          uuid.NewString(),
 				Environment: tc.environment,

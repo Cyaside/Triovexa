@@ -9,7 +9,7 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/alerting"
 	"github.com/Cyaside/Triovexa/internal/domain"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 type stubCollector struct {
@@ -30,7 +30,7 @@ func (s *sequenceCollector) Collect(_ context.Context, incident domain.Incident)
 }
 
 func TestSameFingerprintCreatesNewEpisodeAfterTerminalIncident(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	service := NewService(repository, nil, nil, nil, nil, nil)
 	payload := alerting.GrafanaWebhookPayload{
 		Title:        "queue worker stalled",
@@ -99,7 +99,7 @@ func (s *capturingActionGenerator) Generate(_ context.Context, _ domain.Incident
 }
 
 func TestRunReadOnlyTriageRefreshesEvidenceBeforeActionGeneration(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	now := time.Now().UTC()
 	incidentRecord := domain.Incident{
 		ID: uuid.NewString(), ExternalAlertID: "refresh-action-evidence", AlertSource: "grafana",
@@ -136,7 +136,7 @@ func (s stubActionGenerator) Generate(context.Context, domain.Incident, domain.T
 func TestServiceRunReadOnlyTriageEscalatesWhenNoValidActionsRemain(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	now := time.Now().UTC()
 	incidentRecord := domain.Incident{
 		ID:              uuid.NewString(),

@@ -1,4 +1,4 @@
-package storage
+package postgres
 
 import (
 	"context"
@@ -11,11 +11,27 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/Cyaside/Triovexa/internal/coderepair"
+	repairverify "github.com/Cyaside/Triovexa/internal/coderepair/verification"
+	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/postgres/repair"
 )
+
+var ErrNotFound = storage.ErrNotFound
+var ErrNoJobAvailable = storage.ErrNoJobAvailable
 
 type PostgresStore struct {
 	db *sql.DB
+	*repair.Store
 }
+
+var _ storage.Repository = (*PostgresStore)(nil)
+var _ coderepair.ProposalRepository = (*PostgresStore)(nil)
+var _ coderepair.InvestigationApprovalRepository = (*PostgresStore)(nil)
+
+type RepairDeployment = repairverify.Deployment
+type RepairPREvent = coderepair.PREvent
 
 //go:embed migrations/*.sql
 var migrationFS embed.FS
@@ -34,7 +50,7 @@ func NewPostgresStore(databaseURL string) (*PostgresStore, error) {
 		return nil, fmt.Errorf("ping postgres database: %w", err)
 	}
 
-	store := &PostgresStore{db: db}
+	store := &PostgresStore{db: db, Store: repair.New(db)}
 	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), time.Minute)
 	defer migrationCancel()
 	if err := store.migrate(migrationCtx); err != nil {

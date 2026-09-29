@@ -13,23 +13,28 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Cyaside/Triovexa/internal/coderepair"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
+	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
+var _ repairAPIStore = (*postgres.PostgresStore)(nil)
+
 type recordingRepairWebhookStore struct {
 	storage.Repository
-	events []storage.RepairPREvent
+	events []coderepair.PREvent
 }
 
-func (s *recordingRepairWebhookStore) ApplyRepairPREvent(_ context.Context, event storage.RepairPREvent) (bool, error) {
+func (s *recordingRepairWebhookStore) ApplyRepairPREvent(_ context.Context, event coderepair.PREvent) (bool, error) {
 	s.events = append(s.events, event)
 	return true, nil
 }
 
 func TestRepairGitHubWebhookRequiresSignatureAndCarriesIdentity(t *testing.T) {
-	store := &recordingRepairWebhookStore{Repository: storage.NewMemoryStore()}
+	store := &recordingRepairWebhookStore{Repository: memory.NewMemoryStore()}
 	cfg := config.Config{DeploymentMode: "internal", RepairGitHubWebhookSecret: "webhook-secret",
 		WebhookRateLimit: 10, WebhookRateWindow: time.Minute}
 	mux := http.NewServeMux()

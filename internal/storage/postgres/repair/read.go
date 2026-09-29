@@ -1,4 +1,4 @@
-package storage
+package repair
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/coderepair"
 )
 
-func (s *PostgresStore) ListRepairCasesForIncident(ctx context.Context, incidentID string) ([]coderepair.Case, error) {
+func (s *Store) ListRepairCasesForIncident(ctx context.Context, incidentID string) ([]coderepair.Case, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+repairCaseColumns+` FROM repair_cases
 		WHERE incident_id=$1 ORDER BY created_at DESC LIMIT 20`, incidentID)
 	if err != nil {
@@ -26,7 +26,7 @@ func (s *PostgresStore) ListRepairCasesForIncident(ctx context.Context, incident
 	return cases, rows.Err()
 }
 
-func (s *PostgresStore) GetLatestRepairAttempt(ctx context.Context, caseID string) (coderepair.Attempt, error) {
+func (s *Store) GetLatestRepairAttempt(ctx context.Context, caseID string) (coderepair.Attempt, error) {
 	var id string
 	err := s.db.QueryRowContext(ctx, `SELECT id FROM repair_attempts WHERE case_id=$1
 		ORDER BY attempt_number DESC LIMIT 1`, caseID).Scan(&id)
@@ -39,7 +39,7 @@ func (s *PostgresStore) GetLatestRepairAttempt(ctx context.Context, caseID strin
 	return s.GetRepairAttempt(ctx, id)
 }
 
-func (s *PostgresStore) GetLatestRepairApproval(ctx context.Context, caseID, phase string) (coderepair.Approval, error) {
+func (s *Store) GetLatestRepairApproval(ctx context.Context, caseID, phase string) (coderepair.Approval, error) {
 	var a coderepair.Approval
 	err := s.db.QueryRowContext(ctx, `SELECT id,case_id,case_version,phase,actor_id,decision,
 		scope_digest,policy_version,expires_at,created_at FROM repair_approvals
@@ -52,7 +52,7 @@ func (s *PostgresStore) GetLatestRepairApproval(ctx context.Context, caseID, pha
 	return a, err
 }
 
-func (s *PostgresStore) ListRepairDeployments(ctx context.Context, caseID string) ([]RepairDeployment, error) {
+func (s *Store) ListRepairDeployments(ctx context.Context, caseID string) ([]RepairDeployment, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+deploymentColumns+` FROM repair_deployments
 		WHERE case_id=$1 ORDER BY observed_at`, caseID)
 	if err != nil {

@@ -1,33 +1,22 @@
-package storage
+package repair
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Cyaside/Triovexa/internal/coderepair"
 )
 
-type RepairPREvent struct {
-	DeliveryID string
-	Repository string
-	Branch     string
-	BaseRef    string
-	HeadSHA    string
-	Number     int64
-	Merged     bool
-	MergeSHA   string
-	ReceivedAt time.Time
-}
+type RepairPREvent = coderepair.PREvent
 
 // ApplyRepairPREvent accepts only an authenticated webhook whose immutable
 // branch, PR number and head still match the recorded publication. Delivery
 // identity and state change are committed together; duplicates are no-ops.
-func (s *PostgresStore) ApplyRepairPREvent(ctx context.Context, event RepairPREvent) (bool, error) {
+func (s *Store) ApplyRepairPREvent(ctx context.Context, event RepairPREvent) (bool, error) {
 	if _, err := uuid.Parse(event.DeliveryID); err != nil || event.Branch == "" || event.Number < 1 ||
 		!coderepair.ValidGitRevision(event.HeadSHA) || event.ReceivedAt.IsZero() ||
 		(event.Merged && !coderepair.ValidGitRevision(event.MergeSHA)) {

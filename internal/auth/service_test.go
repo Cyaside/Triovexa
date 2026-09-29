@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/Cyaside/Triovexa/internal/domain"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 func TestLoginAndCSRF(t *testing.T) {
-	service := NewService(storage.NewMemoryStore(), time.Hour)
+	service := NewService(memory.NewMemoryStore(), time.Hour)
 	if _, err := service.CreateUser(context.Background(), "operator", "a-long-test-password", domain.RoleOperator); err != nil {
 		t.Fatal(err)
 	}

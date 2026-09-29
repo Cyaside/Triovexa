@@ -18,6 +18,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/security"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 )
 
 func main() {
@@ -37,7 +38,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	store, err := storage.NewPostgresStore(cfg.DatabaseURL)
+	store, err := postgres.NewPostgresStore(cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}

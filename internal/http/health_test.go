@@ -10,7 +10,7 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/readiness"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 type staticReadiness struct{ report readiness.Report }
@@ -18,7 +18,7 @@ type staticReadiness struct{ report readiness.Report }
 func (s staticReadiness) Check(context.Context) readiness.Report { return s.report }
 
 func TestHealthReturnsDependencySpecificDegradedStatus(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	server := NewServer(config.Config{HTTPHost: "127.0.0.1", HTTPPort: "0"}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, nil, nil, nil, &RuntimeControls{
 		Readiness: staticReadiness{report: readiness.Report{Status: "degraded", Dependencies: map[string]readiness.Dependency{
 			"postgresql": {Status: "ok"}, "redis": {Status: "failed", Error: "dependency check failed"}, "supervisor": {Status: "ok"},

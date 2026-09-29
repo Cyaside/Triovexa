@@ -13,13 +13,13 @@ import (
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/policy"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 func TestServiceEvaluateActionsMovesIncidentToAwaitingApproval(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	killSwitch := NewKillSwitch(false)
 	service := NewService(repository, policy.NewEvaluator(execution.DefaultCatalog()), killSwitch)
 
@@ -78,7 +78,7 @@ func TestServiceEvaluateActionsMovesIncidentToAwaitingApproval(t *testing.T) {
 }
 
 func TestConcurrentApproversProduceOneAtomicDecision(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	service := NewService(repository, policy.NewEvaluator(execution.DefaultCatalog()), NewKillSwitch(false))
 	incidentRecord := domain.Incident{ID: "inc-concurrent", Environment: "staging", State: domain.IncidentStateAwaitingApproval, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := repository.CreateIncident(context.Background(), incidentRecord); err != nil {
@@ -113,7 +113,7 @@ func TestConcurrentApproversProduceOneAtomicDecision(t *testing.T) {
 }
 
 func TestKillSwitchStatePersistsAcrossServiceRestart(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	first := NewService(repository, policy.NewEvaluator(execution.DefaultCatalog()), NewKillSwitch(false))
 	if state := first.SetKillSwitch(true); !state.Enabled {
 		t.Fatal("kill switch was not enabled")
@@ -127,7 +127,7 @@ func TestKillSwitchStatePersistsAcrossServiceRestart(t *testing.T) {
 func TestServiceApproveActionPersistsApprovalRecord(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	service := NewService(repository, policy.NewEvaluator(execution.DefaultCatalog()), NewKillSwitch(false))
 
 	incidentRecord := domain.Incident{
@@ -189,7 +189,7 @@ func TestServiceApproveActionPersistsApprovalRecord(t *testing.T) {
 func TestServiceRejectsApprovalAfterIncidentBecomesTerminal(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	service := NewService(repository, policy.NewEvaluator(execution.DefaultCatalog()), NewKillSwitch(false))
 	incidentRecord := domain.Incident{ID: "inc-terminal", Environment: "staging", State: domain.IncidentStateClosed, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := repository.CreateIncident(context.Background(), incidentRecord); err != nil {

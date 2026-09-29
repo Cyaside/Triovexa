@@ -28,6 +28,23 @@ type Sample struct {
 	AlertCleared     bool      `json:"alert_cleared"`
 }
 
+// Deployment ties verification to the revision observed after a reviewed PR.
+type Deployment struct {
+	ID                 string
+	CaseID             string
+	Environment        string
+	RevisionSHA        string
+	DeploymentID       string
+	ObservedAt         time.Time
+	Phase              string
+	VerificationStatus string
+	Baseline           Sample
+	CompletedAt        time.Time
+	LeaseToken         string
+	LeaseUntil         time.Time
+	Attempts           int
+}
+
 func (s Sample) Valid(now time.Time) bool {
 	return s.Complete && s.AlertObserved && s.Target == "queue-worker" && s.Source == "redis-streams" &&
 		coderepair.ValidGitRevision(s.DeployedRevision) && !s.Timestamp.IsZero() &&

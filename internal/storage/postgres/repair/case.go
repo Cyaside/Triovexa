@@ -1,4 +1,4 @@
-package storage
+package repair
 
 import (
 	"context"
@@ -15,19 +15,22 @@ import (
 	"github.com/Cyaside/Triovexa/internal/coderepair"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/security"
+	"github.com/Cyaside/Triovexa/internal/storage"
 )
+
+var ErrNotFound = storage.ErrNotFound
 
 var ErrRepairConflict = errors.New("storage: repair case changed")
 
 var (
-	_ coderepair.CaseStore     = (*PostgresStore)(nil)
-	_ coderepair.ArtifactStore = (*PostgresStore)(nil)
-	_ coderepair.JobStore      = (*PostgresStore)(nil)
+	_ coderepair.CaseStore     = (*Store)(nil)
+	_ coderepair.ArtifactStore = (*Store)(nil)
+	_ coderepair.JobStore      = (*Store)(nil)
 )
 
 type repairScanner interface{ Scan(...any) error }
 
-func (s *PostgresStore) CreateRepositoryBinding(ctx context.Context, binding coderepair.RepositoryBinding) error {
+func (s *Store) CreateRepositoryBinding(ctx context.Context, binding coderepair.RepositoryBinding) error {
 	if err := binding.Validate(); err != nil {
 		return err
 	}
@@ -70,12 +73,12 @@ func scanRepositoryBinding(row repairScanner) (coderepair.RepositoryBinding, err
 const repairBindingColumns = `id, service_name, environment, repository_url, base_ref,
 	allowed_paths_json::text, test_recipes_json::text, policy_version, enabled, created_at, updated_at`
 
-func (s *PostgresStore) GetActiveRepositoryBinding(ctx context.Context, service, environment string) (coderepair.RepositoryBinding, error) {
+func (s *Store) GetActiveRepositoryBinding(ctx context.Context, service, environment string) (coderepair.RepositoryBinding, error) {
 	return scanRepositoryBinding(s.db.QueryRowContext(ctx, `SELECT `+repairBindingColumns+`
 		FROM repository_bindings WHERE service_name=$1 AND environment=$2 AND enabled`, service, environment))
 }
 
-func (s *PostgresStore) GetRepositoryBinding(ctx context.Context, id string) (coderepair.RepositoryBinding, error) {
+func (s *Store) GetRepositoryBinding(ctx context.Context, id string) (coderepair.RepositoryBinding, error) {
 	return scanRepositoryBinding(s.db.QueryRowContext(ctx, `SELECT `+repairBindingColumns+`
 		FROM repository_bindings WHERE id=$1`, id))
 }
@@ -85,7 +88,7 @@ func getRepairBindingTx(ctx context.Context, tx *sql.Tx, id string) (coderepair.
 		FROM repository_bindings WHERE id=$1`, id))
 }
 
-func (s *PostgresStore) CreateRepairCase(ctx context.Context, repairCase coderepair.Case, event coderepair.Event) error {
+func (s *Store) CreateRepairCase(ctx context.Context, repairCase coderepair.Case, event coderepair.Event) error {
 	if repairCase.State != coderepair.StateProposed {
 		return errors.New("direct case creation requires proposed state")
 	}
@@ -94,7 +97,7 @@ func (s *PostgresStore) CreateRepairCase(ctx context.Context, repairCase coderep
 
 // CreateRepairProposal commits the approval-ready case, audit and sanitized
 // evidence snapshot together. A case cannot be approved without its snapshot.
-func (s *PostgresStore) CreateRepairProposal(ctx context.Context, repairCase coderepair.Case, event coderepair.Event, snapshot coderepair.EvidenceSnapshot) error {
+func (s *Store) CreateRepairProposal(ctx context.Context, repairCase coderepair.Case, event coderepair.Event, snapshot coderepair.EvidenceSnapshot) error {
 	if repairCase.State != coderepair.StateAwaitingInvestigationApproval || !snapshot.VerifyDigest() ||
 		snapshot.IncidentID != repairCase.IncidentID || snapshot.DeployedRevision != repairCase.DeployedSHA ||
 		snapshot.CapturedAt.IsZero() || time.Since(snapshot.CapturedAt) > time.Minute ||
@@ -104,7 +107,7 @@ func (s *PostgresStore) CreateRepairProposal(ctx context.Context, repairCase cod
 	return s.createRepairCase(ctx, repairCase, event, &snapshot)
 }
 
-func (s *PostgresStore) createRepairCase(ctx context.Context, repairCase coderepair.Case, event coderepair.Event, snapshot *coderepair.EvidenceSnapshot) error {
+func (s *Store) createRepairCase(ctx context.Context, repairCase coderepair.Case, event coderepair.Event, snapshot *coderepair.EvidenceSnapshot) error {
 	if repairCase.ID == "" || repairCase.IncidentID == "" || repairCase.BindingID == "" || repairCase.CreatedBy == "" ||
 		(repairCase.State != coderepair.StateProposed && repairCase.State != coderepair.StateAwaitingInvestigationApproval) ||
 		repairCase.Version != 1 || repairCase.CreatedAt.IsZero() || repairCase.UpdatedAt.IsZero() {
@@ -196,7 +199,7 @@ func (s *PostgresStore) createRepairCase(ctx context.Context, repairCase coderep
 	return tx.Commit()
 }
 
-func (s *PostgresStore) GetRepairEvidenceSnapshot(ctx context.Context, caseID string) (coderepair.EvidenceSnapshot, error) {
+func (s *Store) GetRepairEvidenceSnapshot(ctx context.Context, caseID string) (coderepair.EvidenceSnapshot, error) {
 	var content, digest, incidentID string
 	err := s.db.QueryRowContext(ctx, `SELECT e.snapshot_json::text,e.content_sha256,c.incident_id
 		FROM repair_evidence e JOIN repair_cases c ON c.id=e.case_id
@@ -260,11 +263,11 @@ func scanRepairCase(row repairScanner) (coderepair.Case, error) {
 	return c, err
 }
 
-func (s *PostgresStore) GetRepairCase(ctx context.Context, id string) (coderepair.Case, error) {
+func (s *Store) GetRepairCase(ctx context.Context, id string) (coderepair.Case, error) {
 	return scanRepairCase(s.db.QueryRowContext(ctx, `SELECT `+repairCaseColumns+` FROM repair_cases WHERE id=$1`, id))
 }
 
-func (s *PostgresStore) GetRepairAttempt(ctx context.Context, id string) (coderepair.Attempt, error) {
+func (s *Store) GetRepairAttempt(ctx context.Context, id string) (coderepair.Attempt, error) {
 	var attempt coderepair.Attempt
 	var started, finished sql.NullTime
 	err := s.db.QueryRowContext(ctx, `SELECT id,case_id,attempt_number,status,provider,model,prompt_version,
@@ -283,7 +286,7 @@ func (s *PostgresStore) GetRepairAttempt(ctx context.Context, id string) (codere
 	return attempt, err
 }
 
-func (s *PostgresStore) TransitionRepairCase(ctx context.Context, id string, expected coderepair.State, version int64, next coderepair.State, event coderepair.Event) (bool, error) {
+func (s *Store) TransitionRepairCase(ctx context.Context, id string, expected coderepair.State, version int64, next coderepair.State, event coderepair.Event) (bool, error) {
 	if !coderepair.CanTransition(expected, next) {
 		return false, fmt.Errorf("invalid repair transition %s -> %s", expected, next)
 	}
@@ -327,7 +330,7 @@ func insertRepairEventTx(ctx context.Context, tx *sql.Tx, event coderepair.Event
 	return err
 }
 
-func (s *PostgresStore) ListRepairEvents(ctx context.Context, caseID string) ([]coderepair.Event, error) {
+func (s *Store) ListRepairEvents(ctx context.Context, caseID string) ([]coderepair.Event, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id,case_id,actor_id,event_type,details_json::text,created_at
 		FROM repair_events WHERE case_id=$1 ORDER BY created_at,id`, caseID)
 	if err != nil {
@@ -348,7 +351,7 @@ func (s *PostgresStore) ListRepairEvents(ctx context.Context, caseID string) ([]
 // ApproveRepairInvestigation makes the approval, state change, first attempt,
 // audit event and durable job one transaction. A competing approver observes
 // the new case version and cannot create a second attempt.
-func (s *PostgresStore) ApproveRepairInvestigation(ctx context.Context, approval coderepair.Approval, attempt coderepair.Attempt, job coderepair.Job, event coderepair.Event) (bool, error) {
+func (s *Store) ApproveRepairInvestigation(ctx context.Context, approval coderepair.Approval, attempt coderepair.Attempt, job coderepair.Job, event coderepair.Event) (bool, error) {
 	if approval.ID == "" || approval.CaseID == "" || approval.CaseVersion < 1 || approval.Phase != "investigation" ||
 		approval.Decision != "approved" || approval.ActorID == "" || approval.CreatedAt.IsZero() ||
 		!approval.ExpiresAt.After(approval.CreatedAt) || approval.ExpiresAt.Sub(approval.CreatedAt) > 15*time.Minute ||
@@ -467,7 +470,7 @@ func (s *PostgresStore) ApproveRepairInvestigation(ctx context.Context, approval
 	return true, tx.Commit()
 }
 
-func (s *PostgresStore) AddRepairArtifact(ctx context.Context, artifact coderepair.Artifact, event coderepair.Event) error {
+func (s *Store) AddRepairArtifact(ctx context.Context, artifact coderepair.Artifact, event coderepair.Event) error {
 	if artifact.ID == "" || artifact.AttemptID == "" || artifact.Kind == "" || artifact.ArtifactRef == "" ||
 		artifact.ByteSize < 0 || artifact.CreatedAt.IsZero() || len(artifact.ContentSHA256) != 64 {
 		return errors.New("invalid repair artifact manifest")

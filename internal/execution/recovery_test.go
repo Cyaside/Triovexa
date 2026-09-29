@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Cyaside/Triovexa/internal/domain"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 type recoveryAdapter struct{ status ReconciliationStatus }
@@ -22,7 +22,7 @@ func (a recoveryAdapter) Reconcile(context.Context, domain.CandidateAction, Adap
 }
 
 func TestRecoverStartedExecutionFinalizesConfirmedExternalEffect(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentRecord, action := seedApprovedExecutionFixture(t, repository)
 	now := time.Now().UTC()
 	record := domain.ExecutionRecord{ID: "execution-started", CandidateActionID: action.ID, IdempotencyKey: "execute:" + action.ID, InitiatedBy: "operator", ExecutorType: "workload-control-api", Status: ExecutionStatusStarted, StartedAt: now, FinishedAt: now, ResultJSON: `{}`}
@@ -49,7 +49,7 @@ func TestRecoverStartedExecutionFinalizesConfirmedExternalEffect(t *testing.T) {
 }
 
 func TestRecoverStartedExecutionEscalatesUnknownPreDispatchWindow(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentRecord, action := seedApprovedExecutionFixture(t, repository)
 	now := time.Now().UTC()
 	record := domain.ExecutionRecord{ID: "execution-before-dispatch", CandidateActionID: action.ID, IdempotencyKey: "execute:" + action.ID, InitiatedBy: "operator", ExecutorType: "workload-control-api", Status: ExecutionStatusStarted, StartedAt: now, FinishedAt: now, ResultJSON: `{}`}

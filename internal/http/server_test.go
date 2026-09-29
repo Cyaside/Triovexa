@@ -22,7 +22,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/policy"
 	"github.com/Cyaside/Triovexa/internal/remediation"
 	"github.com/Cyaside/Triovexa/internal/retrieval"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 	"github.com/Cyaside/Triovexa/internal/triage"
 	"github.com/Cyaside/Triovexa/internal/verification"
 )
@@ -70,7 +70,7 @@ func TestServerEndToEndReadOnlyTriage(t *testing.T) {
 	}))
 	defer demoServer.Close()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 
 	collector := observability.NewDemoCollector(demoServer.URL)
 	retriever := retrieval.NewFileRetriever(docsRoot)
@@ -438,7 +438,7 @@ func TestServerEndToEndMediumRiskRollback(t *testing.T) {
 	}))
 	defer demoServer.Close()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 
 	collector := observability.NewDemoCollector(demoServer.URL)
 	retriever := retrieval.NewFileRetriever(docsRoot)

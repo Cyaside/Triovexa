@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+// PREvent is the authenticated GitHub delivery normalized by the HTTP boundary.
+type PREvent struct {
+	DeliveryID string
+	Repository string
+	Branch     string
+	BaseRef    string
+	HeadSHA    string
+	Number     int64
+	Merged     bool
+	MergeSHA   string
+	ReceivedAt time.Time
+}
+
 type Publication struct {
 	ID          string
 	CaseID      string

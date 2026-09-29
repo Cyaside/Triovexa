@@ -13,11 +13,11 @@ import (
 	"github.com/Cyaside/Triovexa/internal/alerting"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/incident"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 func TestGrafanaWebhookProcessesEveryAlert(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	service := incident.NewService(repository, nil, nil, nil, nil, nil)
 	server := NewServer(config.Config{ServiceName: "test"}, slog.New(slog.NewTextHandler(io.Discard, nil)), repository, service, nil, nil)
 	api := httptest.NewServer(server.Handler)

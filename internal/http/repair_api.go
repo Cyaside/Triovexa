@@ -16,13 +16,30 @@ import (
 	"github.com/Cyaside/Triovexa/internal/coderepair"
 	"github.com/Cyaside/Triovexa/internal/coderepair/agent"
 	"github.com/Cyaside/Triovexa/internal/coderepair/sandbox"
+	repairverify "github.com/Cyaside/Triovexa/internal/coderepair/verification"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/storage"
 )
 
+type repairAPIStore interface {
+	coderepair.ProposalRepository
+	coderepair.InvestigationApprovalRepository
+	CreateRepositoryBinding(context.Context, coderepair.RepositoryBinding) error
+	ListRepairCasesForIncident(context.Context, string) ([]coderepair.Case, error)
+	GetRepositoryBinding(context.Context, string) (coderepair.RepositoryBinding, error)
+	ListRepairEvents(context.Context, string) ([]coderepair.Event, error)
+	ListRepairDeployments(context.Context, string) ([]repairverify.Deployment, error)
+	GetLatestRepairAttempt(context.Context, string) (coderepair.Attempt, error)
+	GetRepairArtifactContent(context.Context, string, string) ([]byte, error)
+	GetRepairPublication(context.Context, string) (coderepair.Publication, error)
+	GetLatestRepairApproval(context.Context, string, string) (coderepair.Approval, error)
+	PrepareRepairPublication(context.Context, string, string, int64, time.Time) (string, bool, error)
+	ApproveRepairPublication(context.Context, string, string, string, int64, time.Time) (coderepair.Publication, bool, error)
+}
+
 func registerRepairAPI(mux *http.ServeMux, cfg config.Config, repository storage.Repository, runtime *RuntimeControls, approvalService *approval.Service) {
-	store, _ := repository.(*storage.PostgresStore)
+	store, _ := repository.(repairAPIStore)
 	mutationAllowed := func(w http.ResponseWriter) bool {
 		if store == nil {
 			writeAPIError(w, http.StatusServiceUnavailable, "repair_unavailable", "Code repair requires PostgreSQL.")
@@ -233,7 +250,7 @@ func registerRepairAPI(mux *http.ServeMux, cfg config.Config, repository storage
 	})
 }
 
-func writeRepairCaseDetail(w http.ResponseWriter, r *http.Request, store *storage.PostgresStore, caseID string) {
+func writeRepairCaseDetail(w http.ResponseWriter, r *http.Request, store repairAPIStore, caseID string) {
 	c, err := store.GetRepairCase(r.Context(), caseID)
 	if errors.Is(err, storage.ErrNotFound) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "Repair case not found.")

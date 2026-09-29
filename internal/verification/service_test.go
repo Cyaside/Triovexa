@@ -15,6 +15,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
@@ -30,7 +31,7 @@ func (s stubFetcher) Snapshot(context.Context) (demo.Snapshot, error) {
 func TestServiceVerifyExecutionSuccess(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentRecord, action, executionRecord := seedVerificationFixture(t, repository)
 
 	service := NewService(repository, stubFetcher{snapshot: demo.Snapshot{
@@ -64,7 +65,7 @@ func TestServiceVerifyExecutionSuccess(t *testing.T) {
 func TestServiceVerifyExecutionAcceptsStableWorkloadRecovery(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentRecord, action, executionRecord := seedVerificationFixture(t, repository)
 	action.ActionType = "restart_worker"
 	action.TargetResource = "queue-worker"
@@ -103,7 +104,7 @@ func TestServiceVerifyExecutionAcceptsStableWorkloadRecovery(t *testing.T) {
 func TestServiceVerifyExecutionFailedEscalatesIncident(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentRecord, action, executionRecord := seedVerificationFixture(t, repository)
 
 	service := NewService(repository, stubFetcher{snapshot: demo.Snapshot{
@@ -145,7 +146,7 @@ func TestServiceVerifyExecutionFailedEscalatesIncident(t *testing.T) {
 func TestServiceVerifyExecutionInconclusiveEscalatesIncident(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentRecord, action, executionRecord := seedVerificationFixture(t, repository)
 
 	service := NewService(repository, stubFetcher{snapshot: demo.Snapshot{
@@ -179,7 +180,7 @@ func TestServiceVerifyExecutionInconclusiveEscalatesIncident(t *testing.T) {
 func TestServiceVerifyExecutionFailedTriggersRollbackWhenAvailable(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentRecord := domain.Incident{
 		ID:          "incident-verify-rollback-1",
 		Title:       "checkout consumer backlog",
@@ -306,7 +307,7 @@ func TestServiceVerifyExecutionFailedTriggersRollbackWhenAvailable(t *testing.T)
 }
 
 func TestServiceVerifyExecutionEscalatesWhenCompensationFails(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	now := time.Now().UTC()
 	incidentRecord := domain.Incident{ID: "incident-compensation-failure", Title: "queue consumer backlog", ServiceName: "queue-worker", Environment: "staging", State: domain.IncidentStateVerifyingAction, CreatedAt: now, UpdatedAt: now}
 	if err := repository.CreateIncident(context.Background(), incidentRecord); err != nil {
@@ -346,7 +347,7 @@ func TestServiceVerifyExecutionEscalatesWhenCompensationFails(t *testing.T) {
 func TestServiceVerifyExecutionTelemetryMarksErrorsExplicitly(t *testing.T) {
 	t.Parallel()
 
-	baseRepository := storage.NewMemoryStore()
+	baseRepository := memory.NewMemoryStore()
 	_, action, executionRecord := seedVerificationFixture(t, baseRepository)
 	recorder := telemetry.NewRecorder()
 
@@ -381,7 +382,7 @@ func TestServiceVerifyExecutionTelemetryMarksErrorsExplicitly(t *testing.T) {
 func TestServiceVerifyExecutionPreservesBaselineSnapshotFields(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	_, action, executionRecord := seedVerificationFixture(t, repository)
 
 	service := NewService(repository, stubFetcher{snapshot: demo.Snapshot{

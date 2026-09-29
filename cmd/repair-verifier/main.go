@@ -14,7 +14,7 @@ import (
 	repairverify "github.com/Cyaside/Triovexa/internal/coderepair/verification"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/security"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 )
 
 func main() {
@@ -34,7 +34,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	store, err := storage.NewPostgresStore(cfg.DatabaseURL)
+	store, err := postgres.NewPostgresStore(cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
@@ -75,14 +75,14 @@ func run(logger *slog.Logger) error {
 }
 
 type sampleWriter interface {
-	RecordRepairVerificationSample(context.Context, storage.RepairDeployment, repairverify.Sample, bool, time.Time) error
+	RecordRepairVerificationSample(context.Context, postgres.RepairDeployment, repairverify.Sample, bool, time.Time) error
 }
 
 type sampleFetcher interface {
 	Snapshot(context.Context) (repairverify.Sample, error)
 }
 
-func observe(ctx context.Context, writer sampleWriter, fetcher sampleFetcher, d storage.RepairDeployment) (bool, string) {
+func observe(ctx context.Context, writer sampleWriter, fetcher sampleFetcher, d postgres.RepairDeployment) (bool, string) {
 	consecutive := 0
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()

@@ -1,4 +1,4 @@
-package storage
+package memory
 
 import (
 	"context"
@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/Cyaside/Triovexa/internal/domain"
+	"github.com/Cyaside/Triovexa/internal/storage"
 )
+
+var ErrNotFound = storage.ErrNotFound
 
 type MemoryStore struct {
 	mu         sync.RWMutex
@@ -28,6 +31,8 @@ type MemoryStore struct {
 	sessions   map[string]domain.Session
 	settings   map[string]string
 }
+
+var _ storage.Repository = (*MemoryStore)(nil)
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{

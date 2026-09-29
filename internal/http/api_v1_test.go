@@ -12,11 +12,11 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/domain"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 func TestIncidentDetailAPIReturnsEmptyArraysInsteadOfNull(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incident := domain.Incident{ID: "incident-empty", State: domain.IncidentStateDetected, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := repository.CreateIncident(context.Background(), incident); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestConnectionsExposeAndProbeConfiguredMonitoringServices(t *testing.T) {
 	}))
 	defer ready.Close()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	server := NewServer(config.Config{
 		ServiceName:         "test",
 		HTTPHost:            "127.0.0.1",

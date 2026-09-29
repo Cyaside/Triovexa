@@ -9,12 +9,13 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 func TestRollbackServiceRollbackActionSuccess(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	action := seedRollbackFixture(t, repository)
 
 	service := NewRollbackService(repository, DefaultCatalog(), &fakeAdapter{

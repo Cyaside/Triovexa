@@ -9,11 +9,11 @@ import (
 
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/secretstore"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 func TestApplyStoredConnectionProfilesRestoresEncryptedCredential(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	cipher, err := secretstore.NewCipher(filepath.Join(t.TempDir(), "credential.key"), "")
 	if err != nil {
 		t.Fatal(err)

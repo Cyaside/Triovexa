@@ -1,4 +1,4 @@
-package storage
+package repair
 
 import (
 	"context"
@@ -33,7 +33,7 @@ func scanRepairJob(row repairScanner) (coderepair.Job, error) {
 	return job, err
 }
 
-func (s *PostgresStore) GetRepairJob(ctx context.Context, id string) (coderepair.Job, error) {
+func (s *Store) GetRepairJob(ctx context.Context, id string) (coderepair.Job, error) {
 	job, err := scanRepairJob(s.db.QueryRowContext(ctx, `SELECT `+repairJobColumns+` FROM repair_jobs WHERE id=$1`, id))
 	if errors.Is(err, coderepair.ErrNoJobAvailable) {
 		return coderepair.Job{}, ErrNotFound
@@ -44,7 +44,7 @@ func (s *PostgresStore) GetRepairJob(ctx context.Context, id string) (coderepair
 // ClaimRepairJob fences stale workers with a fresh lease token on every claim.
 // A lease can be reclaimed after expiry, but not when the attempt budget is
 // exhausted. RecoverRepairJobs records that terminal state at startup.
-func (s *PostgresStore) ClaimRepairJob(ctx context.Context, workerID string, now time.Time, lease time.Duration) (coderepair.Job, error) {
+func (s *Store) ClaimRepairJob(ctx context.Context, workerID string, now time.Time, lease time.Duration) (coderepair.Job, error) {
 	if workerID == "" || lease <= 0 || now.IsZero() {
 		return coderepair.Job{}, errors.New("invalid repair job lease")
 	}
@@ -90,7 +90,7 @@ func (s *PostgresStore) ClaimRepairJob(ctx context.Context, workerID string, now
 	return job, nil
 }
 
-func (s *PostgresStore) RenewRepairJobLease(ctx context.Context, jobID, leaseToken string, now time.Time, lease time.Duration) (bool, error) {
+func (s *Store) RenewRepairJobLease(ctx context.Context, jobID, leaseToken string, now time.Time, lease time.Duration) (bool, error) {
 	if jobID == "" || leaseToken == "" || now.IsZero() || lease <= 0 {
 		return false, errors.New("invalid repair job lease renewal")
 	}
@@ -104,7 +104,7 @@ func (s *PostgresStore) RenewRepairJobLease(ctx context.Context, jobID, leaseTok
 	return rows == 1, err
 }
 
-func (s *PostgresStore) CompleteRepairJob(ctx context.Context, jobID, leaseToken string, now time.Time) (bool, error) {
+func (s *Store) CompleteRepairJob(ctx context.Context, jobID, leaseToken string, now time.Time) (bool, error) {
 	if jobID == "" || leaseToken == "" || now.IsZero() {
 		return false, errors.New("invalid repair job completion")
 	}
@@ -155,7 +155,7 @@ func (s *PostgresStore) CompleteRepairJob(ctx context.Context, jobID, leaseToken
 
 // FailRepairJob requeues a transient failure or records a terminal failure in
 // the same transaction as the case/attempt state and audit event.
-func (s *PostgresStore) FailRepairJob(ctx context.Context, jobID, leaseToken, message string, now, retryAt time.Time, terminal bool) (bool, error) {
+func (s *Store) FailRepairJob(ctx context.Context, jobID, leaseToken, message string, now, retryAt time.Time, terminal bool) (bool, error) {
 	if jobID == "" || leaseToken == "" || now.IsZero() || (!terminal && retryAt.Before(now)) {
 		return false, errors.New("invalid repair job failure")
 	}
@@ -227,7 +227,7 @@ func blockRepairAttemptTx(ctx context.Context, tx *sql.Tx, caseID, attemptID, re
 // persisted a case outcome but crashed before completing its job, and
 // dead-letters expired exhausted leases. Other expired jobs remain claimable.
 // It never steals an unexpired lease from another process.
-func (s *PostgresStore) RecoverRepairJobs(ctx context.Context, now time.Time) (int, error) {
+func (s *Store) RecoverRepairJobs(ctx context.Context, now time.Time) (int, error) {
 	if now.IsZero() {
 		return 0, errors.New("repair recovery requires a time")
 	}

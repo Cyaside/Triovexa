@@ -20,7 +20,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/execution"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/mode"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
@@ -103,7 +103,7 @@ func urlQueryEscape(value string) string {
 func TestServerRuntimeModeEndpointRejectsInvalidModes(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	runtimeControls := &RuntimeControls{
 		Modes: mode.NewManager("heuristic", "demo"),
 	}
@@ -146,7 +146,7 @@ func TestServerRuntimeModeEndpointRejectsInvalidModes(t *testing.T) {
 func TestServerGrafanaWebhookDeduplicatesActiveIncident(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentService := incident.NewService(repository, nil, nil, nil, nil, nil)
 	server := NewServer(config.Config{
 		ServiceName:     "triovexa",
@@ -221,7 +221,7 @@ func TestServerGrafanaWebhookDeduplicatesActiveIncident(t *testing.T) {
 func TestServerGrafanaWebhookIgnoresResolvedAlertWithoutActiveIncident(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentService := incident.NewService(repository, nil, nil, nil, nil, nil)
 	server := NewServer(config.Config{
 		ServiceName:     "triovexa",
@@ -290,7 +290,7 @@ func TestServerGrafanaWebhookIgnoresResolvedAlertWithoutActiveIncident(t *testin
 func TestServerGrafanaWebhookClosesActiveIncidentOnResolvedAlert(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentService := incident.NewService(repository, nil, nil, nil, nil, nil)
 	server := NewServer(config.Config{
 		ServiceName:     "triovexa",

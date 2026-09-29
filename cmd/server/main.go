@@ -28,6 +28,8 @@ import (
 	"github.com/Cyaside/Triovexa/internal/secretstore"
 	securitylog "github.com/Cyaside/Triovexa/internal/security"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
+	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 	"github.com/Cyaside/Triovexa/internal/telemetry"
 	"github.com/Cyaside/Triovexa/internal/triage"
 	"github.com/Cyaside/Triovexa/internal/verification"
@@ -49,9 +51,9 @@ func main() {
 			os.Exit(1)
 		}
 		logger.Warn("starting with in-memory repository; data will be lost on shutdown")
-		repository = storage.NewMemoryStore()
+		repository = memory.NewMemoryStore()
 	} else {
-		repository, err = storage.NewPostgresStore(cfg.DatabaseURL)
+		repository, err = postgres.NewPostgresStore(cfg.DatabaseURL)
 		if err != nil {
 			logger.Error("failed to initialize storage", slog.String("error", err.Error()))
 			os.Exit(1)

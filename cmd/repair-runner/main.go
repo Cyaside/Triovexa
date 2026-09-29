@@ -18,6 +18,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/secretstore"
 	"github.com/Cyaside/Triovexa/internal/security"
 	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 )
 
 func main() {
@@ -37,7 +38,7 @@ func run(logger *slog.Logger) error {
 	if image == "" {
 		return errors.New("REPAIR_SANDBOX_IMAGE must identify a prebuilt isolated test image")
 	}
-	store, err := storage.NewPostgresStore(cfg.DatabaseURL)
+	store, err := postgres.NewPostgresStore(cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}

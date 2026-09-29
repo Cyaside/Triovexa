@@ -9,7 +9,7 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/auth"
 	"github.com/Cyaside/Triovexa/internal/domain"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 )
 
 func main() {
@@ -28,7 +28,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	repository, err := storage.NewPostgresStore(databaseURL)
+	repository, err := postgres.NewPostgresStore(databaseURL)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

@@ -1,4 +1,4 @@
-package storage
+package repair
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 // RecordRepairInvestigationOutcome writes the decision, immutable content and
 // audit event in one transaction, fenced by the claimed job lease. Completion
 // of the job is separate and can be reconciled after a process crash.
-func (s *PostgresStore) RecordRepairInvestigationOutcome(ctx context.Context, outcome coderepair.InvestigationOutcome) (bool, error) {
+func (s *Store) RecordRepairInvestigationOutcome(ctx context.Context, outcome coderepair.InvestigationOutcome) (bool, error) {
 	if outcome.JobID == "" || outcome.LeaseToken == "" || outcome.CaseID == "" || outcome.AttemptID == "" ||
 		outcome.ExpectedVersion < 1 || outcome.RecordedAt.IsZero() ||
 		len(outcome.ReportJSON) == 0 || len(outcome.ReportJSON) > 128*1024 || !json.Valid(outcome.ReportJSON) ||
@@ -126,7 +126,7 @@ func insertRepairContentTx(ctx context.Context, tx *sql.Tx, attemptID, kind stri
 	return err
 }
 
-func (s *PostgresStore) GetRepairArtifactContent(ctx context.Context, attemptID, kind string) ([]byte, error) {
+func (s *Store) GetRepairArtifactContent(ctx context.Context, attemptID, kind string) ([]byte, error) {
 	var content []byte
 	var digest string
 	err := s.db.QueryRowContext(ctx, `SELECT content,content_sha256 FROM repair_artifacts

@@ -12,14 +12,14 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/mode"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 	"github.com/Cyaside/Triovexa/internal/telemetry"
 )
 
 func TestServerDebugPoliciesExposesCatalog(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	server := NewServerWithTelemetry(config.Config{
 		ServiceName:     "triovexa",
 		Environment:     "test",
@@ -74,7 +74,7 @@ func TestServerDebugPoliciesExposesCatalog(t *testing.T) {
 func TestServerRuntimeModeEndpointUpdatesModes(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	runtimeControls := &RuntimeControls{
 		Modes: mode.NewManager("heuristic", "demo"),
 		Providers: ProviderStatus{
@@ -129,7 +129,7 @@ func TestServerRuntimeModeEndpointUpdatesModes(t *testing.T) {
 func TestServerIncidentWorkbenchShowsRuntimeControls(t *testing.T) {
 	t.Parallel()
 
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	runtimeControls := &RuntimeControls{
 		Modes: mode.NewManager("llm", "grafana"),
 		Providers: ProviderStatus{

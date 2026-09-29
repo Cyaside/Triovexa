@@ -14,12 +14,12 @@ import (
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/secretstore"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 func TestReasoningConnectionConfigStoresReferenceOnly(t *testing.T) {
 	t.Setenv("LOCAL_LLM_TOKEN", "environment-secret")
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	mux := stdhttp.NewServeMux()
 	registerConnectionConfigurationAPI(mux, config.Config{}, repository)
 	payload := `{"provider":"openai-compatible","base_url":"http://127.0.0.1:11434/v1","model":"qwen","credential_ref":"LOCAL_LLM_TOKEN","json_mode":true}`
@@ -39,7 +39,7 @@ func TestReasoningConnectionConfigStoresReferenceOnly(t *testing.T) {
 }
 
 func TestReasoningConnectionConfigEncryptsAndActivatesWebKey(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	client, err := ai.NewOpenAICompatibleClient(ai.ProviderConfig{})
 	if err != nil {
 		t.Fatal(err)

@@ -1,4 +1,4 @@
-package storage
+package repair
 
 import (
 	"context"
@@ -44,7 +44,7 @@ func scanPublication(row repairScanner) (coderepair.Publication, error) {
 	return publication, err
 }
 
-func (s *PostgresStore) GetRepairPublication(ctx context.Context, caseID string) (coderepair.Publication, error) {
+func (s *Store) GetRepairPublication(ctx context.Context, caseID string) (coderepair.Publication, error) {
 	return scanPublication(s.db.QueryRowContext(ctx, `SELECT `+publicationColumns+` FROM repair_publications WHERE case_id=$1`, caseID))
 }
 
@@ -84,7 +84,7 @@ func latestVerifiedRepairPatchTx(ctx context.Context, tx *sql.Tx, caseID string)
 
 // PrepareRepairPublication exposes an immutable, already-tested patch for
 // review. This does not authorize or perform any GitHub write.
-func (s *PostgresStore) PrepareRepairPublication(ctx context.Context, caseID, actorID string, expectedVersion int64, now time.Time) (string, bool, error) {
+func (s *Store) PrepareRepairPublication(ctx context.Context, caseID, actorID string, expectedVersion int64, now time.Time) (string, bool, error) {
 	if caseID == "" || actorID == "" || expectedVersion < 1 || now.IsZero() {
 		return "", false, errors.New("invalid publication review request")
 	}
@@ -130,7 +130,7 @@ func (s *PostgresStore) PrepareRepairPublication(ctx context.Context, caseID, ac
 // ApproveRepairPublication atomically records a short-lived approval, state
 // transition, durable publication operation and audit event. Concurrent
 // approvers cannot both win the locked case version.
-func (s *PostgresStore) ApproveRepairPublication(ctx context.Context, caseID, actorID, reviewDigest string, expectedVersion int64, now time.Time) (coderepair.Publication, bool, error) {
+func (s *Store) ApproveRepairPublication(ctx context.Context, caseID, actorID, reviewDigest string, expectedVersion int64, now time.Time) (coderepair.Publication, bool, error) {
 	if caseID == "" || actorID == "" || reviewDigest == "" || expectedVersion < 1 || now.IsZero() {
 		return coderepair.Publication{}, false, errors.New("invalid publication approval")
 	}
@@ -202,7 +202,7 @@ func (s *PostgresStore) ApproveRepairPublication(ctx context.Context, caseID, ac
 
 // ClaimRepairPublication leases one operation. A recovered lease is fenced by
 // a new token, while the GitHub adapter reconciles any uncertain remote effect.
-func (s *PostgresStore) ClaimRepairPublication(ctx context.Context, worker string, now time.Time, lease time.Duration) (coderepair.Publication, error) {
+func (s *Store) ClaimRepairPublication(ctx context.Context, worker string, now time.Time, lease time.Duration) (coderepair.Publication, error) {
 	if worker == "" || now.IsZero() || lease <= 0 {
 		return coderepair.Publication{}, errors.New("invalid publication lease")
 	}
@@ -241,7 +241,7 @@ type PublicationInput struct {
 	ReportJSON []byte
 }
 
-func (s *PostgresStore) GetRepairPublicationInput(ctx context.Context, publication coderepair.Publication) (PublicationInput, error) {
+func (s *Store) GetRepairPublicationInput(ctx context.Context, publication coderepair.Publication) (PublicationInput, error) {
 	var input PublicationInput
 	var err error
 	input.Case, err = s.GetRepairCase(ctx, publication.CaseID)
@@ -276,7 +276,7 @@ func (s *PostgresStore) GetRepairPublicationInput(ctx context.Context, publicati
 	return input, nil
 }
 
-func (s *PostgresStore) CompleteRepairPublication(ctx context.Context, p coderepair.Publication, headSHA string, number int64, prURL string, now time.Time) (bool, error) {
+func (s *Store) CompleteRepairPublication(ctx context.Context, p coderepair.Publication, headSHA string, number int64, prURL string, now time.Time) (bool, error) {
 	if p.ID == "" || p.LeaseToken == "" || !coderepair.ValidGitRevision(headSHA) || number < 1 || prURL == "" || now.IsZero() {
 		return false, errors.New("invalid published PR result")
 	}
@@ -315,7 +315,7 @@ func (s *PostgresStore) CompleteRepairPublication(ctx context.Context, p coderep
 	return true, tx.Commit()
 }
 
-func (s *PostgresStore) BlockRepairPublication(ctx context.Context, p coderepair.Publication, reason string, now time.Time) (bool, error) {
+func (s *Store) BlockRepairPublication(ctx context.Context, p coderepair.Publication, reason string, now time.Time) (bool, error) {
 	if p.ID == "" || p.LeaseToken == "" || now.IsZero() {
 		return false, errors.New("invalid publication failure")
 	}
@@ -346,7 +346,7 @@ func (s *PostgresStore) BlockRepairPublication(ctx context.Context, p coderepair
 
 // FailRepairPublication bounds explicit failures. A process crash does not
 // consume this budget: its expired lease is reconciled on the next claim.
-func (s *PostgresStore) FailRepairPublication(ctx context.Context, p coderepair.Publication, reason string, now time.Time) (bool, error) {
+func (s *Store) FailRepairPublication(ctx context.Context, p coderepair.Publication, reason string, now time.Time) (bool, error) {
 	if p.ID == "" || p.LeaseToken == "" || now.IsZero() {
 		return false, errors.New("invalid publication failure")
 	}

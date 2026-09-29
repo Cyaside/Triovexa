@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Cyaside/Triovexa/internal/domain"
-	"github.com/Cyaside/Triovexa/internal/storage"
+	"github.com/Cyaside/Triovexa/internal/storage/memory"
 )
 
 type countingAdapter struct{ calls atomic.Int32 }
@@ -20,7 +20,7 @@ func (a *countingAdapter) Execute(_ context.Context, _ domain.CandidateAction, _
 }
 
 func TestExecuteActionClaimsOnceUnderConcurrency(t *testing.T) {
-	repository := storage.NewMemoryStore()
+	repository := memory.NewMemoryStore()
 	incidentRecord, action := seedApprovedExecutionFixture(t, repository)
 	adapter := &countingAdapter{}
 	service := NewService(repository, DefaultCatalog(), adapter, nil, nil, time.Second, 0, time.Minute)
