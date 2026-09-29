@@ -163,6 +163,23 @@ type Artifact struct {
 	CreatedAt     time.Time
 }
 
+// InvestigationOutcome is recorded under the claimed job's fencing token.
+// ReportJSON contains the bounded, sanitized diagnosis and test results.
+type InvestigationOutcome struct {
+	JobID           string
+	LeaseToken      string
+	CaseID          string
+	AttemptID       string
+	ExpectedVersion int64
+	State           State
+	ErrorCode       string
+	ErrorMessage    string
+	Patch           []byte
+	PatchSHA256     string
+	ReportJSON      []byte
+	RecordedAt      time.Time
+}
+
 type Job struct {
 	ID          string
 	CaseID      string

@@ -22,6 +22,14 @@ type CaseStore interface {
 	ListRepairEvents(context.Context, string) ([]Event, error)
 }
 
+type InvestigationStore interface {
+	GetRepairCase(context.Context, string) (Case, error)
+	GetRepositoryBinding(context.Context, string) (RepositoryBinding, error)
+	GetRepairAttempt(context.Context, string) (Attempt, error)
+	GetRepairEvidenceSnapshot(context.Context, string) (EvidenceSnapshot, error)
+	RecordRepairInvestigationOutcome(context.Context, InvestigationOutcome) (bool, error)
+}
+
 // ArtifactStore records a manifest and its audit event atomically. Artifact
 // bytes remain outside the database and are addressed by digest and reference.
 type ArtifactStore interface {

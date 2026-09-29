@@ -75,6 +75,11 @@ func (s *PostgresStore) GetActiveRepositoryBinding(ctx context.Context, service,
 		FROM repository_bindings WHERE service_name=$1 AND environment=$2 AND enabled`, service, environment))
 }
 
+func (s *PostgresStore) GetRepositoryBinding(ctx context.Context, id string) (coderepair.RepositoryBinding, error) {
+	return scanRepositoryBinding(s.db.QueryRowContext(ctx, `SELECT `+repairBindingColumns+`
+		FROM repository_bindings WHERE id=$1`, id))
+}
+
 func getRepairBindingTx(ctx context.Context, tx *sql.Tx, id string) (coderepair.RepositoryBinding, error) {
 	return scanRepositoryBinding(tx.QueryRowContext(ctx, `SELECT `+repairBindingColumns+`
 		FROM repository_bindings WHERE id=$1`, id))
@@ -257,6 +262,25 @@ func scanRepairCase(row repairScanner) (coderepair.Case, error) {
 
 func (s *PostgresStore) GetRepairCase(ctx context.Context, id string) (coderepair.Case, error) {
 	return scanRepairCase(s.db.QueryRowContext(ctx, `SELECT `+repairCaseColumns+` FROM repair_cases WHERE id=$1`, id))
+}
+
+func (s *PostgresStore) GetRepairAttempt(ctx context.Context, id string) (coderepair.Attempt, error) {
+	var attempt coderepair.Attempt
+	var started, finished sql.NullTime
+	err := s.db.QueryRowContext(ctx, `SELECT id,case_id,attempt_number,status,provider,model,prompt_version,
+		error_code,error_message,started_at,finished_at,created_at FROM repair_attempts WHERE id=$1`, id).
+		Scan(&attempt.ID, &attempt.CaseID, &attempt.Number, &attempt.Status, &attempt.Provider, &attempt.Model,
+			&attempt.PromptVersion, &attempt.ErrorCode, &attempt.ErrorMessage, &started, &finished, &attempt.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return coderepair.Attempt{}, ErrNotFound
+	}
+	if started.Valid {
+		attempt.StartedAt = started.Time
+	}
+	if finished.Valid {
+		attempt.FinishedAt = finished.Time
+	}
+	return attempt, err
 }
 
 func (s *PostgresStore) TransitionRepairCase(ctx context.Context, id string, expected coderepair.State, version int64, next coderepair.State, event coderepair.Event) (bool, error) {

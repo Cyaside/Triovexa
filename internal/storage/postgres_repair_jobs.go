@@ -127,12 +127,24 @@ func (s *PostgresStore) CompleteRepairJob(ctx context.Context, jobID, leaseToken
 	if !repairCaseHasCompletedInvestigation(state) {
 		return false, errors.New("repair handler returned without a durable investigation outcome")
 	}
+	attemptStatus := "succeeded"
+	if state == coderepair.StateBlocked || state == coderepair.StateFailed {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM repair_artifacts
+			WHERE attempt_id=$1 AND kind='investigation_report')`, job.AttemptID).Scan(&exists); err != nil {
+			return false, err
+		}
+		if !exists {
+			return false, errors.New("repair failure has no durable investigation report")
+		}
+		attemptStatus = string(state)
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE repair_jobs SET status='succeeded',lease_owner='',lease_token='',
 		lease_until=NULL,updated_at=$1 WHERE id=$2`, now.UTC(), jobID); err != nil {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE repair_attempts SET status='succeeded',finished_at=$1
-		WHERE id=$2 AND status IN ('queued','running')`, now.UTC(), job.AttemptID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE repair_attempts SET status=$1,finished_at=$2
+		WHERE id=$3 AND status IN ('queued','running')`, attemptStatus, now.UTC(), job.AttemptID); err != nil {
 		return false, err
 	}
 	if err := insertRepairEventTx(ctx, tx, repairEvent(job.CaseID, "investigation_job_completed", "patch outcome persisted", now)); err != nil {
@@ -257,6 +269,19 @@ func (s *PostgresStore) RecoverRepairJobs(ctx context.Context, now time.Time) (i
 			if repairCaseHasCompletedInvestigation(job.caseState) {
 				status = coderepair.JobSucceeded
 				attemptStatus = "succeeded"
+				if job.caseState == coderepair.StateBlocked || job.caseState == coderepair.StateFailed {
+					var exists bool
+					if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM repair_artifacts
+						WHERE attempt_id=$1 AND kind='investigation_report')`, job.attemptID).Scan(&exists); err != nil {
+						return 0, err
+					}
+					if exists {
+						attemptStatus = string(job.caseState)
+					} else {
+						status = coderepair.JobDeadLetter
+						attemptStatus = "blocked"
+					}
+				}
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE repair_jobs SET status=$1,lease_owner='',lease_token='',
 				lease_until=NULL,updated_at=$2 WHERE id=$3`, status, now.UTC(), job.id); err != nil {
@@ -287,7 +312,8 @@ func (s *PostgresStore) RecoverRepairJobs(ctx context.Context, now time.Time) (i
 
 func repairCaseHasCompletedInvestigation(state coderepair.State) bool {
 	switch state {
-	case coderepair.StatePatchReady, coderepair.StateAwaitingPublishApproval,
+	case coderepair.StatePatchReady, coderepair.StateBlocked, coderepair.StateFailed,
+		coderepair.StateAwaitingPublishApproval,
 		coderepair.StatePublishing, coderepair.StatePROpen, coderepair.StateMerged,
 		coderepair.StateAwaitingDeployment, coderepair.StateVerifying,
 		coderepair.StateRecovered, coderepair.StateInconclusive:
