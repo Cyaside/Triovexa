@@ -6,7 +6,7 @@ on:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
@@ -34,8 +34,8 @@ jobs:
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/triovexa_test?sslmode=disable
       TEST_REDIS_ADDRESS: 127.0.0.1:6379
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -56,13 +56,13 @@ jobs:
           psql "postgres://postgres:postgres@127.0.0.1:5432/triovexa_restore?sslmode=disable" -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM schema_migrations;"
 
   operator-console:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -73,17 +73,17 @@ jobs:
       - run: npm run test:e2e
 
   repair-fixture:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
       - name: Verify source bug survives a real worker restart
         shell: pwsh
         run: ./scripts/verify-repair-fixture.ps1 -StopAfter
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: code-repair-fixture-evidence
@@ -91,10 +91,10 @@ jobs:
           if-no-files-found: ignore
 
   repair-sandbox:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -105,7 +105,7 @@ jobs:
         env:
           TEST_REPAIR_SANDBOX_IMAGE: triovexa-repair-sandbox:gate2
         run: go test ./internal/coderepair/agent -run '^TestInvestigationDockerRedGreenIntegration$' -count=1 -v
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: code-repair-sandbox-evidence
