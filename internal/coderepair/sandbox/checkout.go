@@ -79,6 +79,9 @@ func checkoutGitRepository(ctx context.Context, parent, repositoryURL, baseRef, 
 		"--", repositoryURL, checkoutPath); err != nil {
 		return "", err
 	}
+	if _, err := git(ctx, "-C", checkoutPath, "config", "--local", "core.autocrlf", "false"); err != nil {
+		return "", err
+	}
 	actual, err := git(ctx, "-C", checkoutPath, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err

@@ -66,6 +66,8 @@ func Open(rootPath string, binding coderepair.RepositoryBinding, limits Limits) 
 
 func (w *Workspace) Close() error { return w.root.Close() }
 
+func (w *Workspace) RootPath() string { return w.rootPath }
+
 func (w *Workspace) checkedPath(name string) error {
 	if !w.binding.AllowsPath(name) {
 		return errors.New("path is outside the repository binding or protected")

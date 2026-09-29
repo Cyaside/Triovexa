@@ -94,9 +94,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Verify isolated repair recipe and rejected commands
         shell: pwsh
         run: ./scripts/verify-repair-sandbox.ps1
+      - name: Verify coding loop with a real red-to-green container test
+        env:
+          TEST_REPAIR_SANDBOX_IMAGE: triovexa-repair-sandbox:gate2
+        run: go test ./internal/coderepair/agent -run '^TestInvestigationDockerRedGreenIntegration$' -count=1 -v
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -8,18 +8,20 @@ import (
 )
 
 type TestRecipe struct {
-	ID             string
-	Executable     string
-	Arguments      []string
-	Timeout        time.Duration
-	MaxOutputBytes int
+	ID              string
+	Executable      string
+	Arguments       []string
+	ExpectedFailure string
+	Timeout         time.Duration
+	MaxOutputBytes  int
 }
 
 var builtinTestRecipes = map[string]TestRecipe{
 	"go-test-workload": {
 		ID: "go-test-workload", Executable: "/usr/local/go/bin/go",
-		Arguments: []string{"test", "-tags", "repair_regression", "./internal/workload", "-run", "^TestRepairFixtureAcceptsSchemaTwo$", "-count=1"},
-		Timeout:   2 * time.Minute, MaxOutputBytes: 32 * 1024,
+		Arguments:       []string{"test", "-tags", "repair_regression", "./internal/workload", "-run", "^TestRepairFixtureAcceptsSchemaTwo$", "-count=1"},
+		ExpectedFailure: "repair fixture: unsupported job schema version 2",
+		Timeout:         2 * time.Minute, MaxOutputBytes: 32 * 1024,
 	},
 }
 
