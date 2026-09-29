@@ -474,7 +474,20 @@ func TestRepairCaseSurvivesRestartAtDurabilityBoundariesIntegration(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	digest := sha256.Sum256([]byte("pre-crash patch"))
+	artifact := coderepair.Artifact{ID: uuid.NewString(), AttemptID: attempt.ID, Kind: "trace",
+		ContentSHA256: hex.EncodeToString(digest[:]), ArtifactRef: "artifacts/code-repair/trace.json",
+		ByteSize: 15, CreatedAt: now}
+	if err := thirdStore.AddRepairArtifact(ctx, artifact,
+		repairTestEvent(c.ID, "artifact_recorded", now)); err != nil {
+		t.Fatal(err)
+	}
 	fourthStore := reopenRepairStore(t, thirdStore)
+	var artifactCount int
+	if err := fourthStore.db.QueryRowContext(ctx, `SELECT count(*) FROM repair_artifacts WHERE attempt_id=$1`, attempt.ID).
+		Scan(&artifactCount); err != nil || artifactCount != 1 {
+		t.Fatalf("artifact manifest lost after restart: count=%d err=%v", artifactCount, err)
+	}
 	if count, err := fourthStore.RecoverRepairJobs(ctx, now.Add(2*time.Second)); err != nil || count != 0 {
 		t.Fatalf("recovery stole unexpired lease: count=%d err=%v", count, err)
 	}
@@ -700,11 +713,12 @@ func TestRepairRecoveryAfterOutcomeBeforeJobCompletionIntegration(t *testing.T) 
 	if err != nil || !changed {
 		t.Fatalf("persist outcome before crash: changed=%v err=%v", changed, err)
 	}
-	count, err := store.RecoverRepairJobs(ctx, now.Add(300*time.Millisecond))
+	restartedStore := reopenRepairStore(t, store)
+	count, err := restartedStore.RecoverRepairJobs(ctx, now.Add(300*time.Millisecond))
 	if err != nil || count != 1 {
 		t.Fatalf("reconcile finished case: count=%d err=%v", count, err)
 	}
-	finalJob, err := store.GetRepairJob(ctx, claimed.ID)
+	finalJob, err := restartedStore.GetRepairJob(ctx, claimed.ID)
 	if err != nil || finalJob.Status != coderepair.JobSucceeded {
 		t.Fatalf("reconciled job=%+v err=%v", finalJob, err)
 	}
