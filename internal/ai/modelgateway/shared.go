@@ -1,6 +1,7 @@
 package modelgateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,7 +32,11 @@ func LoadBudgetConfig(path string) (BudgetConfig, error) {
 		return BudgetConfig{}, errors.New("model admission configuration could not be opened")
 	}
 	defer file.Close()
-	decoder := json.NewDecoder(io.LimitReader(file, 16*1024))
+	raw, err := io.ReadAll(io.LimitReader(file, 16*1024+1))
+	if err != nil || len(raw) > 16*1024 || ValidateUnambiguousJSON(raw) != nil {
+		return BudgetConfig{}, errors.New("model admission configuration is invalid")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var config BudgetConfig
 	if decoder.Decode(&config) != nil || decoder.Decode(new(any)) != io.EOF {

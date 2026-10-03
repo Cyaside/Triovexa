@@ -32,6 +32,7 @@ type Config struct {
 	MaxRequests                                         int
 	Cipher                                              *secretstore.Cipher
 	Fence                                               func(context.Context) error
+	AllowedTools                                        []string
 }
 
 type Gateway struct {
@@ -47,6 +48,17 @@ type Gateway struct {
 const maxProviderResponseBytes = 128 * 1024
 
 func New(config Config, ledger *admission.Service) (*Gateway, error) {
+	if config.Phase == "reviewer" && (len(config.AllowedTools) != 1 || config.AllowedTools[0] != "read_file") {
+		return nil, errors.New("reviewer gateway must be read-only")
+	}
+	for _, name := range config.AllowedTools {
+		if !allowedTools[name] {
+			return nil, errors.New("gateway tool scope is invalid")
+		}
+	}
+	if config.AllowedTools != nil {
+		config.AllowedTools = append([]string{}, config.AllowedTools...)
+	}
 	validator, err := ai.NewOpenAICompatibleClient(config.Provider)
 	if err != nil || !validator.Configured() || ledger == nil || config.Fence == nil || config.Cipher == nil ||
 		config.CampaignID == "" || config.AttemptID == "" || config.ConfigVersion == "" || config.Phase == "" ||
@@ -145,6 +157,9 @@ func (g *Gateway) DispatchAt(ctx context.Context, ordinal int, body []byte) ([]b
 		return nil, 0, 0, errors.New("LEASE_LOST")
 	}
 	if err := ValidatePayload(body, g.config.Provider.Model, g.config.MaxOutputTokens); err != nil {
+		return nil, 0, 0, err
+	}
+	if err := validateStageTools(body, g.config.AllowedTools); err != nil {
 		return nil, 0, 0, err
 	}
 	bound, err := admission.ConservativeInputBound(body, 512)
