@@ -2,6 +2,7 @@ package remediation
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	"github.com/Cyaside/Triovexa/internal/execution"
+	"github.com/Cyaside/Triovexa/internal/mode"
 )
 
 func TestLLMGeneratorBuildsCatalogConstrainedActions(t *testing.T) {
@@ -31,6 +33,57 @@ func TestLLMGeneratorBuildsCatalogConstrainedActions(t *testing.T) {
 	}
 	if actions[0].ActionType != "refresh_demo_cache" {
 		t.Fatalf("ActionType = %q", actions[0].ActionType)
+	}
+}
+
+type recordingActionGenerator struct {
+	calls int
+	err   error
+}
+
+func (g *recordingActionGenerator) Generate(context.Context, domain.Incident, domain.TriageResult, []domain.EvidenceItem, []domain.DocumentReference) ([]domain.CandidateAction, error) {
+	g.calls++
+	return nil, g.err
+}
+
+func TestLLMFailureDoesNotInvokeDevelopmentHeuristic(t *testing.T) {
+	providerErr := errors.New("fixture provider unavailable")
+	heuristic, llm := &recordingActionGenerator{}, &recordingActionGenerator{err: providerErr}
+	modes := mode.NewManager("llm", "demo")
+	generator := NewSwitchingGenerator(modes, heuristic, llm)
+	_, err := generator.Generate(t.Context(), domain.Incident{}, domain.TriageResult{}, nil, nil)
+	if !errors.Is(err, providerErr) || heuristic.calls != 0 || llm.calls != 1 {
+		t.Fatalf("provider failure replaced: err=%v heuristic=%d llm=%d", err, heuristic.calls, llm.calls)
+	}
+	modes.SetReasoning("heuristic")
+	if _, err := generator.Generate(t.Context(), domain.Incident{}, domain.TriageResult{}, nil, nil); err != nil || heuristic.calls != 1 {
+		t.Fatalf("explicit dev mode unavailable: err=%v calls=%d", err, heuristic.calls)
+	}
+	if _, err := NewSwitchingGenerator(mode.NewManager("llm", "demo"), heuristic, nil).Generate(t.Context(), domain.Incident{}, domain.TriageResult{}, nil, nil); err == nil || heuristic.calls != 1 {
+		t.Fatal("missing llm invoked heuristic")
+	}
+}
+
+func TestLLMActionRequiresExplicitListAndAvailableEvidence(t *testing.T) {
+	for _, content := range []string{`{}`, `{"actions":null}`, `{"actions":[],"unknown":true}`, `{"actions":[]} {"actions":[]}`} {
+		generator := NewLLMGenerator(execution.DefaultCatalog(), remediationStubCompleter{content: content})
+		if _, err := generator.Generate(t.Context(), domain.Incident{Environment: "staging"}, domain.TriageResult{}, nil, nil); err == nil {
+			t.Fatalf("accepted malformed action list %s", content)
+		}
+	}
+	for _, refs := range []string{`[]`, `["forged"]`, `["ev-1","ev-1"]`} {
+		generator := NewLLMGenerator(execution.DefaultCatalog(), remediationStubCompleter{content: `{"actions":[{"action_type":"refresh_demo_cache","target_resource":"demo-cache","parameters":{"cache_key":"example"},"rationale":"fixture","evidence_refs":` + refs + `}]}`})
+		actions, err := generator.Generate(t.Context(), domain.Incident{Environment: "staging"}, domain.TriageResult{}, []domain.EvidenceItem{{ID: "ev-1"}}, nil)
+		if err != nil || len(actions) != 1 || actions[0].Status != domain.CandidateActionStatusInvalid {
+			t.Fatalf("ungrounded action accepted: refs=%s actions=%+v err=%v", refs, actions, err)
+		}
+	}
+}
+
+func TestActionPromptIncludesRunbookContent(t *testing.T) {
+	prompt := buildActionPrompt(domain.Incident{}, domain.TriageResult{}, nil, []domain.DocumentReference{{ID: "book-1", DocumentTitle: "Recovery", Snippet: "Restart only when the worker heartbeat is stale."}}, execution.DefaultCatalog())
+	if !strings.Contains(prompt, "Restart only when") || !strings.Contains(prompt, `"passage_sha256"`) {
+		t.Fatal("action prompt has no actual passage/provenance")
 	}
 }
 

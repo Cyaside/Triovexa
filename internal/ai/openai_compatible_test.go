@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -26,6 +27,62 @@ func TestOpenAICompatibleClientNormalizesV1AndValidatesJSON(t *testing.T) {
 	}
 	if result.Content != `{"summary":"ok"}` || result.Usage.TotalTokens != 9 {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestProviderInvalidContentRetainsUsageWithoutRetry(t *testing.T) {
+	for _, content := range []string{`"not-json"`, `""`, `{ "unexpected": true }`} {
+		t.Run(content, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				_, _ = w.Write([]byte(`{"model":"fixture-model","choices":[{"message":{"content":` + content + `}}],"usage":{"prompt_tokens":8,"completion_tokens":5,"total_tokens":13}}`))
+			}))
+			defer server.Close()
+			client, err := NewOpenAICompatibleClient(ProviderConfig{BaseURL: server.URL, APIKey: "dummy", Model: "fixture-model", AllowHTTP: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := client.CompleteJSONDetailed(t.Context(), []ChatMessage{{Role: "user", Content: "fixture"}})
+			if err == nil || result.UsageStatus != UsageKnown || result.Usage.TotalTokens != 13 || calls.Load() != 1 {
+				t.Fatalf("invalid output lost usage or retried: result=%+v err=%v calls=%d", result, err, calls.Load())
+			}
+		})
+	}
+}
+
+func TestProviderMissingAndInvalidUsageAreExplicit(t *testing.T) {
+	for name, fixture := range map[string]struct {
+		raw    string
+		status UsageStatus
+		total  int
+	}{
+		"absent":       {"", UsageMissing, 0},
+		"partial":      {`,"usage":{"total_tokens":13}`, UsageMissing, 13},
+		"inconsistent": {`,"usage":{"prompt_tokens":8,"completion_tokens":5,"total_tokens":12}`, UsageInvalid, 12},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{}"}}]` + fixture.raw + `}`))
+			}))
+			defer server.Close()
+			client, err := NewOpenAICompatibleClient(ProviderConfig{BaseURL: server.URL, APIKey: "dummy", Model: "fixture-model", AllowHTTP: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := client.CompleteJSONDetailed(t.Context(), nil)
+			if err != nil || result.UsageStatus != fixture.status || result.Usage.TotalTokens != fixture.total {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestProviderRejectsCredentialBearingURL(t *testing.T) {
+	for _, address := range []string{"https://user:dummy@example.invalid/v1", "https://example.invalid/v1?key=dummy", "https://example.invalid/v1#secret"} {
+		if _, err := NewOpenAICompatibleClient(ProviderConfig{BaseURL: address, Model: "fixture", APIKey: "dummy"}); err == nil {
+			t.Fatalf("accepted unsafe provider root %q", address)
+		}
 	}
 }
 
