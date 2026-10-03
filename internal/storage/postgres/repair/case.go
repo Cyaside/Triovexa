@@ -270,10 +270,11 @@ func (s *Store) GetRepairCase(ctx context.Context, id string) (coderepair.Case, 
 func (s *Store) GetRepairAttempt(ctx context.Context, id string) (coderepair.Attempt, error) {
 	var attempt coderepair.Attempt
 	var started, finished sql.NullTime
+	var runtime sql.NullString
 	err := s.db.QueryRowContext(ctx, `SELECT id,case_id,attempt_number,status,provider,model,prompt_version,
-		error_code,error_message,started_at,finished_at,created_at FROM repair_attempts WHERE id=$1`, id).
+		error_code,error_message,started_at,finished_at,created_at,runtime_json::text FROM repair_attempts WHERE id=$1`, id).
 		Scan(&attempt.ID, &attempt.CaseID, &attempt.Number, &attempt.Status, &attempt.Provider, &attempt.Model,
-			&attempt.PromptVersion, &attempt.ErrorCode, &attempt.ErrorMessage, &started, &finished, &attempt.CreatedAt)
+			&attempt.PromptVersion, &attempt.ErrorCode, &attempt.ErrorMessage, &started, &finished, &attempt.CreatedAt, &runtime)
 	if errors.Is(err, sql.ErrNoRows) {
 		return coderepair.Attempt{}, ErrNotFound
 	}
@@ -282,6 +283,13 @@ func (s *Store) GetRepairAttempt(ctx context.Context, id string) (coderepair.Att
 	}
 	if finished.Valid {
 		attempt.FinishedAt = finished.Time
+	}
+	if err == nil && runtime.Valid {
+		attempt.Runtime = new(coderepair.RuntimeSpec)
+		if json.Unmarshal([]byte(runtime.String), attempt.Runtime) != nil || attempt.Runtime.Validate() != nil ||
+			attempt.Runtime.ThreadID != attempt.CaseID+":"+attempt.ID {
+			return coderepair.Attempt{}, errors.New("investigation runtime snapshot is corrupt")
+		}
 	}
 	return attempt, err
 }
@@ -352,6 +360,17 @@ func (s *Store) ListRepairEvents(ctx context.Context, caseID string) ([]coderepa
 // audit event and durable job one transaction. A competing approver observes
 // the new case version and cannot create a second attempt.
 func (s *Store) ApproveRepairInvestigation(ctx context.Context, approval coderepair.Approval, attempt coderepair.Attempt, job coderepair.Job, event coderepair.Event) (bool, error) {
+	var runtimeJSON any
+	if attempt.Runtime != nil {
+		if err := attempt.Runtime.Validate(); err != nil || attempt.Runtime.ThreadID != attempt.CaseID+":"+attempt.ID {
+			return false, errors.New("investigation runtime does not match its attempt")
+		}
+		encoded, err := json.Marshal(attempt.Runtime)
+		if err != nil {
+			return false, err
+		}
+		runtimeJSON = string(encoded)
+	}
 	if approval.ID == "" || approval.CaseID == "" || approval.CaseVersion < 1 || approval.Phase != "investigation" ||
 		approval.Decision != "approved" || approval.ActorID == "" || approval.CreatedAt.IsZero() ||
 		!approval.ExpiresAt.After(approval.CreatedAt) || approval.ExpiresAt.Sub(approval.CreatedAt) > 15*time.Minute ||
@@ -440,9 +459,9 @@ func (s *Store) ApproveRepairInvestigation(ctx context.Context, approval coderep
 		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO repair_attempts
-		(id,case_id,attempt_number,status,provider,model,prompt_version,error_code,error_message,created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,'','',$8)`, attempt.ID, attempt.CaseID, attempt.Number, attempt.Status,
-		attempt.Provider, attempt.Model, attempt.PromptVersion, attempt.CreatedAt.UTC()); err != nil {
+		(id,case_id,attempt_number,status,provider,model,prompt_version,error_code,error_message,created_at,runtime_json)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'','',$8,$9::jsonb)`, attempt.ID, attempt.CaseID, attempt.Number, attempt.Status,
+		attempt.Provider, attempt.Model, attempt.PromptVersion, attempt.CreatedAt.UTC(), runtimeJSON); err != nil {
 		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO repair_jobs

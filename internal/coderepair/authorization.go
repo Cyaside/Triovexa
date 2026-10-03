@@ -25,9 +25,18 @@ type AgentSelection struct {
 	Provider      string
 	Model         string
 	PromptVersion string
+	Runtime       *RuntimeSpec
 }
 
 func (s AgentSelection) validate() error {
+	if s.Runtime != nil {
+		if err := s.Runtime.Validate(); err != nil {
+			return err
+		}
+		if s.Runtime.ThreadID != "" {
+			return errors.New("thread identity must be assigned by authorization")
+		}
+	}
 	for _, value := range []string{s.Provider, s.Model, s.PromptVersion} {
 		if value == "" || strings.TrimSpace(value) != value || len(value) > 128 ||
 			strings.IndexFunc(value, unicode.IsControl) >= 0 || security.Redact(value) != value {
@@ -74,6 +83,11 @@ func (s *InvestigationAuthorizationService) Authorize(ctx context.Context, caseI
 	now = now.UTC()
 	attempt := Attempt{ID: uuid.NewString(), CaseID: c.ID, Number: 1, Status: JobQueued,
 		Provider: selection.Provider, Model: selection.Model, PromptVersion: selection.PromptVersion, CreatedAt: now}
+	if selection.Runtime != nil {
+		runtime := *selection.Runtime
+		runtime.ThreadID = c.ID + ":" + attempt.ID
+		attempt.Runtime = &runtime
+	}
 	payload, err := json.Marshal(struct {
 		CaseID          string `json:"case_id"`
 		AttemptID       string `json:"attempt_id"`

@@ -87,12 +87,22 @@ func (w *Workspace) checkedPath(name string) error {
 }
 
 func (w *Workspace) ReadFile(name string) ([]byte, error) {
+	return w.readFile(name, true)
+}
+
+// SourceIndex owns unique-byte accounting for indexed reads. The same bounded
+// file reader is reused without charging each cache miss as a new source file.
+func (w *Workspace) readIndexedFile(name string) ([]byte, error) {
+	return w.readFile(name, false)
+}
+
+func (w *Workspace) readFile(name string, charge bool) ([]byte, error) {
 	if err := w.checkedPath(name); err != nil {
 		return nil, err
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.read >= w.limits.MaxTotalBytes {
+	if charge && w.read >= w.limits.MaxTotalBytes {
 		return nil, errors.New("workspace read budget exhausted")
 	}
 	file, err := w.root.Open(name)
@@ -104,20 +114,22 @@ func (w *Workspace) ReadFile(name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Size() > w.limits.MaxFileBytes || info.Size() > w.limits.MaxTotalBytes-w.read {
+	if !info.Mode().IsRegular() || info.Size() > w.limits.MaxFileBytes || (charge && info.Size() > w.limits.MaxTotalBytes-w.read) {
 		return nil, errors.New("file is not regular or exceeds workspace read budget")
 	}
 	data, err := io.ReadAll(io.LimitReader(file, w.limits.MaxFileBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > w.limits.MaxFileBytes || int64(len(data)) > w.limits.MaxTotalBytes-w.read || strings.IndexByte(string(data), 0) >= 0 {
+	if int64(len(data)) > w.limits.MaxFileBytes || (charge && int64(len(data)) > w.limits.MaxTotalBytes-w.read) || strings.IndexByte(string(data), 0) >= 0 {
 		return nil, errors.New("file is binary or exceeds workspace read budget")
 	}
 	if security.Redact(string(data)) != string(data) {
 		return nil, errors.New("file contains a credential-like value")
 	}
-	w.read += int64(len(data))
+	if charge {
+		w.read += int64(len(data))
+	}
 	return data, nil
 }
 

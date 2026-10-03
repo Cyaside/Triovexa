@@ -100,6 +100,9 @@ func checkoutGitRepository(ctx context.Context, parent, repositoryURL, baseRef, 
 	if strings.TrimSpace(status) != "" {
 		return "", errors.New("checkout is not clean")
 	}
+	if err := markPrivateCheckout(checkoutPath, baseSHA); err != nil {
+		return "", err
+	}
 	keep = true
 	return checkoutPath, nil
 }
@@ -114,6 +117,10 @@ func git(ctx context.Context, args ...string) (string, error) {
 }
 
 func gitInput(ctx context.Context, input []byte, args ...string) (string, error) {
+	return gitInputBounded(ctx, input, 4096, args...)
+}
+
+func gitInputBounded(ctx context.Context, input []byte, limit int, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", args...)
 	if input != nil {
 		command.Stdin = bytes.NewReader(input)
@@ -126,7 +133,7 @@ func gitInput(ctx context.Context, input []byte, args ...string) (string, error)
 	}
 	command.Env = append(command.Env,
 		"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
-	output := &boundedOutput{limit: 4096}
+	output := &boundedOutput{limit: limit}
 	command.Stdout = output
 	command.Stderr = output
 	if err := command.Run(); err != nil {

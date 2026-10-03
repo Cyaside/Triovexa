@@ -124,6 +124,7 @@ type Attempt struct {
 	Provider      string
 	Model         string
 	PromptVersion string
+	Runtime       *RuntimeSpec `json:"-"`
 	ErrorCode     string
 	ErrorMessage  string
 	StartedAt     time.Time
