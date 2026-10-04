@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -31,7 +32,7 @@ var errGLMInputShape = errors.New("BILLING_UNBOUNDED: unsupported GLM template i
 // ValidatePayload remains the caller's authority/policy check. This function
 // rejects shape ambiguities rather than assuming an upstream rendering rule.
 func GLMFlashInputBound(body []byte) (int64, error) {
-	if len(body) == 0 || len(body) > 256*1024 || !utf8.Valid(body) || unambiguousJSON(body) != nil {
+	if len(body) == 0 || len(body) > 256*1024 || !utf8.Valid(body) || unambiguousJSON(body) != nil || !glmEscapedUnicode(body) {
 		return 0, errGLMInputShape
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
@@ -197,7 +198,7 @@ func glmCallBytes(value any) (int, error) {
 		}
 		name, nameOK := function["name"].(string)
 		arguments, argsOK := function["arguments"].(string)
-		if !nameOK || !allowedTools[name] || !argsOK || unambiguousJSON([]byte(arguments)) != nil {
+		if !nameOK || !allowedTools[name] || !argsOK || unambiguousJSON([]byte(arguments)) != nil || !glmEscapedUnicode([]byte(arguments)) {
 			return 0, errGLMInputShape
 		}
 		decoder := json.NewDecoder(strings.NewReader(arguments))
@@ -221,6 +222,37 @@ func glmCallBytes(value any) (int, error) {
 		}
 	}
 	return size, nil
+}
+
+// Go replaces unpaired JSON UTF-16 escapes with U+FFFD; Python preserves the
+// surrogate. Reject that parser disagreement instead of guessing its encoding.
+// The caller has already validated JSON syntax, so every escape has enough bytes.
+func glmEscapedUnicode(data []byte) bool {
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' {
+			continue
+		}
+		i++
+		if data[i] != 'u' {
+			continue
+		}
+		value, _ := strconv.ParseUint(string(data[i+1:i+5]), 16, 16)
+		i += 4
+		if value >= 0xdc00 && value <= 0xdfff {
+			return false
+		}
+		if value >= 0xd800 && value <= 0xdbff {
+			if i+6 >= len(data) || data[i+1] != '\\' || data[i+2] != 'u' {
+				return false
+			}
+			low, _ := strconv.ParseUint(string(data[i+3:i+7]), 16, 16)
+			if low < 0xdc00 || low > 0xdfff {
+				return false
+			}
+			i += 6
+		}
+	}
+	return true
 }
 
 // Python/Jinja default JSON uses ", " and ": ". Go's HTML-safe string encoder

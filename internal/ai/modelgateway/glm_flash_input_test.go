@@ -50,6 +50,12 @@ func TestGLMFlashInputBoundPublishedToolDefinitionGolden(t *testing.T) {
 	if err != nil || bound < int64(len(rendered)) || bound > int64(len(rendered)+6) {
 		t.Fatalf("native definition: bound=%d rendered=%d err=%v", bound, len(rendered), err)
 	}
+	// With trim_blocks disabled, explicit '-' markers still strip loop setup;
+	// LF literals survive before/after the JSON, after endif, and after endfor.
+	untrimmed := strings.Replace(rendered, toolDefinition+"\n</tools>", "\n"+toolDefinition+"\n\n\n</tools>", 1)
+	if bound < int64(len(untrimmed)) || bound > int64(len(untrimmed)+2) {
+		t.Fatalf("untrimmed reference: bound=%d rendered=%d", bound, len(untrimmed))
+	}
 	if strings.Contains(toolDefinition, "strict") {
 		t.Fatal("reference definition unexpectedly retained omitted strict metadata")
 	}
@@ -66,6 +72,10 @@ func TestGLMFlashInputBoundRejectsUnprovenShapes(t *testing.T) {
 		`{"messages":[{"role":"user","content":{"text":"a"}}]}`,
 		`{"messages":[{"role":"assistant","reasoning_content":{"text":"a"}}]}`,
 		`{"messages":[{"role":"user","content":"a","audio":"hidden"}]}`,
+		`{"messages":[{"role":"user","content":"\ud800"}]}`,
+		`{"messages":[{"role":"user","content":"\udfff"}]}`,
+		`{"messages":[{"role":"user","content":"\ud800x\udc00"}]}`,
+		`{"messages":[{"role":"assistant","tool_calls":[{"id":"1","type":"function","function":{"name":"repo_read","arguments":"{\"path\":\"\\ud800\"}"}}]}]}`,
 		`{"messages":[{"role":"user","content":"a"}],"thinking":{"type":"enabled"}}`,
 		`{"messages":[{"role":"user","content":"a"}],"tools":[{"type":"web_search"}]}`,
 		`{"messages":[{"role":"user","content":"a"}],"tools":[{"type":"function","function":{"name":"repo_read","defer_loading":true}}]}`,
@@ -81,6 +91,15 @@ func TestGLMFlashInputBoundRejectsUnprovenShapes(t *testing.T) {
 	}
 	if _, err := GLMFlashInputBound([]byte("{\"messages\":[{\"role\":\"user\",\"content\":\"\xff\"}]}")); err == nil {
 		t.Fatal("invalid UTF-8 was accepted")
+	}
+}
+
+func TestGLMFlashInputBoundAcceptsPairedUnicodeEscapes(t *testing.T) {
+	for _, content := range []string{`\ud83d\ude00`, `\\ud800`, `\u00e9`} {
+		body := []byte(`{"messages":[{"role":"user","content":"` + content + `"}]}`)
+		if _, err := GLMFlashInputBound(body); err != nil {
+			t.Fatalf("valid Unicode escape %s rejected: %v", content, err)
+		}
 	}
 }
 
