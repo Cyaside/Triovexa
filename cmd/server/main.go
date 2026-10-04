@@ -100,6 +100,7 @@ func main() {
 		logger.Error("invalid LLM provider configuration", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+	llmClient.SetDispatcher(configureModelAdmission(context.Background(), repository, credentialCipher))
 	grafanaClient := observability.NewGrafanaClient(
 		cfg.GrafanaBaseURL,
 		cfg.GrafanaAPIToken,
@@ -197,9 +198,10 @@ func main() {
 		executionService,
 		recorder,
 		&apphttp.RuntimeControls{
-			Modes:     runtimeModes,
-			Reasoning: llmClient,
-			Secrets:   credentialCipher,
+			Modes:           runtimeModes,
+			Reasoning:       llmClient,
+			Secrets:         credentialCipher,
+			RepairSelection: repairSelection(llmClient, credentialCipher),
 			Providers: apphttp.ProviderStatus{
 				GrafanaConfigured:  grafanaClient.Configured(),
 				LLMConfigured:      llmClient.Configured(),

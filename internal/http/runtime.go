@@ -5,6 +5,7 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/auth"
+	"github.com/Cyaside/Triovexa/internal/coderepair"
 	"github.com/Cyaside/Triovexa/internal/mode"
 	"github.com/Cyaside/Triovexa/internal/observability"
 	"github.com/Cyaside/Triovexa/internal/readiness"
@@ -12,12 +13,13 @@ import (
 )
 
 type RuntimeControls struct {
-	Modes     *mode.Manager
-	Providers ProviderStatus
-	Reasoning *ai.OpenAICompatibleClient
-	Secrets   *secretstore.Cipher
-	Auth      *auth.Service
-	Readiness interface {
+	Modes           *mode.Manager
+	Providers       ProviderStatus
+	Reasoning       *ai.OpenAICompatibleClient
+	Secrets         *secretstore.Cipher
+	RepairSelection func() (coderepair.AgentSelection, error)
+	Auth            *auth.Service
+	Readiness       interface {
 		Check(context.Context) readiness.Report
 	}
 }

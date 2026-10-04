@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/google/uuid"
 
 	"github.com/Cyaside/Triovexa/internal/alerting"
@@ -115,6 +116,7 @@ func (s *Service) IngestGrafanaWebhookAsync(ctx context.Context, payload alertin
 }
 
 func (s *Service) ProcessWorkflowJob(ctx context.Context, job domain.WorkflowJob) error {
+	ctx = ai.WithRequestScope(ctx, ai.RequestScope{RunID: "workflow:" + job.ID, Phase: "triage", Ordinal: 1})
 	if job.Type != domain.JobTypeTriage {
 		return fmt.Errorf("unsupported workflow job type %q", job.Type)
 	}
@@ -340,7 +342,12 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 	}
 
 	triagedAt := s.now()
-	result, err := s.generator.Generate(ctx, incident, evidence, documents)
+	scope, scoped := ai.RequestScopeFrom(ctx)
+	if !scoped {
+		scope = ai.RequestScope{RunID: "incident:" + incident.ID, Ordinal: 1}
+	}
+	scope.Phase = "triage"
+	result, err := s.generator.Generate(ai.WithRequestScope(ctx, scope), incident, evidence, documents)
 	if err != nil {
 		if s.metrics != nil {
 			s.metrics.ObserveTriageStage("triage_generation", "failed", s.now().Sub(triagedAt))
@@ -401,7 +408,8 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 		return domain.Incident{}, fmt.Errorf("audit action generation start: %w", err)
 	}
 
-	actions, err := s.actions.Generate(ctx, incident, result, actionEvidence, documents)
+	scope.Phase = "remediation"
+	actions, err := s.actions.Generate(ai.WithRequestScope(ctx, scope), incident, result, actionEvidence, documents)
 	if err != nil {
 		if s.metrics != nil {
 			s.metrics.ObserveTriageStage("action_generation", "failed", s.now().Sub(startedAt))

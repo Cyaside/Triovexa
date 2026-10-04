@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/approval"
 	"github.com/Cyaside/Triovexa/internal/config"
@@ -216,23 +218,20 @@ func registerAPIV1(
 		if apiKey == "" {
 			apiKey, _ = config.ResolveCredential(profile.CredentialRef)
 		}
-		if apiKey == "" && runtime != nil && runtime.Reasoning != nil && runtime.Reasoning.Configured() {
-			started := time.Now()
-			testCtx, cancel := context.WithTimeout(r.Context(), cfg.LLMTimeout)
-			defer cancel()
-			_, err := runtime.Reasoning.CompleteJSON(testCtx, []ai.ChatMessage{{Role: "system", Content: "Return a JSON object with status set to ok."}, {Role: "user", Content: "Test this connection."}})
-			if err != nil {
-				writeAPIError(w, http.StatusBadGateway, "provider_test_failed", "The provider did not return a valid JSON response. Check the provider settings.")
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{"status": "connected", "provider": runtime.Reasoning.Provider(), "model": runtime.Reasoning.Model(), "latency_ms": time.Since(started).Milliseconds()})
-			return
-		}
-		if apiKey == "" {
+		if apiKey == "" && (runtime == nil || runtime.Reasoning == nil || !runtime.Reasoning.Configured()) {
 			writeAPIError(w, http.StatusBadRequest, "credential_unavailable", "Enter an API key or configure the credential in the server environment.")
 			return
 		}
-		client, err := ai.NewOpenAICompatibleClient(reasoningProviderConfig(cfg, profile, apiKey))
+		// Reuse the server's dispatcher on an independent configuration snapshot.
+		// Testing an unsaved key must not bypass the shared admission campaign.
+		if runtime == nil || runtime.Reasoning == nil {
+			writeAPIError(w, http.StatusServiceUnavailable, "model_admission_unavailable", "Model admission is unavailable.")
+			return
+		}
+		client, err := runtime.Reasoning.Snapshot()
+		if err == nil {
+			err = client.Reconfigure(reasoningProviderConfig(cfg, profile, apiKey))
+		}
 		if err != nil || !client.Configured() {
 			writeAPIError(w, http.StatusBadRequest, "provider_not_configured", "Reasoning provider configuration is incomplete or invalid.")
 			return
@@ -240,9 +239,10 @@ func registerAPIV1(
 		started := time.Now()
 		testCtx, cancel := context.WithTimeout(r.Context(), cfg.LLMTimeout)
 		defer cancel()
+		testCtx = ai.WithRequestScope(testCtx, ai.RequestScope{RunID: uuid.NewString(), Phase: "connection-test", Ordinal: 1})
 		_, err = client.CompleteJSON(testCtx, []ai.ChatMessage{{Role: "system", Content: "Return a JSON object with status set to ok."}, {Role: "user", Content: "Test this connection."}})
 		if err != nil {
-			writeAPIError(w, http.StatusBadGateway, "provider_test_failed", "The provider did not return a valid JSON response. Check the server logs and provider settings.")
+			writeReasoningTestError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "connected", "provider": profile.Provider, "model": profile.Model, "latency_ms": time.Since(started).Milliseconds()})

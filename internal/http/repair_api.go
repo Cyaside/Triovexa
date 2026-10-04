@@ -14,7 +14,6 @@ import (
 
 	"github.com/Cyaside/Triovexa/internal/approval"
 	"github.com/Cyaside/Triovexa/internal/coderepair"
-	"github.com/Cyaside/Triovexa/internal/coderepair/agent"
 	"github.com/Cyaside/Triovexa/internal/coderepair/sandbox"
 	repairverify "github.com/Cyaside/Triovexa/internal/coderepair/verification"
 	"github.com/Cyaside/Triovexa/internal/config"
@@ -190,8 +189,13 @@ func registerRepairAPI(mux *http.ServeMux, cfg config.Config, repository storage
 		}
 		switch parts[1] {
 		case "investigate":
-			if runtime == nil || runtime.Reasoning == nil || !runtime.Reasoning.Configured() {
-				writeAPIError(w, http.StatusServiceUnavailable, "reasoning_unavailable", "Configure a reasoning provider first.")
+			if runtime == nil || runtime.RepairSelection == nil {
+				writeAPIError(w, http.StatusServiceUnavailable, "reasoning_unavailable", "Configure the repair runtime and model admission first.")
+				return
+			}
+			selection, selectionErr := runtime.RepairSelection()
+			if selectionErr != nil {
+				writeAPIError(w, http.StatusServiceUnavailable, "model_admission_unavailable", "Repair model admission is unavailable. Check the server configuration.")
 				return
 			}
 			service, err := coderepair.NewInvestigationAuthorizationService(store)
@@ -199,9 +203,7 @@ func registerRepairAPI(mux *http.ServeMux, cfg config.Config, repository storage
 				writeAPIError(w, http.StatusInternalServerError, "repair_unavailable", "Investigation authorization is unavailable.")
 				return
 			}
-			_, attempt, _, err := service.Authorize(r.Context(), caseID, identity.User.ID, coderepair.AgentSelection{
-				Provider: runtime.Reasoning.Provider(), Model: runtime.Reasoning.Model(), PromptVersion: agent.PromptVersion,
-			}, time.Now().UTC())
+			_, attempt, _, err := service.Authorize(r.Context(), caseID, identity.User.ID, selection, time.Now().UTC())
 			if err != nil {
 				writeAPIError(w, http.StatusConflict, "investigation_rejected", err.Error())
 				return

@@ -5,17 +5,21 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/Cyaside/Triovexa/internal/ai"
+	"github.com/Cyaside/Triovexa/internal/ai/admission"
+	"github.com/Cyaside/Triovexa/internal/ai/modelgateway"
 	"github.com/Cyaside/Triovexa/internal/coderepair/agent"
 	repairrunner "github.com/Cyaside/Triovexa/internal/coderepair/runner"
+	"github.com/Cyaside/Triovexa/internal/coderepair/runtimebridge"
 	"github.com/Cyaside/Triovexa/internal/coderepair/sandbox"
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
-	"github.com/Cyaside/Triovexa/internal/connections"
+	"github.com/Cyaside/Triovexa/internal/secretstore"
 	"github.com/Cyaside/Triovexa/internal/security"
 	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 )
@@ -33,41 +37,54 @@ func run(logger *slog.Logger) error {
 	if strings.EqualFold(strings.TrimSpace(cfg.DatabaseURL), "memory") || cfg.DatabaseURL == "" {
 		return errors.New("code repair runner requires PostgreSQL")
 	}
+	budgetConfig, err := modelgateway.LoadBudgetConfig(strings.TrimSpace(os.Getenv("AI_BUDGET_CONFIG_PATH")))
+	if err != nil {
+		return err
+	}
 	image := strings.TrimSpace(os.Getenv("REPAIR_SANDBOX_IMAGE"))
 	if image == "" {
 		return errors.New("REPAIR_SANDBOX_IMAGE must identify a prebuilt isolated test image")
+	}
+	entry := strings.TrimSpace(os.Getenv("REPAIR_AGENT_ENTRY"))
+	if !filepath.IsAbs(entry) {
+		return errors.New("REPAIR_AGENT_ENTRY must be an absolute path to the built native agent")
+	}
+	if info, err := os.Stat(entry); err != nil || info.IsDir() {
+		return errors.New("native agent entry is unavailable; build agent-runtime first")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		return errors.New("native repair runtime requires Node.js 24")
+	}
+	checkpointDSN := strings.TrimSpace(os.Getenv("REPAIR_CHECKPOINT_DATABASE_URL"))
+	checkpointSchema := strings.TrimSpace(os.Getenv("REPAIR_CHECKPOINT_SCHEMA"))
+	if checkpointDSN == "" || checkpointSchema == "" {
+		return errors.New("repair runtime requires initialized checkpoint storage with a dedicated restricted role")
 	}
 	store, err := postgres.NewPostgresStore(cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	if err := connections.LoadReasoning(context.Background(), store, &cfg); err != nil {
-		return err
-	}
-	provider, baseURL, apiKey, model := cfg.EffectiveLLM()
-	client, err := ai.NewOpenAICompatibleClient(ai.ProviderConfig{
-		Name: provider, BaseURL: baseURL, APIKey: apiKey, Model: model,
-		JSONMode: cfg.LLMJSONMode, Timeout: cfg.LLMTimeout,
-		AllowHTTP:  strings.EqualFold(cfg.Environment, "local") || strings.EqualFold(cfg.Environment, "local-demo"),
-		AllowHosts: cfg.LLMAllowHosts, RequireAllowlist: cfg.InternalMode(),
-	})
+	ledger, err := admission.NewService(store.ModelBudgetStore())
 	if err != nil {
 		return err
 	}
-	if !client.Configured() {
-		return errors.New("code repair requires a configured OpenAI-compatible provider")
-	}
-	loop, err := agent.NewLoop(client, sandbox.DockerTester{Image: image})
+	credentialCipher, err := secretstore.NewCipher(cfg.CredentialKeyPath, cfg.CredentialEncryptionKey)
 	if err != nil {
 		return err
 	}
+	if err := ledger.CreateCampaign(context.Background(), budgetConfig.Campaign); err != nil {
+		return err
+	}
+	engine := &runtimebridge.NativeRunner{Process: runtimebridge.Process{Executable: node, Entry: entry, Version: runtimebridge.EngineVersion},
+		Tests: sandbox.DockerTester{Image: image}, Store: store, Ledger: ledger, Cipher: credentialCipher, CheckpointDSN: checkpointDSN, CheckpointSchema: checkpointSchema}
 	checkoutParent, err := os.MkdirTemp("", "triovexa-repair-checkouts-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(checkoutParent)
-	handler, err := agent.NewHandler(store, loop, agent.DefaultCheckoutFactory(checkoutParent))
+	handler, err := agent.NewHandler(store, engine, agent.DefaultCheckoutFactory(checkoutParent))
 	if err != nil {
 		return err
 	}
@@ -79,6 +96,6 @@ func run(logger *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	logger.Info("repair investigation runner started", "provider", provider, "model", model)
+	logger.Info("repair investigation runner started", "engine", "deepagents", "engine_version", runtimebridge.EngineVersion)
 	return runner.Run(ctx)
 }
