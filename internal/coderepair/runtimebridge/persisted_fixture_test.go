@@ -122,7 +122,7 @@ func approveNativeFixture(t *testing.T, store *postgres.PostgresStore, binding c
 	}
 	metadata, _ := json.Marshal(map[string]any{"target": binding.ServiceName, "complete": true, "deployed_revision": deployed})
 	evidence := []domain.EvidenceItem{
-		{ID: uuid.NewString(), IncidentID: incident.ID, Type: "log", Source: "fixture-logs", Timestamp: now, Snippet: "valid schema two jobs are rejected", MetadataJSON: `{}`},
+		{ID: uuid.NewString(), IncidentID: incident.ID, Type: "log", Source: "fixture-logs", Timestamp: now, Snippet: "internal/workload/worker.go: valid schema two jobs are rejected", MetadataJSON: `{}`},
 		{ID: uuid.NewString(), IncidentID: incident.ID, Type: "metric", Source: "workload-control", Timestamp: now, Snippet: "backlog increasing", MetadataJSON: string(metadata)},
 	}
 	if err := store.SaveEvidenceItems(ctx, evidence); err != nil {

@@ -10,7 +10,7 @@ import { composeContext, compactContext } from "../context/compose.js";
 import { VirtualBackend } from "../context/virtual-backend.js";
 import { checkpointSaver } from "../checkpoints/saver.js";
 import { PLAYBOOK_MANIFEST_DIGEST, selectPlaybooks } from "../playbooks/registry.js";
-import { ModelTransport } from "./model.js";
+import { isGatewayDenialCode, ModelTransport } from "./model.js";
 import { boundedFilesystem } from "./middleware.js";
 import { registerRestrictedProfile } from "./profile.js";
 import { compactToolDefinition } from "./tool-definition.js";
@@ -100,6 +100,6 @@ export async function invokeReadOnlyReviewer(start: Start, authority: unknown, c
     return { status: "completed", code: "REVIEW_COMPLETE", model_requests: modelRequests, tool_steps: toolSteps, concerns: parsed.data.concerns };
   } catch (error) {
     const code = signal.aborted ? "CANCELLED" : runtimeFailureCode(error, "REVIEW_FAILED");
-    return { status: ["REVIEWER_DISABLED", "BUDGET_EXHAUSTED", "CHECKPOINT_INCOMPATIBLE", "PROMPT_VERSION_UNAVAILABLE", "CONTEXT_LIMIT", "CANCELLED", "DEADLINE_EXCEEDED"].includes(code) ? "blocked" : "failed", code, model_requests: modelRequests, tool_steps: toolSteps };
+    return { status: isGatewayDenialCode(code) || ["REVIEWER_DISABLED", "BUDGET_EXHAUSTED", "CHECKPOINT_INCOMPATIBLE", "PROMPT_VERSION_UNAVAILABLE", "CONTEXT_LIMIT", "CANCELLED", "DEADLINE_EXCEEDED"].includes(code) ? "blocked" : "failed", code, model_requests: modelRequests, tool_steps: toolSteps };
   } finally { if (saver && "end" in saver) await saver.end(); }
 }

@@ -1,10 +1,20 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { type BaseMessage, isAIMessage } from "@langchain/core/messages";
 import { z } from "zod";
-import { RuntimeFailure, MAX_FRAME_BYTES, MODEL_TOOLS, toolSchemas, type Start, type GoToolName } from "../bridge/schema.js";
+import { RuntimeFailure, MAX_FRAME_BYTES, toolSchemas, type Start, type GoToolName } from "../bridge/schema.js";
+import { writerToolsForProfile } from "./tool-inventory.js";
 
 const virtualRead = z.strictObject({ file_path: z.string().max(512), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200).optional() });
 type WireMessage = { role?: string; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>; reasoning_content?: string };
+
+// These exact constants are emitted only by the private Go admission endpoint.
+// Never accept a prefix, JSON error field or arbitrary provider error as a code.
+const gatewayDenialCodes = new Set([
+  "CONTEXT_LIMIT", "BUDGET_EXHAUSTED", "PROVIDER_DISPATCH_UNCERTAIN", "USAGE_UNKNOWN",
+  "OFFLINE_EGRESS_DENIED", "PRICING_UNKNOWN", "BILLING_UNBOUNDED", "MODEL_DISPATCH_BLOCKED",
+]);
+
+export function isGatewayDenialCode(code: string): boolean { return gatewayDenialCodes.has(code); }
 
 export function gatewayRoot(raw: string): URL {
   const url = new URL(raw);
@@ -76,7 +86,7 @@ export class ModelTransport {
     if (url.href !== `${this.root.href}/chat/completions` || !this.ordinal || typeof init?.body !== "string" || init.method !== "POST") throw new RuntimeFailure("GATEWAY_DENIED");
     const body = JSON.parse(init.body) as { model: string; stream: boolean; max_tokens?: number; max_completion_tokens?: number; messages: WireMessage[]; tools?: Array<{ function?: { name?: string } }> };
     if (body.model !== this.start.transport.model || body.stream !== false) throw new RuntimeFailure("PROVIDER_CONTRACT_INVALID");
-    const allowedTools = this.inventory === "reviewer" ? ["read_file"] : [...MODEL_TOOLS];
+    const allowedTools = this.inventory === "reviewer" ? ["read_file"] : writerToolsForProfile(this.start.scope.profile);
     if (!Array.isArray(body.tools) || JSON.stringify(body.tools.map((item) => item.function?.name).sort()) !== JSON.stringify([...allowedTools].sort())) throw new RuntimeFailure("TOOL_INVENTORY_INVALID");
     for (const message of body.messages) {
       if (message.role !== "assistant" || !message.tool_calls?.length) continue;
@@ -96,6 +106,7 @@ export class ModelTransport {
     if (init.signal) signals.push(init.signal);
     const response = await this.underlyingFetch(url, { ...init, body: encoded, headers, redirect: "error", signal: AbortSignal.any(signals) });
     const content = await boundedResponse(response);
+    if (response.status === 409 && isGatewayDenialCode(content.trim())) throw new RuntimeFailure(content.trim());
     if (response.ok) {
       let value: unknown;
       try { value = JSON.parse(content); } catch { throw new RuntimeFailure("PROVIDER_CONTRACT_INVALID"); }

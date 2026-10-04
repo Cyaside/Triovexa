@@ -47,6 +47,10 @@ type Gateway struct {
 // leaves room below the durable ledger's 256 KiB encrypted receipt limit.
 const maxProviderResponseBytes = 128 * 1024
 
+// ErrContextLimit rejects the final serialized prompt before any reservation or
+// provider dispatch. It is distinct from the shared campaign's cumulative cap.
+var ErrContextLimit = errors.New("CONTEXT_LIMIT")
+
 func New(config Config, ledger *admission.Service) (*Gateway, error) {
 	if err := validateInputContract(config.Pricing); err != nil {
 		return nil, err
@@ -128,21 +132,7 @@ func (g *Gateway) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	response, status, _, err := g.DispatchAt(request.Context(), ordinal, body)
 	if err != nil {
 		// Do not relay provider text, headers, URL or private reasoning to callers.
-		code := "MODEL_DISPATCH_BLOCKED"
-		for _, candidate := range []struct {
-			err  error
-			code string
-		}{
-			{admission.ErrOffline, "OFFLINE_EGRESS_DENIED"}, {admission.ErrPricingUnknown, "PRICING_UNKNOWN"},
-			{admission.ErrBillingUnbounded, "BILLING_UNBOUNDED"}, {admission.ErrBudgetExceeded, "BUDGET_EXHAUSTED"},
-			{admission.ErrUncertain, "PROVIDER_DISPATCH_UNCERTAIN"}, {admission.ErrUsageInvalid, "USAGE_UNKNOWN"},
-		} {
-			if errors.Is(err, candidate.err) {
-				code = candidate.code
-				break
-			}
-		}
-		http.Error(writer, code, http.StatusConflict)
+		http.Error(writer, denialCode(err), http.StatusConflict)
 		return
 	}
 	writer.Header().Set("Content-Type", "application/json")
@@ -170,7 +160,7 @@ func (g *Gateway) DispatchAt(ctx context.Context, ordinal int, body []byte) ([]b
 		return nil, 0, 0, err
 	}
 	if bound > g.config.MaxInputTokens {
-		return nil, 0, 0, errors.New("CONTEXT_LIMIT")
+		return nil, 0, 0, ErrContextLimit
 	}
 	// Preceding ordinal receipts must be final. A new process cannot skip an
 	// uncertain request by choosing a fresh ordinal.
@@ -257,6 +247,23 @@ func (g *Gateway) DispatchAt(ctx context.Context, ordinal int, body []byte) ([]b
 		return nil, 0, latency, err
 	}
 	return raw, response.StatusCode, latency, nil
+}
+
+func denialCode(err error) string {
+	for _, candidate := range []struct {
+		err  error
+		code string
+	}{
+		{ErrContextLimit, "CONTEXT_LIMIT"},
+		{admission.ErrOffline, "OFFLINE_EGRESS_DENIED"}, {admission.ErrPricingUnknown, "PRICING_UNKNOWN"},
+		{admission.ErrBillingUnbounded, "BILLING_UNBOUNDED"}, {admission.ErrBudgetExceeded, "BUDGET_EXHAUSTED"},
+		{admission.ErrUncertain, "PROVIDER_DISPATCH_UNCERTAIN"}, {admission.ErrUsageInvalid, "USAGE_UNKNOWN"},
+	} {
+		if errors.Is(err, candidate.err) {
+			return candidate.code
+		}
+	}
+	return "MODEL_DISPATCH_BLOCKED"
 }
 
 func (g *Gateway) requestID(ordinal int) string {

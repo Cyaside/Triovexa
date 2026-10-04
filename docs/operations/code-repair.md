@@ -115,6 +115,8 @@ Only enable this test after verifying the configured endpoint's tariff, conserva
 
 An optional `pricing.input_contract` pins a model-specific input bound in the immutable configuration. For `glm-5.3-flash`, `glm-5.3-flash-template-690b705-v1` counts the published chat template's UTF-8 bytes, including tool definitions, XML arguments, escaping, and retained reasoning. Its byte-level tokenizer makes this a conservative token bound rather than a tokens-per-character estimate. Confirm the endpoint uses that template and tokenizer before selecting it; model aliases and unsupported input shapes are rejected. Transport size and token admission are separate limits. `max_tokens` must also bound billed thinking and output for the configured endpoint.
 
+The one-case `final-smoke` writer exposes only `repo_read`, `read_file`, `propose_patch`, and `cannot_determine`. Its synthetic evidence identifies the source path without supplying a fix. Go runs the baseline and candidate recipes automatically. The ordinary internal profile retains source discovery and explicit test tools. Both process boundaries check the selected inventory, and its checkpoint identity prevents resuming an older validation with different tools.
+
 Set these variables through a private local environment; do not commit their values:
 
 | Variable | Value |

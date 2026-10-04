@@ -31,8 +31,23 @@ func validateStageTools(body []byte, inventory []string) error {
 	if json.Unmarshal(body, &payload) != nil {
 		return errors.New("PROVIDER_CONTRACT_INVALID")
 	}
+	// The one-case validation has a separately pinned four-tool inventory.
+	// Require every declared capability, not merely an allowed subset; this
+	// keeps the Go boundary and native framework's contract identical.
+	if finalSmokeWriterInventory(inventory) && len(payload.Tools) != len(inventory) {
+		return errors.New("TOOL_SCOPE_DENIED")
+	}
 	for _, tool := range payload.Tools {
 		if !allowed[tool.Function.Name] {
+			return errors.New("TOOL_SCOPE_DENIED")
+		}
+	}
+	if finalSmokeWriterInventory(inventory) {
+		declared := make(map[string]bool, len(payload.Tools))
+		for _, tool := range payload.Tools {
+			declared[tool.Function.Name] = true
+		}
+		if len(declared) != len(inventory) {
 			return errors.New("TOOL_SCOPE_DENIED")
 		}
 	}

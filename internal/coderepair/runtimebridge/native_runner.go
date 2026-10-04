@@ -53,6 +53,12 @@ func (n *NativeRunner) Investigate(ctx context.Context, w *sandbox.Workspace, b 
 	// The Go gateway accounts the full final payload; this independent byte
 	// limit includes system/tool definitions rather than only user messages.
 	limits.MaxInputBytes = int(config.Budget.MaxInputTokens) - 512
+	if config.Budget.Pricing.InputContract == modelgateway.GLMFlashInputContract {
+		// Wire bytes and rendered-template tokens are different units. The named
+		// contract is enforced by Go before reserving cost or opening the network;
+		// JSON escaping must not impose the older raw-bytes token proxy here.
+		limits.MaxInputBytes = MaxFrameBytes
+	}
 	if limits.MaxInputBytes < 512 {
 		return fail("CONTEXT_LIMIT")
 	}
@@ -67,7 +73,8 @@ func (n *NativeRunner) Investigate(ctx context.Context, w *sandbox.Workspace, b 
 		}
 		gateway, err := modelgateway.New(modelgateway.Config{Provider: config.Provider, Pricing: config.Budget.Pricing, CampaignID: config.Budget.Campaign.ID,
 			CaseID: claimed.Case.ID, AttemptID: claimed.Attempt.ID, Phase: "repair", ConfigVersion: config.Budget.ConfigVersion,
-			MaxInputTokens: config.Budget.MaxInputTokens, MaxOutputTokens: config.Budget.MaxOutputTokens, MaxRequests: limits.MaxModelRequests, Cipher: n.Cipher, Fence: fence}, n.Ledger)
+			MaxInputTokens: config.Budget.MaxInputTokens, MaxOutputTokens: config.Budget.MaxOutputTokens, MaxRequests: limits.MaxModelRequests,
+			AllowedTools: modelgateway.WriterToolsForProfile(config.Budget.Campaign.Profile), Cipher: n.Cipher, Fence: fence}, n.Ledger)
 		if err != nil {
 			return Transport{}, nil, err
 		}

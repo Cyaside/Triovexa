@@ -5,18 +5,19 @@ import { tool } from "@langchain/core/tools";
 import { HumanMessage, ToolMessage, isAIMessage, isToolMessage } from "@langchain/core/messages";
 import { Command, END, StateSchema } from "@langchain/langgraph";
 import { z } from "zod";
-import { GO_TOOLS, MODEL_TOOLS, RuntimeFailure, runtimeFailureCode, validateStart, toolSchemas, type Start, type ToolResult, type GoToolName } from "../bridge/schema.js";
+import { GO_TOOLS, RuntimeFailure, runtimeFailureCode, validateStart, toolSchemas, type Start, type ToolResult, type GoToolName } from "../bridge/schema.js";
 import type { Outcome } from "../bridge/session.js";
 import { checkpointSaver } from "../checkpoints/saver.js";
 import { Artifacts } from "../context/artifacts.js";
 import { composeContext, compactContext } from "../context/compose.js";
 import { VirtualBackend } from "../context/virtual-backend.js";
 import { PLAYBOOK_MANIFEST_DIGEST, selectPlaybooks } from "../playbooks/registry.js";
-import { ModelTransport } from "./model.js";
+import { isGatewayDenialCode, ModelTransport } from "./model.js";
 import { registerRestrictedProfile } from "./profile.js";
 import { boundedFilesystem, conciseSkills } from "./middleware.js";
 import { compactToolDefinition } from "./tool-definition.js";
 import { prepareBoundedContext, restoreTrustedFiles } from "../context/checkpoint.js";
+import { writerToolsForProfile } from "./tool-inventory.js";
 
 export type ToolCaller = (callID: string, name: GoToolName, args: Record<string, unknown>) => Promise<ToolResult>;
 const terminalSchema = z.object({ terminal: z.literal(true), outcome: z.enum(["patch_ready", "blocked", "failed"]), code: z.string(), reason: z.string().optional() });
@@ -38,7 +39,8 @@ function identity(start: Start): string {
   return createHash("sha256").update(JSON.stringify({ engine: scope.engine_id, engine_version: scope.engine_version, thread: scope.checkpoint_thread, model: start.transport.model,
     config: scope.provider_config_version, prompt: scope.prompt_version, playbooks: scope.playbook_manifest_digest, base: scope.base_sha, deployed: scope.deployed_sha,
     paths: scope.allowed_paths, recipes: scope.recipe_ids, profile: scope.profile, limits: scope.limits, evidence: scope.evidence,
-    baseline: { exit_code: scope.baseline.exit_code, output: scope.baseline.output } })).digest("hex");
+    baseline: { exit_code: scope.baseline.exit_code, output: scope.baseline.output },
+    ...(scope.profile === "final-smoke" ? { writer_tools: writerToolsForProfile(scope.profile) } : {}) })).digest("hex");
 }
 
 export async function investigate(start: Start, call: ToolCaller, signal: AbortSignal, underlyingFetch: typeof fetch = fetch): Promise<Outcome> {
@@ -53,6 +55,7 @@ export async function investigate(start: Start, call: ToolCaller, signal: AbortS
     signal.throwIfAborted();
     const artifacts = new Artifacts(start.scope.attempt_id);
     const initial = composeContext(start.scope, artifacts);
+    const modelTools = writerToolsForProfile(start.scope.profile);
     const transport = new ModelTransport(start, signal, underlyingFetch);
     registerRestrictedProfile(start.transport.model);
     saver = checkpointSaver(start);
@@ -88,9 +91,9 @@ export async function investigate(start: Start, call: ToolCaller, signal: AbortS
         const messages = compactContext(request.messages, start.scope.limits.max_context_bytes, artifacts);
         // The framework exclusion middleware runs inside this wrapper. Apply
         // the product inventory here too, then assert the actual wire payload.
-        const scopedTools = request.tools.filter((item) => MODEL_TOOLS.includes(item.name as GoToolName));
+        const scopedTools = request.tools.filter((item) => modelTools.includes(item.name as GoToolName));
         const names = scopedTools.map((item) => item.name).sort();
-        if (JSON.stringify(names) !== JSON.stringify([...MODEL_TOOLS].sort())) throw new RuntimeFailure("TOOL_INVENTORY_INVALID");
+        if (JSON.stringify(names) !== JSON.stringify([...modelTools].sort())) throw new RuntimeFailure("TOOL_INVENTORY_INVALID");
         transport.prepare(messages, ordinal);
         modelRequests = ordinal;
         return handler({ ...request, tools: scopedTools.map(compactToolDefinition), messages, modelSettings: { ...request.modelSettings, parallel_tool_calls: false } });
@@ -101,7 +104,7 @@ export async function investigate(start: Start, call: ToolCaller, signal: AbortS
           if (terminal) throw new RuntimeFailure("TERMINAL_ALREADY_REACHED");
           if (++toolSteps > start.scope.limits.max_tool_steps) throw new RuntimeFailure("TOOL_LIMIT");
           const item = request.toolCall;
-          if (!item.id || !MODEL_TOOLS.includes(item.name as GoToolName)) throw new RuntimeFailure("CALL_ID_INVALID");
+          if (!item.id || !modelTools.includes(item.name as GoToolName)) throw new RuntimeFailure("CALL_ID_INVALID");
           const signature = `${item.name}:${JSON.stringify(item.args)}`;
           if (signatures.has(signature)) throw new RuntimeFailure("NO_PROGRESS");
           signatures.add(signature);
@@ -147,7 +150,7 @@ export async function investigate(start: Start, call: ToolCaller, signal: AbortS
     return { status: terminal.outcome === "patch_ready" ? "completed" : terminal.outcome, code: terminal.code, ...(terminal.reason ? { reason: terminal.reason } : {}), model_requests: modelRequests, tool_steps: toolSteps };
   } catch (error) {
     const code = signal.aborted ? "CANCELLED" : runtimeFailureCode(error);
-    const blocked = ["BUDGET_EXHAUSTED", "CONTEXT_LIMIT", "CHECKPOINT_INCOMPATIBLE", "PLAYBOOK_VERSION_UNAVAILABLE", "PROMPT_VERSION_UNAVAILABLE", "NO_PROGRESS", "CANCELLED", "DEADLINE_EXCEEDED", "NO_TERMINAL_RESULT"].includes(code);
+    const blocked = isGatewayDenialCode(code) || ["BUDGET_EXHAUSTED", "CONTEXT_LIMIT", "CHECKPOINT_INCOMPATIBLE", "PLAYBOOK_VERSION_UNAVAILABLE", "PROMPT_VERSION_UNAVAILABLE", "NO_PROGRESS", "CANCELLED", "DEADLINE_EXCEEDED", "NO_TERMINAL_RESULT"].includes(code);
     return { status: blocked ? "blocked" : "failed", code, model_requests: modelRequests, tool_steps: toolSteps };
   } finally {
     if (saver && "end" in saver) await saver.end();

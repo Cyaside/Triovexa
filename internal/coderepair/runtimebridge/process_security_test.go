@@ -179,6 +179,12 @@ func TestProcessPreservesTypedRuntimeConfigurationFailures(t *testing.T) {
 	for _, scenario := range []struct{ code, status string }{
 		{"PROMPT_VERSION_UNAVAILABLE", "blocked"},
 		{"CANDIDATE_LIMIT", "blocked"},
+		{"OFFLINE_EGRESS_DENIED", "blocked"},
+		{"PRICING_UNKNOWN", "blocked"},
+		{"BILLING_UNBOUNDED", "blocked"},
+		{"PROVIDER_DISPATCH_UNCERTAIN", "blocked"},
+		{"USAGE_UNKNOWN", "blocked"},
+		{"MODEL_DISPATCH_BLOCKED", "blocked"},
 		{"TOOL_SCHEMA_REPRESENTATION_INVALID", "failed"},
 	} {
 		t.Run(scenario.code, func(t *testing.T) {
