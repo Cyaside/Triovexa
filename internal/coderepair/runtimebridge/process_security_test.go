@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -171,5 +172,24 @@ emit("tool_request", {call_id:"read",name:"repo_read",args:{}}, 3);`)
 	_, err := process.Run(ctx, processScope(), tools)
 	if err == nil || !strings.Contains(err.Error(), "frame identity, ordinal or correlation") || tools.result.Steps != 0 {
 		t.Fatalf("duplicate correlation reached a tool: steps=%d err=%v", tools.result.Steps, err)
+	}
+}
+
+func TestProcessPreservesTypedRuntimeConfigurationFailures(t *testing.T) {
+	for _, scenario := range []struct{ code, status string }{
+		{"PROMPT_VERSION_UNAVAILABLE", "blocked"},
+		{"CANDIDATE_LIMIT", "blocked"},
+		{"TOOL_SCHEMA_REPRESENTATION_INVALID", "failed"},
+	} {
+		t.Run(scenario.code, func(t *testing.T) {
+			process := scriptedProcess(t, `emit("investigation_result", {status:"failed",code:`+strconv.Quote(scenario.code)+`,model_requests:0,tool_steps:0}, 1);`)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			tools := &ToolSession{}
+			result, err := process.Run(ctx, processScope(), tools)
+			if err != nil || result.Code != scenario.code || result.Status != scenario.status || tools.result.Steps != 0 {
+				t.Fatalf("typed runtime failure changed: result=%+v err=%v", result, err)
+			}
+		})
 	}
 }
