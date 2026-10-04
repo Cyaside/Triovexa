@@ -27,9 +27,15 @@ type persistedFixture struct {
 	node          string
 	entry         string
 	image         string
+	appSchema     string
+	role          string
 }
 
 func persistedNativeFixture(t *testing.T) persistedFixture {
+	return persistedNativeFixtureRetained(t, false, nil)
+}
+
+func persistedNativeFixtureRetained(t *testing.T, retain bool, recordAllocation func(appSchema, checkpoint, role string)) persistedFixture {
 	t.Helper()
 	dsn, entry, image := os.Getenv("TEST_DATABASE_URL"), os.Getenv("TEST_AGENT_RUNTIME_ENTRY"), os.Getenv("TEST_REPAIR_SANDBOX_IMAGE")
 	if dsn == "" || entry == "" || image == "" {
@@ -56,14 +62,19 @@ func persistedNativeFixture(t *testing.T) persistedFixture {
 	t.Cleanup(func() { _ = admin.Close() })
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
 	appSchema, checkpoint, role := "native_app_"+suffix, "native_checkpoint_"+suffix, "native_role_"+suffix
+	if recordAllocation != nil {
+		recordAllocation(appSchema, checkpoint, role)
+	}
 	if _, err := admin.Exec(`CREATE SCHEMA ` + appSchema); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_, _ = admin.Exec(`DROP SCHEMA IF EXISTS ` + appSchema + ` CASCADE`)
-		_, _ = admin.Exec(`DROP SCHEMA IF EXISTS ` + checkpoint + ` CASCADE`)
-		_, _ = admin.Exec(`DROP ROLE IF EXISTS ` + role)
-	})
+	if !retain {
+		t.Cleanup(func() {
+			_, _ = admin.Exec(`DROP SCHEMA IF EXISTS ` + appSchema + ` CASCADE`)
+			_, _ = admin.Exec(`DROP SCHEMA IF EXISTS ` + checkpoint + ` CASCADE`)
+			_, _ = admin.Exec(`DROP ROLE IF EXISTS ` + role)
+		})
+	}
 	query := parsed.Query()
 	query.Set("search_path", appSchema)
 	parsed.RawQuery = query.Encode()
@@ -92,7 +103,7 @@ func persistedNativeFixture(t *testing.T) persistedFixture {
 	}
 	runtimeURL, _ := url.Parse(dsn)
 	runtimeURL.User = url.UserPassword(role, password)
-	return persistedFixture{admin: admin, store: store, appDSN: appDSN, checkpointDSN: runtimeURL.String(), checkpoint: checkpoint, node: node, entry: entry, image: image}
+	return persistedFixture{admin: admin, store: store, appDSN: appDSN, checkpointDSN: runtimeURL.String(), checkpoint: checkpoint, node: node, entry: entry, image: image, appSchema: appSchema, role: role}
 }
 
 func approveNativeFixture(t *testing.T, store *postgres.PostgresStore, binding coderepair.RepositoryBinding,
