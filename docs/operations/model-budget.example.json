@@ -1,0 +1,25 @@
+{
+  "campaign": {
+    "id": "triovexa-internal-v1",
+    "profile": "internal",
+    "offline": false,
+    "max_spend_micro_usd": 1000000,
+    "max_input_tokens": 100000,
+    "max_requests": 20
+  },
+  "pricing": {
+    "version": "unverified-v1",
+    "provider": "openai-compatible",
+    "model": "replace-with-configured-model",
+    "verified": false,
+    "input_bound_verified": false,
+    "billable_output_bound": false,
+    "input_micro_usd_per_million": 0,
+    "output_micro_usd_per_million": 0,
+    "fixed_request_micro_usd": 0
+  },
+  "config_version": "model-config-v1",
+  "max_input_tokens": 24000,
+  "max_output_tokens": 1500,
+  "repair_candidate_limit": 1
+}
