@@ -39,17 +39,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Install PostgreSQL backup tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
       - run: go test ./...
       - run: go vet ./...
       - run: go test -race ./...
       - name: Apply migrations for backup verification
-        run: go test -count=1 ./internal/storage -run '^TestPostgresMigrationsAndAtomicIntakeIntegration$'
+        run: go test -count=1 ./internal/storage/postgres -run '^TestPostgresMigrationsAndAtomicIntakeIntegration$'
       - name: Verify PostgreSQL backup and restore
         env:
           PGPASSWORD: postgres
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
           createdb -h 127.0.0.1 -U postgres triovexa_restore
           bash scripts/backup-postgres.sh "$TEST_DATABASE_URL" "$RUNNER_TEMP/triovexa.dump"
           bash scripts/restore-postgres.sh "postgres://postgres:postgres@127.0.0.1:5432/triovexa_restore?sslmode=disable" "$RUNNER_TEMP/triovexa.dump"
@@ -71,6 +73,153 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+
+  agent-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: triovexa_agent_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d triovexa_agent_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/triovexa_agent_test?sslmode=disable
+      TEST_AGENT_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/triovexa_agent_test?sslmode=disable
+      TEST_REDIS_ADDRESS: 127.0.0.1:6379
+      TEST_AGENT_RUNTIME_ENTRY: ${{ github.workspace }}/agent-runtime/dist/src/main.js
+      TEST_REPAIR_SANDBOX_IMAGE: triovexa-repair-sandbox:agent-runtime
+      AI_RUNTIME_BASELINE_REPORT: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-baseline.json
+      AI_NATIVE_REPORT: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-native-payload.json
+      AI_MATCHED_CORPUS_REPORT: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-matched-corpus.json
+      TEST_NATIVE_EVIDENCE_PATH: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-persisted-evidence.json
+      LANGSMITH_TRACING: "false"
+      LANGCHAIN_TRACING_V2: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.13.0
+          cache: npm
+          cache-dependency-path: agent-runtime/package-lock.json
+      - name: Install pinned runtime dependencies without lifecycle scripts
+        working-directory: agent-runtime
+        run: npm ci --ignore-scripts
+      - name: Typecheck the agent runtime
+        working-directory: agent-runtime
+        run: npm run typecheck
+      - name: Build the agent runtime
+        working-directory: agent-runtime
+        run: npm run build
+      - name: Install PostgreSQL backup tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      - name: Require the built IPC entry point and integration dependencies
+        run: |
+          test -s "$TEST_AGENT_RUNTIME_ENTRY"
+          test -n "$TEST_DATABASE_URL"
+          test -n "$TEST_AGENT_DATABASE_URL"
+          test -n "$TEST_REDIS_ADDRESS"
+          test -s agent-runtime/tests/checkpoint-postgres.spec.ts
+          command -v pg_dump
+          mkdir -p artifacts/code-repair
+      - name: Test the agent runtime with offline model fixtures
+        working-directory: agent-runtime
+        run: |
+          npm run test -- --exclude 'dist/**' --exclude tests/checkpoint-postgres.spec.ts --reporter=default --reporter=junit --outputFile.junit=../artifacts/code-repair/agent-runtime-vitest.xml
+          test -s ../artifacts/code-repair/agent-runtime-vitest.xml
+          if grep -Eq 'skipped="[1-9][0-9]*"' ../artifacts/code-repair/agent-runtime-vitest.xml; then
+            echo "A required runtime test was skipped."
+            exit 1
+          fi
+      - name: Verify PostgreSQL checkpoints without skipping integration tests
+        working-directory: agent-runtime
+        run: |
+          npm run test -- tests/checkpoint-postgres.spec.ts --exclude 'dist/**' --reporter=default --reporter=junit --outputFile.junit=../artifacts/code-repair/agent-runtime-checkpoint.xml
+          if grep -Eq 'skipped="[1-9][0-9]*"' ../artifacts/code-repair/agent-runtime-checkpoint.xml; then
+            echo "A required PostgreSQL checkpoint test was skipped."
+            exit 1
+          fi
+      - name: Verify durable budget receipts and real Redis processing
+        run: |
+          go test ./internal/storage/postgres -run '^TestBudgetPostgres.*Integration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-budget.jsonl
+          go test ./internal/workload -run '^Test(RedisStreamWorkerProcessesAndDeduplicates|SupervisorAcceptsSnakeCaseOperationContract)Integration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-redis.jsonl
+          for report in artifacts/code-repair/agent-runtime-{budget,redis}.jsonl; do
+            if ! grep -q '"Action":"run".*"Test":' "$report" || grep -q '"Action":"skip"' "$report"; then
+              echo "A required database integration suite ran no tests or skipped a test."
+              exit 1
+            fi
+          done
+      - name: Build the isolated sandbox image
+        run: docker build -f Dockerfile.repair-sandbox -t "$TEST_REPAIR_SANDBOX_IMAGE" .
+      - name: Record the deterministic legacy request baseline
+        run: go test ./internal/coderepair/agent -run '^TestAgentLoopOfflineBaseline$' -count=1 -v
+      - name: Compare legacy and native context on identical offline inputs
+        run: |
+          test -s "$TEST_AGENT_RUNTIME_ENTRY"
+          go test ./internal/coderepair/runtimebridge -run '^TestMatchedRuntimeContextCorpus$' -count=1 -json | tee artifacts/code-repair/agent-runtime-matched-corpus.jsonl
+          if ! grep -q '"Action":"run".*"Test":' artifacts/code-repair/agent-runtime-matched-corpus.jsonl || grep -q '"Action":"skip"' artifacts/code-repair/agent-runtime-matched-corpus.jsonl; then
+            echo "The required matched context comparison ran no tests or skipped a test."
+            exit 1
+          fi
+          test -s "$AI_MATCHED_CORPUS_REPORT"
+      - name: Verify native IPC and both registered sandbox recipes
+        run: |
+          go test ./internal/coderepair/runtimebridge -run '^TestNativeRuntimeIPCProducesGoVerifiedPatchIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-native-ipc.jsonl
+          go test ./internal/coderepair/runtimebridge -run '^TestPersistedNativeRepairRecoversTerminalProofIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-persisted-native.jsonl
+          go test ./internal/coderepair/sandbox -run '^TestRegisteredPositiveIntegerRecipeRedGreenIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-positive-int.jsonl
+          for report in artifacts/code-repair/agent-runtime-{native-ipc,persisted-native,positive-int}.jsonl; do
+            if ! grep -q '"Action":"run".*"Test":' "$report" || grep -q '"Action":"skip"' "$report"; then
+              echo "A required sandbox integration suite ran no tests or skipped a test."
+              exit 1
+            fi
+          done
+          test -s "$AI_RUNTIME_BASELINE_REPORT"
+          test -s "$AI_NATIVE_REPORT"
+          test -s "$TEST_NATIVE_EVIDENCE_PATH"
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+          const proof = JSON.parse(readFileSync(process.env.TEST_NATIVE_EVIDENCE_PATH, "utf8"));
+          assert.equal(proof.status, "passed");
+          assert.equal(proof.paid_model_requests, 0);
+          assert.equal(proof.restart_additional_model_requests, 0);
+          assert.equal(proof.restart_additional_test_runs, 0);
+          assert.equal(proof.downstream_publication_and_verification.status, "passed");
+          assert.equal(proof.downstream_publication_and_verification.case_state, "recovered");
+          assert.equal(proof.downstream_publication_and_verification.synthetic_recovery_observations, 3);
+          NODE
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: agent-runtime-offline-evidence
+          path: artifacts/code-repair/agent-runtime-*
+          if-no-files-found: error
 
   repair-fixture:
     runs-on: ubuntu-24.04
