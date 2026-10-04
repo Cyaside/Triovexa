@@ -177,6 +177,8 @@ jobs:
           done
       - name: Build the isolated sandbox image
         run: docker build -f Dockerfile.repair-sandbox -t "$TEST_REPAIR_SANDBOX_IMAGE" .
+      - name: Compile the opt-in provider validation harness without running it
+        run: go test -tags provider_smoke ./internal/coderepair/runtimebridge -run '^$'
       - name: Record the deterministic legacy request baseline
         run: go test ./internal/coderepair/agent -run '^TestAgentLoopOfflineBaseline$' -count=1 -v
       - name: Compare legacy and native context on identical offline inputs
@@ -192,8 +194,10 @@ jobs:
         run: |
           go test ./internal/coderepair/runtimebridge -run '^TestNativeRuntimeIPCProducesGoVerifiedPatchIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-native-ipc.jsonl
           go test ./internal/coderepair/runtimebridge -run '^TestPersistedNativeRepairRecoversTerminalProofIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-persisted-native.jsonl
+          go test ./internal/coderepair/runtimebridge -run '^TestProviderSmokeFixture(RejectsSchemaCompatibilityRegression|RetainsRecoveryState)Integration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-smoke-guards.jsonl
+          go test ./internal/coderepair/runtimebridge -run '^TestProviderSmokeRejectsSharedDatabaseIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-smoke-isolation.jsonl
           go test ./internal/coderepair/sandbox -run '^TestRegisteredPositiveIntegerRecipeRedGreenIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-positive-int.jsonl
-          for report in artifacts/code-repair/agent-runtime-{native-ipc,persisted-native,positive-int}.jsonl; do
+          for report in artifacts/code-repair/agent-runtime-{native-ipc,persisted-native,smoke-guards,smoke-isolation,positive-int}.jsonl; do
             if ! grep -q '"Action":"run".*"Test":' "$report" || grep -q '"Action":"skip"' "$report"; then
               echo "A required sandbox integration suite ran no tests or skipped a test."
               exit 1
