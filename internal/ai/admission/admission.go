@@ -61,11 +61,12 @@ type Pricing struct {
 	Verified bool   `json:"verified"`
 	// InputBoundVerified asserts the configured tokenizer/billing contract
 	// guarantees the caller's upper bound. A bytes/4 estimate never qualifies.
-	InputBoundVerified       bool  `json:"input_bound_verified"`
-	BillableOutputBound      bool  `json:"billable_output_bound"`
-	InputMicroUSDPerMillion  int64 `json:"input_micro_usd_per_million"`
-	OutputMicroUSDPerMillion int64 `json:"output_micro_usd_per_million"`
-	FixedRequestMicroUSD     int64 `json:"fixed_request_micro_usd"`
+	InputBoundVerified       bool   `json:"input_bound_verified"`
+	InputContract            string `json:"input_contract,omitempty"`
+	BillableOutputBound      bool   `json:"billable_output_bound"`
+	InputMicroUSDPerMillion  int64  `json:"input_micro_usd_per_million"`
+	OutputMicroUSDPerMillion int64  `json:"output_micro_usd_per_million"`
+	FixedRequestMicroUSD     int64  `json:"fixed_request_micro_usd"`
 }
 
 type Request struct {

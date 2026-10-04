@@ -113,6 +113,8 @@ Run the offline tests first. Build the Node runtime and sandbox image, and prepa
 
 Only enable this test after verifying the configured endpoint's tariff, conservative input bound, and limit on every billable output category. Use the `final-smoke` profile and the existing encrypted connection saved through **Connections**. Preflight checks the cumulative US$0.10 target, US$0.20 hard ceiling, prior dispatches, and uncertain reservations before opening the credential key. CI cannot run the test.
 
+An optional `pricing.input_contract` pins a model-specific input bound in the immutable configuration. For `glm-5.3-flash`, `glm-5.3-flash-template-690b705-v1` counts the published chat template's UTF-8 bytes, including tool definitions, XML arguments, escaping, and retained reasoning. Its byte-level tokenizer makes this a conservative token bound rather than a tokens-per-character estimate. Confirm the endpoint uses that template and tokenizer before selecting it; model aliases and unsupported input shapes are rejected. Transport size and token admission are separate limits. `max_tokens` must also bound billed thinking and output for the configured endpoint.
+
 Set these variables through a private local environment; do not commit their values:
 
 | Variable | Value |

@@ -48,6 +48,9 @@ type Gateway struct {
 const maxProviderResponseBytes = 128 * 1024
 
 func New(config Config, ledger *admission.Service) (*Gateway, error) {
+	if err := validateInputContract(config.Pricing); err != nil {
+		return nil, err
+	}
 	if config.Phase == "reviewer" && (len(config.AllowedTools) != 1 || config.AllowedTools[0] != "read_file") {
 		return nil, errors.New("reviewer gateway must be read-only")
 	}
@@ -162,8 +165,11 @@ func (g *Gateway) DispatchAt(ctx context.Context, ordinal int, body []byte) ([]b
 	if err := validateStageTools(body, g.config.AllowedTools); err != nil {
 		return nil, 0, 0, err
 	}
-	bound, err := admission.ConservativeInputBound(body, 512)
-	if err != nil || bound > g.config.MaxInputTokens {
+	bound, err := inputTokenBound(g.config.Pricing, body)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if bound > g.config.MaxInputTokens {
 		return nil, 0, 0, errors.New("CONTEXT_LIMIT")
 	}
 	// Preceding ordinal receipts must be final. A new process cannot skip an

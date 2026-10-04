@@ -49,6 +49,9 @@ func LoadBudgetConfig(path string) (BudgetConfig, error) {
 }
 
 func (c BudgetConfig) Validate() error {
+	if err := validateInputContract(c.Pricing); err != nil {
+		return err
+	}
 	if c.RepairCandidateLimit < 0 || c.RepairCandidateLimit > 3 || (c.Campaign.Profile != "internal" && c.RepairCandidateLimit > 1) {
 		return admission.ErrInvalid
 	}
