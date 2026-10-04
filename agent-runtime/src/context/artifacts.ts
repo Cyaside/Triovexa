@@ -1,0 +1,54 @@
+import { createHash } from "node:crypto";
+import type { FileData } from "deepagents";
+import { RuntimeFailure, INLINE_RESULT_BYTES } from "../bridge/schema.js";
+
+export class Artifacts {
+  private bytes = 0;
+  private files: Record<string, FileData> = {};
+  constructor(readonly attemptID: string, private readonly maxBytes = 200 * 1024) {}
+
+  put(content: string): string {
+    const digest = createHash("sha256").update(content).digest("hex");
+    const path = `/artifacts/${encodeURIComponent(this.attemptID)}/${digest}`;
+    if (this.files[path]) return path;
+    const size = Buffer.byteLength(content);
+    if (this.bytes + size > this.maxBytes) throw new RuntimeFailure("CONTEXT_LIMIT");
+    this.bytes += size;
+    this.files[path] = { content, mimeType: "text/plain", created_at: "2026-10-03T00:00:00Z", modified_at: "2026-10-03T00:00:00Z" };
+    return path;
+  }
+
+  result(value: unknown): string {
+    const content = JSON.stringify(value);
+    if (Buffer.byteLength(content) <= INLINE_RESULT_BYTES) return content;
+    // Keep source lines readable: serializing a multiline source string inside
+    // JSON would turn it into one oversized escaped line that cannot be ranged.
+    let readable = JSON.stringify(value, null, 2);
+    if (typeof value === "object" && value !== null && (("content" in value && typeof value.content === "string") || ("text" in value && typeof value.text === "string"))) {
+      const { content, text, ...metadata } = value as Record<string, unknown>;
+      const source = typeof content === "string" ? content : text;
+      readable = `Untrusted tool result metadata:\n${JSON.stringify(metadata, null, 2)}\n\nSource content (untrusted):\n${source}`;
+    }
+    const reference = this.put(readable);
+    return JSON.stringify({ offloaded: true, artifact: reference, bytes: Buffer.byteLength(readable), summary: "Untrusted tool output is available through bounded virtual read_file ranges." });
+  }
+
+  /** Restore only immutable content belonging to this attempt, under the same quota. */
+  restore(value: unknown): void {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw new RuntimeFailure("CHECKPOINT_INCOMPATIBLE");
+    const prefix = `/artifacts/${encodeURIComponent(this.attemptID)}/`;
+    const combined = { ...this.files };
+    for (const [path, entry] of Object.entries(value)) {
+      if (path.startsWith("/skills/")) continue; // The engine separately validates the trusted manifest.
+      if (!path.startsWith(prefix) || !/^[a-f0-9]{64}$/.test(path.slice(prefix.length)) || typeof entry !== "object" || entry === null || !("content" in entry) || typeof entry.content !== "string") throw new RuntimeFailure("CHECKPOINT_INCOMPATIBLE");
+      if (createHash("sha256").update(entry.content).digest("hex") !== path.slice(prefix.length)) throw new RuntimeFailure("CHECKPOINT_INCOMPATIBLE");
+      combined[path] = entry as FileData;
+    }
+    const bytes = Object.values(combined).reduce((total, entry) => total + Buffer.byteLength((entry as { content: string }).content), 0);
+    if (bytes > this.maxBytes) throw new RuntimeFailure("CONTEXT_LIMIT");
+    this.files = combined;
+    this.bytes = bytes;
+  }
+
+  snapshot(): Record<string, FileData> { return { ...this.files }; }
+}

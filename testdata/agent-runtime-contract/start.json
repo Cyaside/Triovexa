@@ -1,0 +1,44 @@
+{
+  "contract_version": "1",
+  "type": "start_investigation",
+  "id": "start",
+  "case_id": "fixture-case",
+  "attempt_id": "fixture-attempt",
+  "ordinal": 1,
+  "payload": {
+    "scope": {
+      "case_id": "fixture-case",
+      "attempt_id": "fixture-attempt",
+      "engine_id": "deepagents",
+      "engine_version": "1.14.1",
+      "contract_version": 1,
+      "checkpoint_thread": "fixture-case:fixture-attempt",
+      "provider": "openai-compatible",
+      "provider_config_version": "fixture-provider-v1",
+      "prompt_version": "repair-native-v3",
+      "playbook_manifest_digest": "7f698e35ce61618666730c1c15bb010be04c5cc55a00c7f002b1cce546ca6cb5",
+      "base_sha": "1111111111111111111111111111111111111111",
+      "deployed_sha": "1111111111111111111111111111111111111111",
+      "allowed_paths": ["internal/worker"],
+      "recipe_ids": ["worker-regression"],
+      "profile": "offline-fixture",
+      "deadline": "2099-01-01T00:00:00Z",
+      "evidence": { "symptom": "Valid jobs fail repeatedly", "evidence_ids": ["log-1"] },
+      "baseline": { "exit_code": 1, "output": "TestValidJob failed", "duration_ns": 1000000 },
+      "limits": {
+        "max_model_requests": 4,
+        "max_tool_steps": 20,
+        "max_candidate_count": 1,
+        "max_input_bytes": 24000,
+        "max_context_bytes": 16000,
+        "max_output_tokens": 1500,
+        "recursion_limit": 40
+      }
+    },
+    "transport": {
+      "model": "fixture-native-tools",
+      "model_gateway_url": "http://127.0.0.1:19080/v1",
+      "capability": "fixture-not-a-provider-key"
+    }
+  }
+}

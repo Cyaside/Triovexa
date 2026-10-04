@@ -39,6 +39,20 @@ func NewGitHub(token string) (*GitHub, error) {
 	return newGitHub("https://api.github.com", token)
 }
 
+// NewGitHubWithTransport injects HTTP transport without changing the API host,
+// timeout or redirect policy. Callers own the transport's lifecycle.
+func NewGitHubWithTransport(token string, transport http.RoundTripper) (*GitHub, error) {
+	if transport == nil {
+		return nil, errors.New("GitHub publisher requires an HTTP transport")
+	}
+	g, err := NewGitHub(token)
+	if err != nil {
+		return nil, err
+	}
+	g.client.Transport = transport
+	return g, nil
+}
+
 func newGitHub(baseURL, token string) (*GitHub, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") ||

@@ -133,6 +133,16 @@ func (c *OpenAICompatibleClient) Model() string {
 	return c.config.Model
 }
 
+// ConfigurationSnapshot is for trusted server-side sealing only. It is never
+// returned by the connections API or supplied to the child agent.
+func (c *OpenAICompatibleClient) ConfigurationSnapshot() ProviderConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	config := c.config
+	config.AllowHosts = append([]string(nil), config.AllowHosts...)
+	return config
+}
+
 // Reconfigure atomically replaces the provider used by future completions.
 // Callers can safely reconfigure while an existing request is in flight; that
 // request finishes with the client snapshot it started with.

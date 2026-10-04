@@ -37,10 +37,11 @@ func (r InvestigationResult) Outcome(job coderepair.Job, expectedVersion int64, 
 		Steps       int                `json:"steps"`
 		Code        string             `json:"code"`
 		Reason      string             `json:"reason,omitempty"`
+		Runtime     *RuntimeTrace      `json:"runtime,omitempty"`
 	}{r.Status, recipeID, r.PatchReport.SHA256, security.Redact(r.Hypothesis), r.EvidenceIDs,
 		r.Before.ExitCode, r.After.ExitCode, int64(r.Before.Duration), int64(r.After.Duration),
 		security.Redact(r.Before.Output), security.Redact(r.After.Output), r.Usage,
-		r.Provider, r.Model, r.Prompt, r.Steps, r.Code, security.Redact(r.Reason)})
+		r.Provider, r.Model, r.Prompt, r.Steps, r.Code, security.Redact(r.Reason), r.Runtime})
 	if err != nil {
 		return coderepair.InvestigationOutcome{}, err
 	}

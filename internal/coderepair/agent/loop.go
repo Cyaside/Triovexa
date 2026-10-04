@@ -1,14 +1,11 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go/format"
 	"strings"
-	"time"
 
 	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/coderepair"
@@ -37,6 +34,7 @@ type InvestigationResult struct {
 	Provider    string
 	Model       string
 	Prompt      string
+	Runtime     *RuntimeTrace
 }
 
 type Loop struct {
@@ -58,6 +56,10 @@ func (l *Loop) Investigate(ctx context.Context, workspace *sandbox.Workspace, bi
 	snapshot coderepair.EvidenceSnapshot, selection coderepair.AgentSelection, recipeID string) InvestigationResult {
 	result := InvestigationResult{Status: coderepair.StateBlocked, Provider: selection.Provider,
 		Model: selection.Model, Prompt: selection.PromptVersion}
+	if claim, ok := InvestigationClaim(ctx); ok && claim.RecoveryOnly {
+		result.Code, result.Reason = "EVIDENCE_STALE", "approved evidence is too old to dispatch a new investigation"
+		return result
+	}
 	if workspace == nil || !snapshot.VerifyDigest() || selection.PromptVersion != PromptVersion ||
 		binding.ServiceName != snapshot.ServiceName || binding.Environment != snapshot.Environment ||
 		!binding.Enabled || !coderepair.ValidGitRevision(snapshot.DeployedRevision) {
@@ -115,7 +117,11 @@ func (l *Loop) Investigate(ctx context.Context, workspace *sandbox.Workspace, bi
 			result.Code, result.Reason = "INTERRUPTED", "investigation was interrupted"
 			return result
 		}
-		completion, err := completer.CompleteJSONDetailed(ctx, messages)
+		requestCtx := ctx
+		if claim, ok := InvestigationClaim(ctx); ok {
+			requestCtx = ai.WithRequestScope(ctx, ai.RequestScope{RunID: claim.Job.AttemptID, Phase: "repair", Ordinal: step})
+		}
+		completion, err := completer.CompleteJSONDetailed(requestCtx, messages)
 		result.Steps = step
 		if err != nil {
 			result.Code, result.Reason = "PROVIDER_ERROR", "coding provider failed to return a decision"
@@ -162,53 +168,10 @@ func (l *Loop) Investigate(ctx context.Context, workspace *sandbox.Workspace, bi
 			testResult, err := l.tests.Run(ctx, workspace.RootPath(), binding, recipeID)
 			messages = appendToolResult(messages, decision.Operation, testResult, err)
 		case ProposePatch:
-			if len(readPaths) == 0 {
-				result.Status, result.Code, result.Reason = coderepair.StateFailed, "UNGROUNDED_PATCH", "patch was proposed without reading source"
-				return result
+			result = VerifyCandidate(ctx, workspace, binding, l.tests, recipeID, decision, readPaths, result)
+			if result.Status != coderepair.StatePatchReady {
+				result.Patch, result.PatchReport = "", sandbox.PatchReport{}
 			}
-			patchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			report, err := workspace.ValidatePatch(patchCtx, []byte(decision.Patch), sandbox.PatchLimits{
-				MaxPatchBytes: 64 * 1024, MaxFiles: 5, MaxChangedLines: 300})
-			cancel()
-			if err != nil {
-				result.Status, result.Code, result.Reason = coderepair.StateFailed, "INVALID_PATCH", "proposed patch did not pass scope validation"
-				return result
-			}
-			for _, path := range report.Files {
-				if !readPaths[path] || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-					result.Status, result.Code, result.Reason = coderepair.StateFailed, "UNGROUNDED_PATCH", "patch changed an unread or protected test file"
-					return result
-				}
-			}
-			patchCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
-			report, err = workspace.ApplyPatch(patchCtx, []byte(decision.Patch), sandbox.PatchLimits{
-				MaxPatchBytes: 64 * 1024, MaxFiles: 5, MaxChangedLines: 300})
-			cancel()
-			if err != nil {
-				result.Status, result.Code, result.Reason = coderepair.StateFailed, "PATCH_APPLY_FAILED", "validated patch could not be applied"
-				return result
-			}
-			for _, path := range report.Files {
-				content, readErr := workspace.ReadFile(path)
-				formatted, formatErr := format.Source(content)
-				if readErr != nil || formatErr != nil || !bytes.Equal(content, formatted) {
-					result.Status, result.Code, result.Reason = coderepair.StateFailed, "FORMAT_FAILED", "patched Go source does not pass gofmt"
-					return result
-				}
-			}
-			after, err := l.tests.Run(ctx, workspace.RootPath(), binding, recipeID)
-			result.After = after
-			if err != nil || after.TimedOut || after.Truncated {
-				result.Status, result.Code, result.Reason = coderepair.StateBlocked, "TEST_UNAVAILABLE", "isolated post-patch test could not complete"
-				return result
-			}
-			if after.ExitCode != 0 {
-				result.Status, result.Code, result.Reason = coderepair.StateFailed, "TESTS_FAILED", "regression test still fails after the patch"
-				return result
-			}
-			result.Status, result.Code = coderepair.StatePatchReady, "PATCH_VERIFIED"
-			result.Hypothesis, result.EvidenceIDs = decision.Hypothesis, append([]string(nil), decision.EvidenceIDs...)
-			result.Patch, result.PatchReport = decision.Patch, report
 			return result
 		default:
 			result.Status, result.Code, result.Reason = coderepair.StateFailed, "INVALID_DECISION", "coding provider requested an unsupported operation"

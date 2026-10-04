@@ -3,6 +3,9 @@
 bin
 dist
 ui/node_modules
+agent-runtime/node_modules
+agent-runtime/dist
+agent-runtime/coverage
 ui/.vite
 ui/test-results
 ui/playwright-report

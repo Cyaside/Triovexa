@@ -12,6 +12,10 @@ agents/
 bin/
 dist/
 ui/node_modules/
+/agent-runtime/node_modules/
+/agent-runtime/dist/
+/agent-runtime/coverage/
+/agent-runtime/*.tsbuildinfo
 ui/*.tsbuildinfo
 ui/test-results/
 ui/playwright-report/

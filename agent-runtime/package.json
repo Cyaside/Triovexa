@@ -1,0 +1,31 @@
+{
+  "name": "triovexa-agent-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc",
+    "start": "node dist/src/main.js"
+  },
+  "dependencies": {
+    "@langchain/core": "1.2.14",
+    "@langchain/langgraph": "1.4.18",
+    "@langchain/langgraph-checkpoint-postgres": "1.0.5",
+    "@langchain/openai": "1.6.2",
+    "deepagents": "1.14.1",
+    "langchain": "1.5.15",
+    "pg": "8.23.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/pg": "8.23.1",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3"
+  }
+}

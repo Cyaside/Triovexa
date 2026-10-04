@@ -18,15 +18,15 @@ type CheckoutFactory func(context.Context, coderepair.RepositoryBinding, string)
 
 type Handler struct {
 	store    coderepair.InvestigationStore
-	loop     *Loop
+	engine   InvestigationEngine
 	checkout CheckoutFactory
 }
 
-func NewHandler(store coderepair.InvestigationStore, loop *Loop, checkout CheckoutFactory) (*Handler, error) {
-	if store == nil || loop == nil || checkout == nil {
+func NewHandler(store coderepair.InvestigationStore, engine InvestigationEngine, checkout CheckoutFactory) (*Handler, error) {
+	if store == nil || engine == nil || checkout == nil {
 		return nil, errors.New("repair handler requires store, coding loop and checkout factory")
 	}
-	return &Handler{store: store, loop: loop, checkout: checkout}, nil
+	return &Handler{store: store, engine: engine, checkout: checkout}, nil
 }
 
 func DefaultCheckoutFactory(parent string) CheckoutFactory {
@@ -93,8 +93,7 @@ func (h *Handler) Handle(ctx context.Context, job coderepair.Job) error {
 	if !binding.Enabled || binding.ID != caseRecord.BindingID || binding.ServiceName != snapshot.ServiceName ||
 		binding.Environment != snapshot.Environment || binding.PolicyVersion != caseRecord.PolicyVersion ||
 		snapshot.IncidentID != caseRecord.IncidentID || snapshot.DeployedRevision != caseRecord.DeployedSHA ||
-		!snapshot.VerifyDigest() || snapshot.CapturedAt.After(now.Add(5*time.Second)) ||
-		now.Sub(snapshot.CapturedAt) > time.Minute {
+		!snapshot.VerifyDigest() || snapshot.CapturedAt.After(now.Add(5*time.Second)) {
 		result.Code, result.Reason = "EVIDENCE_STALE", "approved evidence or repository binding is no longer current"
 	} else if digest, err := coderepair.ScopeDigest(caseRecord, binding); err != nil || digest != caseRecord.ScopeDigest {
 		result.Code, result.Reason = "SCOPE_CHANGED", "approved repository scope changed before investigation"
@@ -116,7 +115,9 @@ func (h *Handler) Handle(ctx context.Context, job coderepair.Job) error {
 			if openErr != nil {
 				result.Code, result.Reason = "CHECKOUT_INVALID", "approved checkout is not a safe workspace"
 			} else {
-				result = h.loop.Investigate(ctx, workspace, binding, snapshot, selection, binding.TestRecipes[0])
+				engineCtx := WithClaimedInvestigation(ctx, ClaimedInvestigation{Job: job, ExpectedVersion: payload.ExpectedVersion,
+					Case: caseRecord, Attempt: attempt, RecoveryOnly: now.Sub(snapshot.CapturedAt) > time.Minute})
+				result = h.engine.Investigate(engineCtx, workspace, binding, snapshot, selection, binding.TestRecipes[0])
 				_ = workspace.Close()
 			}
 		}
