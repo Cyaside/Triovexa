@@ -104,3 +104,33 @@ Send `started` immediately before rollout so Triovexa captures the pre-deploy wo
 Publication approval lasts 15 minutes and binds the case, repository scope, base commit, policy, attempt, and patch SHA-256. The publisher has its own credential and stable operation ID. After an uncertain GitHub response or process restart, it checks the dedicated branch and PR before writing again; a conflicting branch or PR blocks publication. Verified GitHub webhook deliveries are deduplicated and cannot authorize deployment.
 
 The UI shows evidence, test proof, diff, approval, PR, deployment, and verification state. `patch_ready`, `pr_open`, and `merged` do **not** mean the incident recovered. The deployment pipeline and a reviewer remain separate decision makers. The deterministic CI gate uses a scripted model and fake GitHub API; a live provider and real GitHub staging run must be evaluated separately before relying on this workflow for operational use.
+
+## Validate a configured provider
+
+The optional provider smoke test runs one source-repair case in a temporary local Git repository. The model receives the failing baseline and a protected regression suite that requires both supported schema versions to keep working. It must propose the patch; the harness supplies no expected diff. Docker executes the registered recipe before and after the patch. This test validates a provider investigation, not GitHub publication, a deployment, or recovery of a running service.
+
+Run the offline tests first. Build the Node runtime and sandbox image, and prepare a dedicated, administrator-owned loopback PostgreSQL test database whose name contains `test`. Initialization hardens checkpoint permissions and revokes database-wide default temporary-table access, so this database must not contain other workloads. The live harness verifies physical cluster/database identities and rejects reuse of the shared application database, including through a different hostname or credential. Both database credentials must permit read-only `pg_control_system()` metadata; unavailable metadata blocks the test. The harness creates uniquely named application and checkpoint schemas and retains them, together with its private fixture checkout, on success or failure. Its accounting uses the existing application database's campaign; it never creates a replacement campaign or reads provider credentials from environment variables.
+
+Only enable this test after verifying the configured endpoint's tariff, conservative input bound, and limit on every billable output category. Use the `final-smoke` profile and the existing encrypted connection saved through **Connections**. Preflight checks the cumulative US$0.10 target, US$0.20 hard ceiling, prior dispatches, and uncertain reservations before opening the credential key. CI cannot run the test.
+
+Set these variables through a private local environment; do not commit their values:
+
+| Variable | Value |
+| --- | --- |
+| `RUN_NATIVE_PROVIDER_SMOKE` | `one-approved-case` to explicitly enable one local case. |
+| `AI_BUDGET_CONFIG_PATH` | Absolute path to the verified, unchanged campaign configuration. |
+| `LIVE_EXPECTED_CAMPAIGN_ID` | Existing shared campaign ID, matching the configuration. |
+| `LIVE_SHARED_DATABASE_URL` | Existing application database containing the campaign and saved encrypted connection. |
+| `LIVE_CREDENTIAL_KEY_PATH` | Absolute path to its existing credential-encryption key; no replacement key is created. |
+| `LIVE_PROVIDER_ALLOWED_HOST` | Exact approved HTTPS hostname of the configured provider; port must be standard HTTPS. |
+| `TEST_DATABASE_URL` | Separate isolated loopback test database with administrative schema/role permissions. |
+| `LIVE_ISOLATED_DATABASE_NAME` | Exact database name, confirming the dedicated test database selected above. |
+| `TEST_AGENT_RUNTIME_ENTRY` | Absolute path to the built `agent-runtime/dist/src/main.js`. |
+| `TEST_REPAIR_SANDBOX_IMAGE` | Existing sandbox image built from `Dockerfile.repair-sandbox`. |
+| `LIVE_PROVIDER_EVIDENCE_PATH` | New absolute `.json` path under the ignored repository `artifacts/` directory. |
+
+```powershell
+go test -tags provider_smoke ./internal/coderepair/runtimebridge -run '^TestNativeProviderSmoke$' -count=1 -timeout 10m
+```
+
+Keep the report, its append-only `.manifest.jsonl` recovery journal, retained database schemas and fixture checkout, original campaign, and credential key together for recovery and audit. The journal is flushed before database initialization and before inference so an interrupted process retains the allocated schema identifiers, approved base, and case identity. The final report contains the outcome, patch digest, regression exits, and runtime accounting; provider credentials and raw responses are omitted. Local tariff-based accounting is not a reconciled provider invoice. A failed or uncertain attempt must be inspected without rerunning paid investigation: the harness rejects any campaign with a previous repair request. Changing the report path, deleting accounting records, or switching campaign IDs must not be used to bypass this limit. Publication remains a separate operator-approved workflow.
