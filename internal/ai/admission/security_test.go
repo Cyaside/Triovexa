@@ -27,12 +27,12 @@ func TestRepeatedPromptsConsumeCumulativeInputAndRequestAllowances(t *testing.T)
 			t.Fatal(err)
 		}
 		if err := service.RecordResponse(ctx, Receipt{RequestID: request.ID, PayloadHash: request.PayloadHash, HTTPStatus: 200,
-			ResponseEncoding: "fixture-raw", Usage: Usage{Present: true, PromptTokens: 1000, CompletionTokens: 10, TotalTokens: 1010}}); err != nil {
+			ResponseEncoding: "fixture-raw", Usage: Usage{Present: true, PromptTokens: 6000, CompletionTokens: 10, TotalTokens: 6010}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// Recreating the service keeps the campaign and all serialized prompt bounds;
-	// low actual usage does not silently grant more context than the hard cap.
+	// Recreating the service keeps every actual prompt contribution. Repeated
+	// context counts again for each request, even if its contents are identical.
 	restarted, _ := NewService(store)
 	request := Request{ID: "after-restart", CampaignID: "bounded", AttemptID: "new-attempt", Phase: "repair", ConfigVersion: "config-v1",
 		PayloadHash: PayloadHash([]byte("next prompt")), Provider: pricing.Provider, Model: pricing.Model, External: true, InputTokenBound: 1, OutputTokenBound: 1}
@@ -40,7 +40,7 @@ func TestRepeatedPromptsConsumeCumulativeInputAndRequestAllowances(t *testing.T)
 		t.Fatalf("cumulative serialized input allowance reset: %v", err)
 	}
 	campaign, _ := restarted.GetCampaign(ctx, "bounded")
-	if campaign.AdmittedInputTokens != 12000 || campaign.Requests != 2 || campaign.SpentMicroUSD != 2020 || campaign.ReservedMicroUSD != 0 {
+	if campaign.AdmittedInputTokens != 12000 || campaign.Requests != 2 || campaign.SpentMicroUSD != 12020 || campaign.ReservedMicroUSD != 0 {
 		t.Fatalf("incorrect cumulative accounting: %+v", campaign)
 	}
 }

@@ -105,7 +105,7 @@ func TestResponseReceiptReplaysWithoutSecondDispatch(t *testing.T) {
 		t.Fatalf("paid replay dispatched: %v", err)
 	}
 	c, _ := s.GetCampaign(ctx, r.CampaignID)
-	if c.SpentMicroUSD != 11 || c.ReservedMicroUSD != 0 || c.Requests != 1 {
+	if c.SpentMicroUSD != 11 || c.ReservedMicroUSD != 0 || c.Requests != 1 || c.AdmittedInputTokens != 8 {
 		t.Fatalf("double accounting %+v", c)
 	}
 	r.PayloadHash = PayloadHash([]byte("changed"))
@@ -128,7 +128,7 @@ func TestMissingOrInvalidUsageBlocksNextPaidCall(t *testing.T) {
 			t.Fatalf("unknown usage permitted next call: %v", err)
 		}
 		c, _ := s.GetCampaign(ctx, r.CampaignID)
-		if !c.Blocked || c.ReservedMicroUSD != 15 || c.SpentMicroUSD != 0 {
+		if !c.Blocked || c.ReservedMicroUSD != 15 || c.SpentMicroUSD != 0 || c.AdmittedInputTokens != r.InputTokenBound {
 			t.Fatalf("uncertainty released allowance: %+v", c)
 		}
 	}

@@ -237,6 +237,9 @@ func (s *Store) RecordResponse(ctx context.Context, receipt admission.Receipt, c
 	if cost < 0 || cost > r.ReservedMicroUSD {
 		return admission.ErrInvalid
 	}
+	if valid && (!admission.ValidUsage(receipt.Usage) || receipt.Usage.PromptTokens > r.Request.InputTokenBound || receipt.Usage.CompletionTokens > r.Request.OutputTokenBound) {
+		return admission.ErrUsageInvalid
+	}
 	response := receipt.Response
 	receipt.Response = nil
 	metadata, err := json.Marshal(receipt)
@@ -252,7 +255,8 @@ func (s *Store) RecordResponse(ctx context.Context, receipt admission.Receipt, c
 		return err
 	}
 	if valid {
-		_, err = tx.ExecContext(ctx, `UPDATE ai_budget_campaigns SET reserved_micro_usd=reserved_micro_usd-$1,spent_micro_usd=spent_micro_usd+$2 WHERE id=$3`, r.ReservedMicroUSD, cost, c.ID)
+		_, err = tx.ExecContext(ctx, `UPDATE ai_budget_campaigns SET reserved_micro_usd=reserved_micro_usd-$1,spent_micro_usd=spent_micro_usd+$2,
+		admitted_input_tokens=admitted_input_tokens-$3 WHERE id=$4`, r.ReservedMicroUSD, cost, r.Request.InputTokenBound-receipt.Usage.PromptTokens, c.ID)
 	} else {
 		_, err = tx.ExecContext(ctx, `UPDATE ai_budget_campaigns SET blocked=true WHERE id=$1`, c.ID)
 	}

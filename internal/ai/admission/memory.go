@@ -146,6 +146,9 @@ func (m *MemoryStore) RecordResponse(_ context.Context, receipt Receipt, cost in
 	if cost < 0 || cost > r.ReservedMicroUSD {
 		return ErrInvalid
 	}
+	if valid && (!ValidUsage(receipt.Usage) || receipt.Usage.PromptTokens > r.Request.InputTokenBound || receipt.Usage.CompletionTokens > r.Request.OutputTokenBound) {
+		return ErrUsageInvalid
+	}
 	r.Receipt = &receipt
 	r.ActualMicroUSD = cost
 	r.FinishedAt = receipt.RecordedAt
@@ -153,6 +156,7 @@ func (m *MemoryStore) RecordResponse(_ context.Context, receipt Receipt, cost in
 	if valid {
 		c.ReservedMicroUSD -= r.ReservedMicroUSD
 		c.SpentMicroUSD += cost
+		c.AdmittedInputTokens -= r.Request.InputTokenBound - receipt.Usage.PromptTokens
 	} else {
 		r.State = Uncertain
 		c.Blocked = true

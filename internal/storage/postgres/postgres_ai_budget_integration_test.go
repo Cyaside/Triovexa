@@ -125,7 +125,7 @@ func TestBudgetPostgresReceiptReplayAndUsagePersistIntegration(t *testing.T) {
 		t.Fatalf("replay dispatched: %v", err)
 	}
 	c, _ := after.GetCampaign(ctx, r.CampaignID)
-	if c.SpentMicroUSD != 11 || c.Requests != 1 || c.ReservedMicroUSD != 0 {
+	if c.SpentMicroUSD != 11 || c.Requests != 1 || c.ReservedMicroUSD != 0 || c.AdmittedInputTokens != 8 {
 		t.Fatalf("bad restored accounting: %+v", c)
 	}
 	r.ConfigVersion = "different-version"
@@ -168,7 +168,7 @@ func TestBudgetPostgresCrashAndMissingUsageHoldReservationIntegration(t *testing
 				t.Fatalf("uncertain released: %v", err)
 			}
 			c, _ := after.GetCampaign(ctx, r.CampaignID)
-			if c.ReservedMicroUSD != 15 || c.SpentMicroUSD != 0 {
+			if c.ReservedMicroUSD != 15 || c.SpentMicroUSD != 0 || c.AdmittedInputTokens != r.InputTokenBound {
 				t.Fatalf("reservation disappeared: %+v", c)
 			}
 		})
