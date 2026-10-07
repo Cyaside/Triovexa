@@ -2,7 +2,7 @@ import { BaseMessage, HumanMessage, SystemMessage, isAIMessage, isToolMessage } 
 import { RuntimeFailure, type Scope } from "../bridge/schema.js";
 import { Artifacts, transcriptReference } from "./artifacts.js";
 
-export const CONTEXT_POLICY_VERSION = "tool-archives-v1";
+export const CONTEXT_POLICY_VERSION = "tool-archives-v2";
 
 export function composeContext(scope: Scope, artifacts: Artifacts): HumanMessage {
   const baselineOutput = scope.baseline.output;

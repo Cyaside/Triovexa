@@ -197,7 +197,7 @@ suite("Postgres checkpoint isolation and recovery", () => {
     } finally { await gateway.close(); }
   }, 30000);
 
-  it("blocks unfinished pre-archive context policy checkpoints before another model or tool call", async () => {
+  it.each([undefined, "tool-archives-v1"])("blocks unfinished %s context policy checkpoints before another model or tool call", async (contextPolicy) => {
     const start = await fixture();
     const gateway = await stub((request) => ({ body: completion(String(request.body.model), [{ id: "pre-policy-read", name: "repo_read", args: { path: "internal/worker/job.go", start_line: 1, end_line: 2 } }]) }));
     start.transport.model_gateway_url = gateway.url;
@@ -207,8 +207,9 @@ suite("Postgres checkpoint isolation and recovery", () => {
       try {
         const stored = (await saver.getTuple(config(start)))!;
         const { scope } = start;
-        // Exact pre-archives identity layout, deliberately lacking context_policy.
-        const oldIdentity = createHash("sha256").update(JSON.stringify({ engine: scope.engine_id, engine_version: scope.engine_version, thread: scope.checkpoint_thread, model: start.transport.model,
+        // Exact previous identity layouts, including the pre-archives layout
+        // without context_policy and the archived view's older read receipts.
+        const oldIdentity = createHash("sha256").update(JSON.stringify({ ...(contextPolicy ? { context_policy: contextPolicy } : {}), engine: scope.engine_id, engine_version: scope.engine_version, thread: scope.checkpoint_thread, model: start.transport.model,
           config: scope.provider_config_version, prompt: scope.prompt_version, playbooks: scope.playbook_manifest_digest, base: scope.base_sha, deployed: scope.deployed_sha,
           paths: scope.allowed_paths, recipes: scope.recipe_ids, profile: scope.profile, limits: scope.limits, evidence: scope.evidence,
           baseline: { exit_code: scope.baseline.exit_code, output: scope.baseline.output } })).digest("hex");
@@ -267,6 +268,26 @@ suite("Postgres checkpoint isolation and recovery", () => {
     } finally { if ("end" in saver) await saver.end(); }
     expect(await investigate(start, caller, new AbortController().signal, fetcher)).toMatchObject({ status: "completed", model_requests: 4, tool_steps: 6 });
     expect(wires).toHaveLength(4); expect(effects).toBe(2);
+  }, 30000);
+
+  it("stops a repeated full skill read even after offload, without another model or Go call", async () => {
+    const start = await fixture(); start.scope.profile = "final-smoke"; start.transport.input_budget_mode = "gateway-preview";
+    const wires: Record<string, unknown>[] = []; let effects = 0;
+    const response = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+    const fetcher: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (new Headers(init?.headers).get("X-Triovexa-Context-Preview") === "1") {
+        return response({ input_bound: Buffer.byteLength(JSON.stringify(body)) + 1400, max_input_tokens: 6000 });
+      }
+      wires.push(body);
+      return response(completion(start.transport.model, wires.length === 1
+        ? ["go-investigation", "incident-evidence", "regression-patch"].map((name, index) => ({ id: `first-skill-${index}`, name: "read_file", args: { file_path: `/skills/${name}/SKILL.md`, offset: 0, limit: 100 } }))
+        : [{ id: "repeated-skill", name: "read_file", args: { file_path: "/skills/regression-patch/SKILL.md", offset: 0, limit: 100 } }]));
+    };
+    expect(await investigate(start, async () => { effects++; throw new Error("Only virtual skills are authorized in this fixture"); }, new AbortController().signal, fetcher))
+      .toMatchObject({ status: "blocked", code: "NO_PROGRESS", model_requests: 2 });
+    expect(wires).toHaveLength(2); expect(effects).toBe(0);
+    expect(JSON.stringify(wires[1]!.messages)).toContain("/skills/regression-patch/SKILL.md#L8; read_file offset=7 limit=1; no full reread.");
   }, 30000);
 
   it("allows only explicit internal candidate correction and checkpoints its counter", async () => {

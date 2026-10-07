@@ -13,11 +13,13 @@ function pair(args: unknown, text = fullWindow, resultID = "skill-one", name = "
 const textOf = (messages: WireContentMessage[]) => (messages[1]!.content as Array<{ text: string }>)[0]!.text;
 
 describe("pinned trusted read receipts", () => {
-  it("references the existing trusted path only after verifying its exact full window and original paired call", () => {
-    const artifacts = new Artifacts("skill-receipt"); const args = { file_path: book.path, offset: 0, limit: 200 };
+  it.each([100, 200])("references the existing trusted path only after verifying its exact full window and original paired call with limit %i", (limit) => {
+    const artifacts = new Artifacts("skill-receipt"); const args = { file_path: book.path, offset: 0, limit };
     const messages = pair(args); const originalCall = JSON.stringify(messages[0]);
     expect(offloadWireToolResults(messages, artifacts, 300)).toBe(1);
-    expect(textOf(messages)).toBe(`${book.path}#L8`);
+    expect(textOf(messages)).toContain("no full reread.");
+    expect(textOf(messages)).toContain(`${book.path}#L8`);
+    expect(textOf(messages)).toContain("read_file offset=7 limit=1");
     expect(JSON.stringify(messages[0])).toBe(originalCall);
     expect(messages[1]!.tool_call_id).toBe("skill-one");
     expect(Object.values(artifacts.snapshot()).map((file) => file.content)).toContain(fullWindow);
@@ -36,7 +38,7 @@ describe("pinned trusted read receipts", () => {
     const artifacts = new Artifacts("untrusted-receipt");
     const messages = pair(fixture.args, fixture.text, fixture.resultID, fixture.name);
     expect(offloadWireToolResults(messages, artifacts, 1)).toBe(1);
-    expect(textOf(messages)).not.toBe(`${book.path}#L8`);
+    expect(textOf(messages)).not.toContain(`${book.path}#L8`);
     const reference = JSON.parse(textOf(messages));
     expect(reference.untrusted).toBe(true);
     expect(reference.artifact).toMatch(/^\/artifacts\/untrusted-receipt\/[a-f0-9]{64}$/);

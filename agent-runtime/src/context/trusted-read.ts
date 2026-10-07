@@ -20,7 +20,7 @@ export function trustedReadReferences(messages: WireContentMessage[]): Map<strin
       const text = `@@ lines 1-${lines.length} of ${lines.length} @@\n${lines.join("\n")}`;
       const instructionLine = lines.findIndex((line, index) => index > 5 && line.trim() !== "");
       if (instructionLine < 0) continue;
-      references.set(call.id, { text, reference: `${book.path}#L${instructionLine + 1}` });
+      references.set(call.id, { text, reference: `${book.path}#L${instructionLine + 1}; read_file offset=${instructionLine} limit=1; no full reread.` });
     }
   }
   return references;
