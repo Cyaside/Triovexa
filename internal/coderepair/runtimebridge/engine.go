@@ -13,7 +13,7 @@ import (
 )
 
 const EngineVersion = "1.14.1"
-const PromptVersion = "repair-native-v3"
+const PromptVersion = "repair-native-v4"
 const PlaybookDigest = "7f698e35ce61618666730c1c15bb010be04c5cc55a00c7f002b1cce546ca6cb5"
 
 type ClaimStore interface {

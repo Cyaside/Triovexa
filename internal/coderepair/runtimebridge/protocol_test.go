@@ -60,7 +60,8 @@ func TestGoTypeScriptSharedContractFixture(t *testing.T) {
 	if err := DecodeStrict(frame.Payload, &start); err != nil {
 		t.Fatal(err)
 	}
-	if frame.ContractVersion != ContractVersion || start.Scope.CheckpointThread != start.Scope.CaseID+":"+start.Scope.AttemptID || start.Scope.EngineID != "deepagents" {
+	if frame.ContractVersion != ContractVersion || start.Scope.CheckpointThread != start.Scope.CaseID+":"+start.Scope.AttemptID || start.Scope.EngineID != "deepagents" ||
+		start.Scope.PromptVersion != PromptVersion || start.Scope.PlaybookManifestDigest != PlaybookDigest {
 		t.Fatal("Go/TS identity contract diverged")
 	}
 }

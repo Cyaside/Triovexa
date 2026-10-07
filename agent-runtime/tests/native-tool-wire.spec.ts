@@ -5,7 +5,7 @@ import { completion, patchArgs, startFixture, stub } from "./fixture.js";
 
 describe("native Chat Completions runtime", () => {
   it("rejects a prompt contract unsupported by this executable", async () => {
-    const start = await startFixture(); start.scope.prompt_version = "repair-native-v2";
+    const start = await startFixture(); start.scope.prompt_version = "repair-native-v3";
     expect(() => validateStart(start)).toThrowError("PROMPT_VERSION_UNAVAILABLE");
   });
   it("uses exactly seven tools and stops after the Go-verified terminal proposal", async () => {
@@ -26,6 +26,8 @@ describe("native Chat Completions runtime", () => {
         expect(request.body.parallel_tool_calls).toBe(false);
         expect(request.body.max_tokens).toBe(1500);
         expect((request.body.tools as Array<{ function: { name: string } }>).map((tool) => tool.function.name).sort()).toEqual([...MODEL_TOOLS].sort());
+        const proposal = (request.body.tools as Array<{ function: { name: string; description: string } }>).find((tool) => tool.function.name === "propose_patch")!;
+        expect(proposal.function.description).toContain("Text Git diff starts diff --git");
         expect(request.headers["x-triovexa-request-ordinal"]).toBe(String(index + 1));
         expect(JSON.stringify(request.body)).not.toContain(start.transport.capability);
         expect(JSON.stringify(request.body)).not.toContain("model_gateway_url");

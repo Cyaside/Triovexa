@@ -60,6 +60,7 @@ func TestQueuedAttemptEngineMismatchBlocks(t *testing.T) {
 	for name, mutate := range map[string]func(*coderepair.Attempt){
 		"legacy": func(a *coderepair.Attempt) { a.Runtime = nil },
 		"engine": func(a *coderepair.Attempt) { a.Runtime.EngineVersion = "old-version" },
+		"prompt": func(a *coderepair.Attempt) { a.PromptVersion = "repair-native-v3" },
 		"thread": func(a *coderepair.Attempt) { a.Runtime.ThreadID = "other:attempt" },
 		"digest": func(a *coderepair.Attempt) { a.Runtime.SnapshotSHA256 = strings.Repeat("0", 64) },
 		"model":  func(a *coderepair.Attempt) { a.Model = "other" },

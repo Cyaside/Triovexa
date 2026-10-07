@@ -39,4 +39,4 @@ export async function stub(factory: ResponseFactory) {
   return { requests, url: `http://127.0.0.1:${address.port}/v1`, close: async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); } };
 }
 
-export const patchArgs = { patch: "--- a/internal/worker/job.go\n+++ b/internal/worker/job.go\n@@ -1 +1 @@\n-old\n+fixed\n", hypothesis: "The valid job path rejects supported input", evidence_ids: ["log-1"] };
+export const patchArgs = { patch: "diff --git a/internal/worker/job.go b/internal/worker/job.go\n--- a/internal/worker/job.go\n+++ b/internal/worker/job.go\n@@ -1 +1 @@\n-old\n+fixed\n", hypothesis: "The valid job path rejects supported input", evidence_ids: ["log-1"] };
