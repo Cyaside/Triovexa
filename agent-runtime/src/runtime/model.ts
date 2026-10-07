@@ -3,9 +3,12 @@ import { type BaseMessage, isAIMessage } from "@langchain/core/messages";
 import { z } from "zod";
 import { RuntimeFailure, MAX_FRAME_BYTES, toolSchemas, type Start, type GoToolName } from "../bridge/schema.js";
 import { writerToolsForProfile } from "./tool-inventory.js";
+import { Artifacts } from "../context/artifacts.js";
+import { offloadWireToolResults, type WireContentMessage } from "../context/wire-offload.js";
+import { archiveOlderWireHistory } from "../context/wire-history.js";
 
 const virtualRead = z.strictObject({ file_path: z.string().max(512), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200).optional() });
-type WireMessage = { role?: string; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>; reasoning_content?: string };
+type WireMessage = WireContentMessage & { tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>; reasoning_content?: string };
 
 // These exact constants are emitted only by the private Go admission endpoint.
 // Never accept a prefix, JSON error field or arbitrary provider error as a code.
@@ -65,7 +68,7 @@ export class ModelTransport {
   dispatched = 0;
   readonly root: URL;
 
-  constructor(private readonly start: Start, private readonly signal: AbortSignal, private readonly underlyingFetch: typeof fetch = fetch, private readonly inventory: "writer" | "reviewer" = "writer") {
+  constructor(private readonly start: Start, private readonly signal: AbortSignal, private readonly underlyingFetch: typeof fetch = fetch, private readonly inventory: "writer" | "reviewer" = "writer", private readonly artifacts?: Artifacts) {
     this.root = gatewayRoot(start.transport.model_gateway_url);
   }
 
@@ -93,18 +96,46 @@ export class ModelTransport {
       const content = this.reasoning.get(message.tool_calls[0]!.id);
       if (content !== undefined) message.reasoning_content = content;
     }
-    const encoded = JSON.stringify(body);
-    if (Buffer.byteLength(encoded) > this.start.scope.limits.max_input_bytes) throw new RuntimeFailure("CONTEXT_LIMIT");
+    let encoded = JSON.stringify(body);
     if ((body.max_tokens ?? body.max_completion_tokens) !== this.start.scope.limits.max_output_tokens) throw new RuntimeFailure("OUTPUT_LIMIT_MISSING");
     const headers = new Headers(init.headers);
+    headers.delete("X-Triovexa-Context-Preview");
     headers.set("Authorization", `Bearer ${this.start.transport.capability}`);
     headers.set("X-Triovexa-Case-ID", this.start.scope.case_id);
     headers.set("X-Triovexa-Attempt-ID", this.start.scope.attempt_id);
     headers.set("X-Triovexa-Request-Ordinal", String(this.ordinal));
-    this.dispatched++;
     const signals = [this.signal, AbortSignal.timeout(Math.min(300000, Math.max(1, Date.parse(this.start.scope.deadline) - Date.now())))];
     if (init.signal) signals.push(init.signal);
-    const response = await this.underlyingFetch(url, { ...init, body: encoded, headers, redirect: "error", signal: AbortSignal.any(signals) });
+    const dispatchSignal = AbortSignal.any(signals);
+    if (this.start.transport.input_budget_mode === "gateway-preview") {
+      if (!this.artifacts) throw new RuntimeFailure("CONTEXT_CONFIG_INVALID");
+      const preview = async (payload: string) => {
+        const previewHeaders = new Headers(headers); previewHeaders.set("X-Triovexa-Context-Preview", "1");
+        const response = await this.underlyingFetch(url, { ...init, body: payload, headers: previewHeaders, redirect: "error", signal: dispatchSignal });
+        const content = await boundedResponse(response);
+        if (response.status === 409 && isGatewayDenialCode(content.trim())) throw new RuntimeFailure(content.trim());
+        let value: unknown;
+        try { value = JSON.parse(content); } catch { throw new RuntimeFailure("CONTEXT_PREVIEW_INVALID"); }
+        const contract = z.strictObject({ input_bound: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), max_input_tokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).safeParse(value);
+        if (!response.ok || !contract.success) throw new RuntimeFailure("CONTEXT_PREVIEW_INVALID");
+        return contract.data;
+      };
+      const measured = await preview(encoded);
+      if (measured.input_bound > measured.max_input_tokens || Buffer.byteLength(encoded) > this.start.scope.limits.max_input_bytes) {
+        const excess = Math.max(measured.input_bound - measured.max_input_tokens, Buffer.byteLength(encoded) - this.start.scope.limits.max_input_bytes);
+        const history = archiveOlderWireHistory(body.messages, this.artifacts);
+        body.messages = history.messages;
+        const remaining = Math.max(0, excess - history.reductionBytes);
+        const replacements = remaining ? offloadWireToolResults(body.messages, this.artifacts, remaining) : 0;
+        if (!history.archived && !replacements) throw new RuntimeFailure("CONTEXT_LIMIT");
+        encoded = JSON.stringify(body);
+        const reduced = await preview(encoded);
+        if (reduced.input_bound > reduced.max_input_tokens) throw new RuntimeFailure("CONTEXT_LIMIT");
+      }
+    }
+    if (Buffer.byteLength(encoded) > this.start.scope.limits.max_input_bytes) throw new RuntimeFailure("CONTEXT_LIMIT");
+    this.dispatched++;
+    const response = await this.underlyingFetch(url, { ...init, body: encoded, headers, redirect: "error", signal: dispatchSignal });
     const content = await boundedResponse(response);
     if (response.status === 409 && isGatewayDenialCode(content.trim())) throw new RuntimeFailure(content.trim());
     if (response.ok) {

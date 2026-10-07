@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isAIMessage, type BaseMessage } from "@langchain/core/messages";
@@ -191,9 +191,82 @@ suite("Postgres checkpoint isolation and recovery", () => {
         { ...start, scope: { ...start.scope, provider_config_version: "changed-config" } },
         { ...start, scope: { ...start.scope, baseline: { ...start.scope.baseline, output: "changed baseline proof" } } },
         { ...start, transport: { ...start.transport, model: "changed-model" } },
+        { ...start, transport: { ...start.transport, input_budget_mode: "gateway-preview" as const } },
       ]) expect(await investigate(changed, caller, new AbortController().signal)).toMatchObject({ status: "blocked", code: "CHECKPOINT_INCOMPATIBLE", model_requests: 0 });
       expect(gateway.requests).toHaveLength(1);
     } finally { await gateway.close(); }
+  }, 30000);
+
+  it("blocks unfinished pre-archive context policy checkpoints before another model or tool call", async () => {
+    const start = await fixture();
+    const gateway = await stub((request) => ({ body: completion(String(request.body.model), [{ id: "pre-policy-read", name: "repo_read", args: { path: "internal/worker/job.go", start_line: 1, end_line: 2 } }]) }));
+    start.transport.model_gateway_url = gateway.url;
+    try {
+      expect(await investigate(start, async () => { throw new RuntimeFailure("OFFLINE_PROCESS_CRASH"); }, new AbortController().signal)).toMatchObject({ status: "failed", code: "OFFLINE_PROCESS_CRASH" });
+      const saver = checkpointSaver(start);
+      try {
+        const stored = (await saver.getTuple(config(start)))!;
+        const { scope } = start;
+        // Exact pre-archives identity layout, deliberately lacking context_policy.
+        const oldIdentity = createHash("sha256").update(JSON.stringify({ engine: scope.engine_id, engine_version: scope.engine_version, thread: scope.checkpoint_thread, model: start.transport.model,
+          config: scope.provider_config_version, prompt: scope.prompt_version, playbooks: scope.playbook_manifest_digest, base: scope.base_sha, deployed: scope.deployed_sha,
+          paths: scope.allowed_paths, recipes: scope.recipe_ids, profile: scope.profile, limits: scope.limits, evidence: scope.evidence,
+          baseline: { exit_code: scope.baseline.exit_code, output: scope.baseline.output } })).digest("hex");
+        const version = `${stored.checkpoint.channel_versions.runtime_identity}-pre-archive-policy`;
+        await saver.put(stored.config, { ...stored.checkpoint, id: `ffffffff-ffff-4fff-bfff-${randomUUID().slice(-12)}`,
+          channel_values: { ...stored.checkpoint.channel_values, runtime_identity: oldIdentity }, channel_versions: { ...stored.checkpoint.channel_versions, runtime_identity: version } },
+        stored.metadata!, { runtime_identity: version });
+      } finally { if ("end" in saver) await saver.end(); }
+      let tools = 0;
+      expect(await investigate(start, async () => { tools++; throw new Error("Old context policy cannot resume"); }, new AbortController().signal)).toMatchObject({ status: "blocked", code: "CHECKPOINT_INCOMPATIBLE", model_requests: 0, tool_steps: 0 });
+      expect(tools).toBe(0); expect(gateway.requests).toHaveLength(1);
+    } finally { await gateway.close(); }
+  }, 30000);
+
+  it("retrieves offloaded trusted instructions with a new bounded range before source and terminal patch in four requests", async () => {
+    const start = await fixture(); start.scope.profile = "final-smoke"; start.transport.input_budget_mode = "gateway-preview";
+    const books = ["go-investigation", "incident-evidence", "regression-patch"];
+    const wires: Record<string, unknown>[] = []; let previews = 0; let effects = 0;
+    const fetcher: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)); const headers = new Headers(init?.headers);
+      if (headers.get("X-Triovexa-Context-Preview") === "1") {
+        previews++;
+        // Local deterministic authority fixture, including template overhead;
+        // the Go/Node integration proves the actual GLM template/campaign cap.
+        return new Response(JSON.stringify({ input_bound: Buffer.byteLength(JSON.stringify(body)) + 1400, max_input_tokens: 6000 }), { status: 200 });
+      }
+      wires.push(body);
+      const index = wires.length;
+      if (index === 2) {
+        const output = JSON.stringify(body.messages);
+        expect(output).toContain("/skills/go-investigation/SKILL.md#L8");
+      }
+      return new Response(JSON.stringify(completion(start.transport.model, index === 1
+        ? books.map((name, bookIndex) => ({ id: `book-${bookIndex}`, name: "read_file", args: { file_path: `/skills/${name}/SKILL.md`, offset: 0, limit: 200 } }))
+        : index === 2 ? [{ id: "targeted-instructions", name: "read_file", args: { file_path: "/skills/go-investigation/SKILL.md", offset: 7, limit: 1 } }]
+          : index === 3 ? [{ id: "bounded-source", name: "repo_read", args: { path: "internal/worker/job.go", start_line: 1, end_line: 2 } }]
+            : [{ id: "bounded-patch", name: "propose_patch", args: patchArgs }], index === 1 ? "Load relevant pinned playbooks" : "Keep the latest native thought")), { status: 200 });
+    };
+    const caller = async (id: string, name: string) => {
+      effects++;
+      return { call_id: id, status: "ok" as const, value: name === "repo_read" ? { path: "internal/worker/job.go", digest: "pinned-source", start_line: 1, content: "package worker\nfunc old() {}" }
+        : { terminal: true, outcome: "patch_ready", code: "PATCH_READY" } };
+    };
+    expect(await investigate(start, caller, new AbortController().signal, fetcher)).toMatchObject({ status: "completed", code: "PATCH_READY", model_requests: 4, tool_steps: 6 });
+    expect(wires).toHaveLength(4); expect(effects).toBe(2);
+    expect(previews).toBeGreaterThanOrEqual(4); expect(previews).toBeLessThanOrEqual(8);
+    for (const wire of wires) expect(Buffer.byteLength(JSON.stringify(wire)) + 1400).toBeLessThanOrEqual(6000);
+    const instruction = (wires[2]!.messages as Array<{ tool_call_id?: string; content: unknown }>).find((message) => message.tool_call_id === "targeted-instructions")!;
+    expect(JSON.stringify(instruction.content)).toContain("Trace the observed failure to a specific path");
+    const saver = checkpointSaver(start);
+    try {
+      const stored = (await saver.getTuple(config(start)))!;
+      const messages = stored.checkpoint.channel_values.messages as BaseMessage[];
+      expect(messages.filter(isAIMessage).map((message) => message.additional_kwargs.reasoning_content)).toContain("Load relevant pinned playbooks");
+      expect(JSON.stringify(stored.checkpoint.channel_values.files)).toContain("Untrusted".toLowerCase());
+    } finally { if ("end" in saver) await saver.end(); }
+    expect(await investigate(start, caller, new AbortController().signal, fetcher)).toMatchObject({ status: "completed", model_requests: 4, tool_steps: 6 });
+    expect(wires).toHaveLength(4); expect(effects).toBe(2);
   }, 30000);
 
   it("allows only explicit internal candidate correction and checkpoints its counter", async () => {

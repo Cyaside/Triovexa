@@ -53,6 +53,7 @@ export const startSchema = z.strictObject({
     model: identifier,
     model_gateway_url: z.url(),
     capability: z.string().min(1).max(4096),
+    input_budget_mode: z.literal("gateway-preview").optional(),
     checkpoint_dsn: z.string().min(1).max(4096).optional(),
     checkpoint_schema: z.string().regex(/^[a-z][a-z0-9_]{0,62}$/).optional(),
   }),

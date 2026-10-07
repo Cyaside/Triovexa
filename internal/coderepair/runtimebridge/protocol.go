@@ -69,6 +69,7 @@ type Transport struct {
 	Capability       string `json:"capability"`
 	CheckpointDSN    string `json:"checkpoint_dsn,omitempty"`
 	CheckpointSchema string `json:"checkpoint_schema,omitempty"`
+	InputBudgetMode  string `json:"input_budget_mode,omitempty"`
 }
 
 type Start struct {

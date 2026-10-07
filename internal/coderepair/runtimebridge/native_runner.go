@@ -53,11 +53,13 @@ func (n *NativeRunner) Investigate(ctx context.Context, w *sandbox.Workspace, b 
 	// The Go gateway accounts the full final payload; this independent byte
 	// limit includes system/tool definitions rather than only user messages.
 	limits.MaxInputBytes = int(config.Budget.MaxInputTokens) - 512
+	inputBudgetMode := ""
 	if config.Budget.Pricing.InputContract == modelgateway.GLMFlashInputContract {
 		// Wire bytes and rendered-template tokens are different units. The named
 		// contract is enforced by Go before reserving cost or opening the network;
 		// JSON escaping must not impose the older raw-bytes token proxy here.
 		limits.MaxInputBytes = MaxFrameBytes
+		inputBudgetMode = "gateway-preview"
 	}
 	if limits.MaxInputBytes < 512 {
 		return fail("CONTEXT_LIMIT")
@@ -79,7 +81,7 @@ func (n *NativeRunner) Investigate(ctx context.Context, w *sandbox.Workspace, b 
 			return Transport{}, nil, err
 		}
 		url, stop, err := gateway.Listen(c)
-		return Transport{Model: config.Provider.Model, ModelGatewayURL: url, Capability: gateway.Capability(), CheckpointDSN: n.CheckpointDSN, CheckpointSchema: n.CheckpointSchema}, stop, err
+		return Transport{Model: config.Provider.Model, ModelGatewayURL: url, Capability: gateway.Capability(), CheckpointDSN: n.CheckpointDSN, CheckpointSchema: n.CheckpointSchema, InputBudgetMode: inputBudgetMode}, stop, err
 	}
 	return engine.Investigate(ctx, w, b, s, selection, recipe)
 }

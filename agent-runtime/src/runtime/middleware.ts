@@ -6,7 +6,7 @@ import { PLAYBOOKS, selectPlaybooks } from "../playbooks/registry.js";
 /** Retain framework tools/retrieval while replacing generic chat-oriented guidance. */
 export function boundedFilesystem(backend: BackendFactory) {
   return createFilesystemMiddleware({ backend, tools: ["read_file"],
-    customToolDescriptions: { read_file: "Own virtual lines; limit<=200." } });
+    customToolDescriptions: { read_file: "Virtual /skills,/artifacts; #Ln=offset n-1,limit1; repo_read for repo." } });
 }
 
 export function conciseSkills(backend: BackendFactory) {
