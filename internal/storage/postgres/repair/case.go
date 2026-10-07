@@ -30,64 +30,6 @@ var (
 
 type repairScanner interface{ Scan(...any) error }
 
-func (s *Store) CreateRepositoryBinding(ctx context.Context, binding coderepair.RepositoryBinding) error {
-	if err := binding.Validate(); err != nil {
-		return err
-	}
-	paths, err := json.Marshal(binding.AllowedPaths)
-	if err != nil {
-		return err
-	}
-	recipes, err := json.Marshal(binding.TestRecipes)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO repository_bindings
-		(id, service_name, environment, repository_url, base_ref, allowed_paths_json, test_recipes_json, policy_version, enabled, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		binding.ID, binding.ServiceName, binding.Environment, binding.RepositoryURL, binding.BaseRef,
-		string(paths), string(recipes), binding.PolicyVersion, binding.Enabled, binding.CreatedAt.UTC(), binding.UpdatedAt.UTC())
-	return err
-}
-
-func scanRepositoryBinding(row repairScanner) (coderepair.RepositoryBinding, error) {
-	var binding coderepair.RepositoryBinding
-	var paths, recipes string
-	err := row.Scan(&binding.ID, &binding.ServiceName, &binding.Environment, &binding.RepositoryURL,
-		&binding.BaseRef, &paths, &recipes, &binding.PolicyVersion, &binding.Enabled, &binding.CreatedAt, &binding.UpdatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return coderepair.RepositoryBinding{}, ErrNotFound
-	}
-	if err != nil {
-		return coderepair.RepositoryBinding{}, err
-	}
-	if err := json.Unmarshal([]byte(paths), &binding.AllowedPaths); err != nil {
-		return coderepair.RepositoryBinding{}, err
-	}
-	if err := json.Unmarshal([]byte(recipes), &binding.TestRecipes); err != nil {
-		return coderepair.RepositoryBinding{}, err
-	}
-	return binding, nil
-}
-
-const repairBindingColumns = `id, service_name, environment, repository_url, base_ref,
-	allowed_paths_json::text, test_recipes_json::text, policy_version, enabled, created_at, updated_at`
-
-func (s *Store) GetActiveRepositoryBinding(ctx context.Context, service, environment string) (coderepair.RepositoryBinding, error) {
-	return scanRepositoryBinding(s.db.QueryRowContext(ctx, `SELECT `+repairBindingColumns+`
-		FROM repository_bindings WHERE service_name=$1 AND environment=$2 AND enabled`, service, environment))
-}
-
-func (s *Store) GetRepositoryBinding(ctx context.Context, id string) (coderepair.RepositoryBinding, error) {
-	return scanRepositoryBinding(s.db.QueryRowContext(ctx, `SELECT `+repairBindingColumns+`
-		FROM repository_bindings WHERE id=$1`, id))
-}
-
-func getRepairBindingTx(ctx context.Context, tx *sql.Tx, id string) (coderepair.RepositoryBinding, error) {
-	return scanRepositoryBinding(tx.QueryRowContext(ctx, `SELECT `+repairBindingColumns+`
-		FROM repository_bindings WHERE id=$1`, id))
-}
-
 func (s *Store) CreateRepairCase(ctx context.Context, repairCase coderepair.Case, event coderepair.Event) error {
 	if repairCase.State != coderepair.StateProposed {
 		return errors.New("direct case creation requires proposed state")
@@ -107,7 +49,18 @@ func (s *Store) CreateRepairProposal(ctx context.Context, repairCase coderepair.
 	return s.createRepairCase(ctx, repairCase, event, &snapshot)
 }
 
-func (s *Store) createRepairCase(ctx context.Context, repairCase coderepair.Case, event coderepair.Event, snapshot *coderepair.EvidenceSnapshot) error {
+func (s *Store) createRepairCase(ctx context.Context, c coderepair.Case, event coderepair.Event, snapshot *coderepair.EvidenceSnapshot) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := s.createRepairCaseTx(ctx, tx, c, event, snapshot); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (s *Store) createRepairCaseTx(ctx context.Context, tx *sql.Tx, repairCase coderepair.Case, event coderepair.Event, snapshot *coderepair.EvidenceSnapshot) error {
 	if repairCase.ID == "" || repairCase.IncidentID == "" || repairCase.BindingID == "" || repairCase.CreatedBy == "" ||
 		(repairCase.State != coderepair.StateProposed && repairCase.State != coderepair.StateAwaitingInvestigationApproval) ||
 		repairCase.Version != 1 || repairCase.CreatedAt.IsZero() || repairCase.UpdatedAt.IsZero() {
@@ -116,11 +69,6 @@ func (s *Store) createRepairCase(ctx context.Context, repairCase coderepair.Case
 	if err := validateRepairEvent(event, repairCase.ID); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	binding, err := getRepairBindingTx(ctx, tx, repairCase.BindingID)
 	if err != nil {
 		return err
@@ -142,7 +90,7 @@ func (s *Store) createRepairCase(ctx context.Context, repairCase coderepair.Case
 	if snapshot != nil && (snapshot.ServiceName != service || snapshot.Environment != environment) {
 		return errors.New("repair evidence target does not match incident")
 	}
-	if incidentState != "escalated" && incidentState != "failed_remediation" {
+	if !coderepair.EligibleForInvestigation(domain.Incident{State: domain.IncidentState(incidentState)}, binding) {
 		return errors.New("incident is not eligible for code repair")
 	}
 	if snapshot != nil {
@@ -196,7 +144,7 @@ func (s *Store) createRepairCase(ctx context.Context, repairCase coderepair.Case
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) GetRepairEvidenceSnapshot(ctx context.Context, caseID string) (coderepair.EvidenceSnapshot, error) {
@@ -360,6 +308,18 @@ func (s *Store) ListRepairEvents(ctx context.Context, caseID string) ([]coderepa
 // audit event and durable job one transaction. A competing approver observes
 // the new case version and cannot create a second attempt.
 func (s *Store) ApproveRepairInvestigation(ctx context.Context, approval coderepair.Approval, attempt coderepair.Attempt, job coderepair.Job, event coderepair.Event) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	ok, err := s.approveRepairInvestigationTx(ctx, tx, approval, attempt, job, event)
+	if err != nil || !ok {
+		return ok, err
+	}
+	return true, tx.Commit()
+}
+func (s *Store) approveRepairInvestigationTx(ctx context.Context, tx *sql.Tx, approval coderepair.Approval, attempt coderepair.Attempt, job coderepair.Job, event coderepair.Event) (bool, error) {
 	var runtimeJSON any
 	if attempt.Runtime != nil {
 		if err := attempt.Runtime.Validate(); err != nil || attempt.Runtime.ThreadID != attempt.CaseID+":"+attempt.ID {
@@ -386,11 +346,6 @@ func (s *Store) ApproveRepairInvestigation(ctx context.Context, approval coderep
 	if err := validateRepairEvent(event, approval.CaseID); err != nil {
 		return false, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
 	c, err := scanRepairCase(tx.QueryRowContext(ctx, `SELECT `+repairCaseColumns+` FROM repair_cases WHERE id=$1 FOR UPDATE`, approval.CaseID))
 	if err != nil {
 		return false, err
@@ -486,7 +441,7 @@ func (s *Store) ApproveRepairInvestigation(ctx context.Context, approval coderep
 	if err := insertRepairEventTx(ctx, tx, event); err != nil {
 		return false, err
 	}
-	return true, tx.Commit()
+	return true, nil
 }
 
 func (s *Store) AddRepairArtifact(ctx context.Context, artifact coderepair.Artifact, event coderepair.Event) error {

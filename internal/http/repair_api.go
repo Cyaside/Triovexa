@@ -39,6 +39,9 @@ type repairAPIStore interface {
 
 func registerRepairAPI(mux *http.ServeMux, cfg config.Config, repository storage.Repository, runtime *RuntimeControls, approvalService *approval.Service) {
 	store, _ := repository.(repairAPIStore)
+	if adminStore, ok := repository.(bindingAdminStore); ok {
+		registerBindingAdminAPI(mux, adminStore)
+	}
 	mutationAllowed := func(w http.ResponseWriter) bool {
 		if store == nil {
 			writeAPIError(w, http.StatusServiceUnavailable, "repair_unavailable", "Code repair requires PostgreSQL.")
@@ -81,22 +84,37 @@ func registerRepairAPI(mux *http.ServeMux, cfg config.Config, repository storage
 				return
 			}
 			var body struct {
-				ServiceName   string   `json:"service_name"`
-				Environment   string   `json:"environment"`
-				RepositoryURL string   `json:"repository_url"`
-				BaseRef       string   `json:"base_ref"`
-				AllowedPaths  []string `json:"allowed_paths"`
-				TestRecipes   []string `json:"test_recipes"`
+				ServiceName       string                        `json:"service_name"`
+				Environment       string                        `json:"environment"`
+				RepositoryURL     string                        `json:"repository_url"`
+				BaseRef           string                        `json:"base_ref"`
+				AllowedPaths      []string                      `json:"allowed_paths"`
+				TestRecipes       []string                      `json:"test_recipes"`
+				ValidationProfile *coderepair.ValidationProfile `json:"validation_profile"`
+				CredentialRef     string                        `json:"credential_ref"`
+				Automation        *coderepair.AutomationPolicy  `json:"automation"`
 			}
 			if err := decodeBoundedJSON(w, r, &body); err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 				return
 			}
 			now := time.Now().UTC()
+			if body.Automation != nil && body.Automation.Enabled {
+				body.Automation.AuthorizedBy = identity.User.ID
+				if !body.Automation.ExpiresAt.After(now) || body.Automation.ExpiresAt.After(now.Add(30*24*time.Hour)) {
+					writeAPIError(w, http.StatusBadRequest, "invalid_grant", "Investigation grant must expire within 30 days.")
+					return
+				}
+			}
 			binding := coderepair.RepositoryBinding{ID: uuid.NewString(), ServiceName: body.ServiceName,
 				Environment: body.Environment, RepositoryURL: body.RepositoryURL, BaseRef: body.BaseRef,
 				AllowedPaths: body.AllowedPaths, TestRecipes: body.TestRecipes,
-				PolicyVersion: "repair-v1", Enabled: true, CreatedAt: now, UpdatedAt: now}
+				PolicyVersion: "repair-v2", Enabled: true, CreatedAt: now, UpdatedAt: now,
+				ValidationProfile: body.ValidationProfile, CredentialRef: body.CredentialRef, Automation: body.Automation}
+			if binding.ValidationProfile == nil {
+				writeAPIError(w, http.StatusBadRequest, "profile_required", "Configure a repository validation profile.")
+				return
+			}
 			if err := binding.Validate(); err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid_binding", err.Error())
 				return

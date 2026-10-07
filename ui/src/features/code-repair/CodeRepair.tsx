@@ -1,10 +1,11 @@
-import { FormEvent, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, APIError, Incident } from '../../api'
+import { RepositorySetup } from './RepositorySetup'
 
 type User = { id: string; role: string }
 type RepairCase = { ID: string; IncidentID: string; BindingID: string; BaseSHA: string; DeployedSHA: string; State: string; Version: number; CreatedBy: string }
-type Binding = { ID: string; RepositoryURL: string; BaseRef: string; AllowedPaths: string[]; TestRecipes: string[]; PolicyVersion: string }
+type Binding = { ID: string; RepositoryURL: string; BaseRef: string; AllowedPaths: string[]; TestRecipes: string[]; PolicyVersion: string; Automation?: { enabled: boolean } }
 type Evidence = { captured_at: string; sha256: string; entries: { id: string; type: string; source: string; status: string; text: string }[] }
 type Attempt = { ID: string; Status: string; Provider: string; Model: string; ErrorCode: string; ErrorMessage: string }
 type Report = { status: string; hypothesis?: string; recipe_id: string; before_exit: number; after_exit: number; patch_sha256?: string; evidence_ids?: string[]; code?: string; reason?: string }
@@ -28,7 +29,7 @@ export function CodeRepairPanel({ incident, user }: { incident: Incident; user: 
   const propose = useMutation({ mutationFn: () => api<RepairCase>(`/api/v1/repair/incidents/${incident.ID}`, { method: 'POST', body: '{}' }), onSuccess: () => { setNotice('Investigation proposal created. Review the scope before approving.'); client.invalidateQueries({ queryKey: ['repair', 'incident', incident.ID] }) } })
   if (cases.isLoading) return <p className="muted">Loading code repair cases…</p>
   if (cases.isError) return <RepairError error={cases.error} retry={() => cases.refetch()} />
-  const eligible = incident.State === 'escalated' || incident.State === 'failed_remediation'
+  const eligible = incident.State === 'escalated' || incident.State === 'failed_remediation' || Boolean(binding.data?.Automation?.enabled && ['detected', 'triaging'].includes(incident.State))
   if (current) return <div className="repair-content">
     {cases.data && cases.data.items.length > 1 && <label className="repair-case-picker">Repair case
       <select value={current.ID} onChange={(event) => setSelectedCaseID(event.target.value)}>{cases.data.items.map((item) => <option key={item.ID} value={item.ID}>{item.ID.slice(0, 8)} · {label(item.State)}</option>)}</select>
@@ -39,34 +40,15 @@ export function CodeRepairPanel({ incident, user }: { incident: Incident; user: 
     <RepairCaseView caseID={current.ID} user={user} />
   </div>
   return <section className="repair-content">
-    <h2>Code repair</h2><p className="muted">Investigate a source defect only when an operational action did not resolve this incident. An operator must approve repository access and later approve the exact patch before a draft PR is created.</p>
-    {!eligible && <p className="repair-note">This incident is not escalated or marked as failed remediation. Code investigation is unavailable.</p>}
-    {binding.isError && binding.error instanceof APIError && binding.error.status === 404 && user.role === 'admin' && <BindingForm incident={incident} onCreated={() => binding.refetch()} />}
+    <h2>Code repair</h2><p className="muted">Investigate the mapped repository using incident evidence and its validation profile. Automatic investigation follows the repository grant. Draft PR publication currently requires review of the exact patch.</p>
+    {!eligible && <p className="repair-note">Enable automatic investigation in the repository configuration, or request manual investigation after escalation.</p>}
+    {binding.isError && binding.error instanceof APIError && binding.error.status === 404 && user.role === 'admin' && <RepositorySetup service={incident.ServiceName} environment={incident.Environment} onCreated={() => binding.refetch()} />}
     {binding.data && <dl className="repair-facts"><div><dt>Repository</dt><dd>{binding.data.RepositoryURL}</dd></div><div><dt>Base branch</dt><dd><code>{binding.data.BaseRef}</code></dd></div><div><dt>Allowed paths</dt><dd>{binding.data.AllowedPaths.join(', ')}</dd></div></dl>}
     {binding.isError && !(binding.error instanceof APIError && binding.error.status === 404) && <RepairError error={binding.error} retry={() => binding.refetch()} />}
     {notice && <p className="repair-note" role="status">{notice}</p>}
     {propose.isError && <RepairError error={propose.error} retry={() => propose.reset()} />}
     {eligible && binding.data && user.role !== 'viewer' && <button className="primary" disabled={propose.isPending} onClick={() => propose.mutate()}>{propose.isPending ? 'Checking evidence…' : 'Request code investigation'}</button>}
   </section>
-}
-
-function BindingForm({ incident, onCreated }: { incident: Incident; onCreated: () => void }) {
-  const create = useMutation({ mutationFn: (body: object) => api('/api/v1/repair/bindings', { method: 'POST', body: JSON.stringify(body) }), onSuccess: onCreated })
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const data = new FormData(event.currentTarget)
-    create.mutate({ service_name: incident.ServiceName, environment: incident.Environment,
-      repository_url: String(data.get('repository_url')).trim(), base_ref: String(data.get('base_ref')).trim(),
-      allowed_paths: String(data.get('allowed_paths')).split(',').map((s) => s.trim()).filter(Boolean),
-      test_recipes: ['go-test-workload'] })
-  }
-  return <form className="repair-setup" onSubmit={submit}><h3>Register repository scope</h3><p className="muted">Admin only. The agent can read and modify existing files in the allowed paths, then run the fixed workload regression test.</p>
-    <label>GitHub repository URL<input name="repository_url" placeholder="https://github.com/owner/repository" required /></label>
-    <label>Protected base branch<input name="base_ref" placeholder="main" required /></label>
-    <label>Allowed paths, comma separated<input name="allowed_paths" placeholder="internal/workload" required /></label>
-    {create.isError && <RepairError error={create.error} retry={() => create.reset()} />}
-    <button className="primary" disabled={create.isPending}>Register repository</button>
-  </form>
 }
 
 function RepairCaseView({ caseID, user }: { caseID: string; user: User }) {

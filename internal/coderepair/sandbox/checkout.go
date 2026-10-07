@@ -24,6 +24,10 @@ func ResolveBaseRevision(ctx context.Context, binding coderepair.RepositoryBindi
 	if _, bounded := ctx.Deadline(); !bounded {
 		return "", errors.New("base revision lookup requires a deadline")
 	}
+	ctx, err := gitCredentialContext(ctx, binding)
+	if err != nil {
+		return "", err
+	}
 	return resolveGitBaseRevision(ctx, binding.RepositoryURL, binding.BaseRef)
 }
 
@@ -48,6 +52,10 @@ func Checkout(ctx context.Context, parent string, binding coderepair.RepositoryB
 	}
 	if _, bounded := ctx.Deadline(); !bounded {
 		return "", errors.New("checkout requires a deadline")
+	}
+	ctx, err := gitCredentialContext(ctx, binding)
+	if err != nil {
+		return "", err
 	}
 	return checkoutGitRepository(ctx, parent, binding.RepositoryURL, binding.BaseRef, baseSHA)
 }
@@ -133,17 +141,18 @@ func gitInputBounded(ctx context.Context, input []byte, limit int, args ...strin
 	}
 	command.Env = append(command.Env,
 		"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+	command.Env = append(command.Env, gitCredentialEnvironment(ctx)...)
 	output := &boundedOutput{limit: limit}
 	command.Stdout = output
 	command.Stderr = output
 	if err := command.Run(); err != nil {
-		message := security.Redact(output.String())
+		message := security.Redact(redactGitCredential(ctx, output.String()))
 		return "", fmt.Errorf("git operation failed: %w: %s", err, message)
 	}
 	if output.truncated {
 		return "", errors.New("git output exceeded limit")
 	}
-	return output.String(), nil
+	return redactGitCredential(ctx, output.String()), nil
 }
 
 type boundedOutput struct {

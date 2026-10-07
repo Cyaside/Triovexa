@@ -119,6 +119,10 @@ time { color: var(--muted); font-size: 12px; white-space: nowrap; }.muted { colo
 .repair-setup label { display: grid; gap: 6px; font-size: 12px; }
 .repair-setup input { width: 100%; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--raised); padding: 9px 10px; }
 .repair-setup button { justify-self: start; }
+.repair-setup fieldset { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 6px; }
+.repair-setup legend { padding: 0 6px; font-size: 13px; }
+.repair-setup textarea { width: 100%; resize: vertical; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--raised); color: var(--text); padding: 9px 10px; font-family: monospace; font-size: 12px; }
+.repair-setup input[type=checkbox] { width: auto; justify-self: start; }
 .repair-activity { list-style: none; padding: 0; }
 .repair-activity li { border-bottom: 1px solid var(--border); padding: 10px 0; font-size: 12px; }
 .repair-activity details { width: 100%; min-width: 0; }
