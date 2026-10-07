@@ -75,21 +75,25 @@ func fixtureGit(t *testing.T, root string, args ...string) string {
 func nativeFixture(t *testing.T) (*sandbox.Workspace, coderepair.RepositoryBinding, coderepair.EvidenceSnapshot, string, string) {
 	t.Helper()
 	root := t.TempDir()
+	// Docker's non-root user reads this mount; the private parent stays 0700.
+	if err := os.Chmod(root, 0755); err != nil {
+		t.Fatal(err)
+	}
 	fixtureGit(t, root, "init", "-b", "main")
 	fixtureGit(t, root, "config", "core.autocrlf", "false")
 	path := filepath.Join(root, "internal", "workload", "worker.go")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
 	original := "package workload\n\nfunc rejects(version int) bool { return version != 1 }\n"
-	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module fixture\n\ngo 1.24.0\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module fixture\n\ngo 1.24.0\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	regression := "//go:build repair_regression\n\npackage workload\n\nimport \"testing\"\n\nfunc TestRepairFixtureAcceptsSchemaTwo(t *testing.T) {\n\tif rejects(2) { t.Fatal(\"repair fixture: unsupported job schema version 2\") }\n}\n"
-	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "worker_regression_test.go"), []byte(regression), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "worker_regression_test.go"), []byte(regression), 0644); err != nil {
 		t.Fatal(err)
 	}
 	fixtureGit(t, root, "add", "go.mod", "internal/workload")

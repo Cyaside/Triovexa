@@ -40,10 +40,14 @@ func compatibilityFixture(t *testing.T) (*sandbox.Workspace, coderepair.Reposito
 
 func compatibilityFixtureAt(t *testing.T, root string) (*sandbox.Workspace, coderepair.RepositoryBinding, string) {
 	t.Helper()
+	// Only synthetic source is readable by the sandbox; no credentials live here.
+	if err := os.Chmod(root, 0755); err != nil {
+		t.Fatal(err)
+	}
 	fixtureGit(t, root, "init", "-b", "main")
 	fixtureGit(t, root, "config", "core.autocrlf", "false")
 	path := filepath.Join(root, "internal", "workload", "worker.go")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
 	for name, body := range map[string]string{
@@ -51,7 +55,7 @@ func compatibilityFixtureAt(t *testing.T, root string) (*sandbox.Workspace, code
 		"internal/workload/worker.go": "package workload\n\n// Schemas 1 and 2 are supported; other versions must be rejected.\nfunc rejects(version int) bool { return version != 1 }\n",
 		"internal/workload/worker_regression_test.go": compatibilityRegression,
 	} {
-		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(body), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(body), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}

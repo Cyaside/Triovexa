@@ -94,9 +94,13 @@ func TestRegisteredPositiveIntegerRecipeRedGreenIntegration(t *testing.T) {
 		t.Skip("Git executable is unavailable")
 	}
 	root := t.TempDir()
+	// The read-only fixture mount must be readable by Docker's non-root user.
+	if err := os.Chmod(root, 0755); err != nil {
+		t.Fatal(err)
+	}
 	fixturePath := "testdata/code-repair/positive-int"
 	directory := filepath.Join(root, filepath.FromSlash(fixturePath))
-	if err := os.MkdirAll(directory, 0700); err != nil {
+	if err := os.MkdirAll(directory, 0755); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"parser.go", "parser_test.go"} {
@@ -104,11 +108,11 @@ func TestRegisteredPositiveIntegerRecipeRedGreenIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err = os.WriteFile(filepath.Join(directory, name), content, 0600); err != nil {
+		if err = os.WriteFile(filepath.Join(directory, name), content, 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.invalid/positive-int-fixture\n\ngo 1.24.0\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.invalid/positive-int-fixture\n\ngo 1.24.0\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	runTestGit(t, root, "init", "-b", "main")
