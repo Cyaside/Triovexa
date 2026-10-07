@@ -80,6 +80,27 @@ func (s *InvestigationAuthorizationService) Authorize(ctx context.Context, caseI
 	if !snapshot.VerifyDigest() || snapshot.IncidentID != c.IncidentID || snapshot.DeployedRevision != c.DeployedSHA {
 		return Approval{}, Attempt{}, Job{}, errors.New("repair evidence no longer matches the proposed case")
 	}
+	approval, attempt, job, event, err := BuildInvestigationAuthorization(c, snapshot, actorID, selection, now)
+	if err != nil {
+		return Approval{}, Attempt{}, Job{}, err
+	}
+	approved, err := s.repository.ApproveRepairInvestigation(ctx, approval, attempt, job, event)
+	if err != nil {
+		return Approval{}, Attempt{}, Job{}, err
+	}
+	if !approved {
+		return Approval{}, Attempt{}, Job{}, errors.New("repair case changed before investigation approval")
+	}
+	return approval, attempt, job, nil
+}
+
+// BuildInvestigationAuthorization is shared by manual and transactional automatic dispatch.
+func BuildInvestigationAuthorization(c Case, snapshot EvidenceSnapshot, actorID string, selection AgentSelection, now time.Time) (Approval, Attempt, Job, Event, error) {
+	if !safeEvidenceIdentifier(c.ID) || !safeEvidenceIdentifier(actorID) || now.IsZero() || selection.validate() != nil ||
+		c.State != StateAwaitingInvestigationApproval || c.Version < 1 || !validDigest(c.ScopeDigest) || !snapshot.VerifyDigest() ||
+		snapshot.IncidentID != c.IncidentID || snapshot.DeployedRevision != c.DeployedSHA {
+		return Approval{}, Attempt{}, Job{}, Event{}, errors.New("invalid investigation authorization")
+	}
 	now = now.UTC()
 	attempt := Attempt{ID: uuid.NewString(), CaseID: c.ID, Number: 1, Status: JobQueued,
 		Provider: selection.Provider, Model: selection.Model, PromptVersion: selection.PromptVersion, CreatedAt: now}
@@ -94,7 +115,7 @@ func (s *InvestigationAuthorizationService) Authorize(ctx context.Context, caseI
 		ExpectedVersion int64  `json:"expected_version"`
 	}{c.ID, attempt.ID, c.Version + 1})
 	if err != nil {
-		return Approval{}, Attempt{}, Job{}, err
+		return Approval{}, Attempt{}, Job{}, Event{}, err
 	}
 	job := Job{ID: uuid.NewString(), CaseID: c.ID, AttemptID: attempt.ID,
 		Type: JobTypeInvestigation, DedupKey: InvestigationDedupKey(c.ID, attempt.Number),
@@ -109,16 +130,10 @@ func (s *InvestigationAuthorizationService) Authorize(ctx context.Context, caseI
 		"provider": selection.Provider, "model": selection.Model,
 	})
 	if err != nil {
-		return Approval{}, Attempt{}, Job{}, err
+		return Approval{}, Attempt{}, Job{}, Event{}, err
 	}
 	event := Event{ID: uuid.NewString(), CaseID: c.ID, ActorID: actorID,
 		Type: "investigation_approved", DetailsJSON: string(eventDetails), CreatedAt: now}
-	approved, err := s.repository.ApproveRepairInvestigation(ctx, approval, attempt, job, event)
-	if err != nil {
-		return Approval{}, Attempt{}, Job{}, err
-	}
-	if !approved {
-		return Approval{}, Attempt{}, Job{}, errors.New("repair case changed before investigation approval")
-	}
-	return approval, attempt, job, nil
+
+	return approval, attempt, job, event, nil
 }

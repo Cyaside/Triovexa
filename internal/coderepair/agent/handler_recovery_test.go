@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,11 @@ type handlerRecoveryStore struct {
 	snapshot   coderepair.EvidenceSnapshot
 	outcome    coderepair.InvestigationOutcome
 	records    int
+	safetyErr  error
+}
+
+func (s *handlerRecoveryStore) CheckRepairInvestigationSafety(context.Context, string, time.Time) error {
+	return s.safetyErr
 }
 
 func (s *handlerRecoveryStore) GetRepairCase(context.Context, string) (coderepair.Case, error) {
@@ -65,6 +71,7 @@ func TestHandlerKeepsExpiredEvidenceRecoveryWithinUnchangedScope(t *testing.T) {
 		{"invalid snapshot digest", func(store *handlerRecoveryStore) { store.snapshot.SHA256 = strings.Repeat("0", 64) }, false, "EVIDENCE_STALE"},
 		{"changed approval scope", func(store *handlerRecoveryStore) { store.repairCase.ScopeDigest = strings.Repeat("0", 64) }, false, "SCOPE_CHANGED"},
 		{"disabled repository binding", func(store *handlerRecoveryStore) { store.binding.Enabled = false }, false, "EVIDENCE_STALE"},
+		{"revoked investigation grant", func(store *handlerRecoveryStore) { store.safetyErr = errors.New("grant revoked") }, false, "SCOPE_REVOKED"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			_, binding, initial, root := loopFixture(t)

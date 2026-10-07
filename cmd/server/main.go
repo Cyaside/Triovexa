@@ -14,6 +14,8 @@ import (
 	"github.com/Cyaside/Triovexa/internal/ai"
 	"github.com/Cyaside/Triovexa/internal/approval"
 	"github.com/Cyaside/Triovexa/internal/auth"
+	"github.com/Cyaside/Triovexa/internal/coderepair"
+	"github.com/Cyaside/Triovexa/internal/coderepair/sandbox"
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/connections"
 	"github.com/Cyaside/Triovexa/internal/domain"
@@ -172,6 +174,16 @@ func main() {
 		logger.Info("reconciled started executions", slog.Int("count", recovered))
 	}
 	incidentService := incident.NewService(repository, collector, retriever, generator, actionGenerator, policyService).WithTelemetry(recorder)
+	if repairStore, ok := repository.(coderepair.AutomaticDispatchRepository); ok {
+		dispatcher := &coderepair.AutomaticDispatcher{Store: repairStore, ResolveBase: sandbox.ResolveBaseRevision,
+			Selection: repairSelection(llmClient, credentialCipher), Allowed: func(context.Context) error {
+				if killSwitch.Enabled() {
+					return errors.New("new repair work is disabled by the kill switch")
+				}
+				return nil
+			}}
+		incidentService.WithAutomaticInvestigation(dispatcher.Try)
+	}
 	authService := auth.NewService(repository, cfg.SessionTTL)
 	readinessChecker := readiness.NewChecker(repository, cfg.RedisAddress, cfg.WorkloadControlBaseURL)
 	defer readinessChecker.Close()

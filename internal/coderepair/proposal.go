@@ -52,19 +52,30 @@ func (s *ProposalService) Propose(ctx context.Context, incidentID, actorID strin
 	if err != nil {
 		return Case{}, EvidenceSnapshot{}, fmt.Errorf("load repository binding: %w", err)
 	}
+	repairCase, event, snapshot, err := s.prepare(ctx, incident, binding, actorID, now)
+	if err != nil {
+		return Case{}, snapshot, err
+	}
+	if err := s.repository.CreateRepairProposal(ctx, repairCase, event, snapshot); err != nil {
+		return Case{}, snapshot, err
+	}
+	return repairCase, snapshot, nil
+}
+
+func (s *ProposalService) prepare(ctx context.Context, incident domain.Incident, binding RepositoryBinding, actorID string, now time.Time) (Case, Event, EvidenceSnapshot, error) {
 	snapshot, err := CaptureEvidence(ctx, s.repository, incident, now, s.limits)
 	if err != nil {
-		return Case{}, EvidenceSnapshot{}, err
+		return Case{}, Event{}, EvidenceSnapshot{}, err
 	}
 	if err := CheckInvestigationEvidence(incident, binding, snapshot, now); err != nil {
-		return Case{}, snapshot, err
+		return Case{}, Event{}, snapshot, err
 	}
 	baseSHA, err := s.resolveBase(ctx, binding)
 	if err != nil {
-		return Case{}, snapshot, fmt.Errorf("resolve registered base revision: %s", security.Redact(err.Error()))
+		return Case{}, Event{}, snapshot, fmt.Errorf("resolve registered base revision: %s", security.Redact(err.Error()))
 	}
 	if !ValidGitRevision(baseSHA) {
-		return Case{}, snapshot, errors.New("registered base branch returned an invalid revision")
+		return Case{}, Event{}, snapshot, errors.New("registered base branch returned an invalid revision")
 	}
 	repairCase := Case{
 		ID: uuid.NewString(), IncidentID: incident.ID, BindingID: binding.ID,
@@ -74,7 +85,7 @@ func (s *ProposalService) Propose(ctx context.Context, incidentID, actorID strin
 	}
 	repairCase.ScopeDigest, err = ScopeDigest(repairCase, binding)
 	if err != nil {
-		return Case{}, snapshot, err
+		return Case{}, Event{}, snapshot, err
 	}
 	details, err := json.Marshal(map[string]string{
 		"evidence_sha256": snapshot.SHA256,
@@ -82,12 +93,10 @@ func (s *ProposalService) Propose(ctx context.Context, incidentID, actorID strin
 		"deployed_sha":    snapshot.DeployedRevision,
 	})
 	if err != nil {
-		return Case{}, snapshot, err
+		return Case{}, Event{}, snapshot, err
 	}
 	event := Event{ID: uuid.NewString(), CaseID: repairCase.ID, ActorID: actorID,
 		Type: "investigation_requested", DetailsJSON: string(details), CreatedAt: now.UTC()}
-	if err := s.repository.CreateRepairProposal(ctx, repairCase, event, snapshot); err != nil {
-		return Case{}, snapshot, err
-	}
-	return repairCase, snapshot, nil
+
+	return repairCase, event, snapshot, nil
 }

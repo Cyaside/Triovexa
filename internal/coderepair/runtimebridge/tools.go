@@ -317,6 +317,13 @@ func LeaseFence(store interface {
 		if err != nil || caseRecord.State != coderepair.StateInvestigating || caseRecord.Version != claim.ExpectedVersion {
 			return errors.New("repair case no longer matches the invocation")
 		}
+		if safety, ok := store.(interface {
+			CheckRepairInvestigationSafety(context.Context, string, time.Time) error
+		}); ok {
+			if err := safety.CheckRepairInvestigationSafety(ctx, caseRecord.ID, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		return ctx.Err()
 	}
 }

@@ -1,8 +1,52 @@
 # Code repair (staging)
 
-Triovexa can prepare a bounded source patch for an escalated Redis worker incident. The operator authorizes repository investigation, reviews the resulting diff and red-to-green regression test, then separately authorizes publication of a **draft** GitHub pull request. GitHub CI and human review still control merge. The deployment pipeline remains responsible for rollout; Triovexa only marks the repair recovered after the deployed merge revision and three workload observations agree.
+Triovexa can investigate an incident against its registered GitHub repository and prepare a bounded source patch. Investigation starts with operator approval or an administrator's expiring automatic-investigation grant. The operator reviews the resulting diff and red-to-green regression test, then separately authorizes publication of a **draft** GitHub pull request. GitHub CI and human review still control merge. The deployment pipeline remains responsible for rollout; Triovexa only marks the repair recovered after the deployed merge revision and three workload observations agree.
 
-This integration currently targets one registered GitHub repository, a Go worker, and the `queue-worker` staging workload. Tests use administrator-registered recipes with fixed commands; the workload uses `go-test-workload`, and an independent parser fixture verifies the `go-test-positive-int` recipe. It does not run arbitrary tests, change CI files, auto-merge, or deploy code.
+Source validation is language-neutral. Each service/environment binding pins its repository, allowed paths, sandbox image, formatter/linter checks, and regression command. An offline Python fixture verifies this boundary with real Docker tests; the deployed recovery integration still targets the bounded `queue-worker` staging workload. Each additional workload needs a trusted deployed-revision signal and verified recovery adapter. The agent cannot choose a repository, command, image, or credential, change protected tests or CI files, auto-merge, or deploy code.
+
+## Register a repository
+
+An administrator opens **Settings → Source repositories** and registers the service and environment used by incoming alerts, the canonical GitHub HTTPS URL, base branch, and allowed repository paths. Include any configuration or test files the agent needs to read in those paths; the validation profile's root files and protected test paths remain immutable. Configure a prebuilt image containing `triovexa-repair-sandbox` and the repository's language tools and dependencies. Prefer an image digest when deploying. Tests run as UID/GID 10001 in a container with no network, a read-only checkout, and bounded resources. Dependency installation belongs in image preparation, before investigation.
+
+For example, build a Python runtime:
+
+```sh
+docker build -f Dockerfile.repair-sandbox \
+  --build-arg RUNTIME_IMAGE=python:3.12-alpine \
+  -t triovexa-repair-sandbox:python .
+```
+
+This image can run standard-library tests. Projects that require packages need their own prepared base image. A validation profile for a protected `tests/` suite might use:
+
+```json
+{
+  "id": "repository-tests",
+  "version": "validation-v1",
+  "image": "triovexa-repair-sandbox:python",
+  "root_files": ["pyproject.toml"],
+  "protected_paths": ["tests"],
+  "checks": [],
+  "test": {
+    "executable": "/usr/local/bin/python",
+    "arguments": ["-m", "unittest", "discover", "-s", "tests", "-v"],
+    "timeout_seconds": 120
+  },
+  "expected_test_name": "test_accepts_one",
+  "expected_failure": "one rejected"
+}
+```
+
+The failing baseline must contain both configured regression markers. A successful patch must pass all configured checks and tests without timeouts or truncated output. Formatter commands must check formatting without writing to the checkout; use `require_empty_output: true` for tools such as `gofmt -l`. Shell commands and inline programs are rejected. Existing Go fixture bindings retain their explicitly registered recipes; a new binding requires a validation profile. Changing configuration requires disabling the old binding and registering a replacement, which invalidates the old scope.
+
+Public repositories need no checkout credential. Private repositories use a server-side read credential reference, such as `env:REPAIR_GITHUB_READ_TOKEN` or `file:<absolute-secret-file>`. Provision it on both the API server and the host investigation worker, then use **Check repository access** to verify the configured branch. The token is passed to Git through ephemeral environment configuration, never stored in a repository URL, Git config, model context, or test container. The separate publisher credential below remains responsible for writes and pull requests.
+
+## Investigate incoming alerts automatically
+
+The binding's **Automatically investigate incoming alerts** setting authorizes investigation only. An administrator specifies an existing model campaign ID, grant expiry, maximum investigations, and maximum model requests per investigation. The campaign must match the server's sealed reasoning/budget configuration; its global spend and request limits still apply. The `final-smoke` validation campaign cannot be used for automatic alerts.
+
+After alert intake and fresh evidence collection, a matching enabled grant dispatches investigation directly. Restart or failed remediation is not a prerequisite. Case, evidence, authorization, attempt, durable job, and alert deduplication commit in one PostgreSQL transaction. Duplicate deliveries and runner restarts cannot allocate a second investigation for that incident/binding. A new incident episode consumes another slot from the same grant. Missing evidence, exhausted budget, or invalid authorization stops this route explicitly, without falling back to a restart or another model.
+
+Disabling the binding, expiry, removal of its administrator role, or the kill switch blocks further work. The worker rechecks authorization before checkout and at model/tool boundaries. Automatic publication is not enabled by this grant: a verified patch still requires the separate review and publication flow.
 
 ## Prepare the investigation runtime
 
@@ -65,7 +109,7 @@ There is currently no automatic checkpoint-retention or purge job. Define a rete
 
 ## Run the components
 
-The normal Compose stack supplies PostgreSQL, the workload supervisor, and the UI. Configure an OpenAI-compatible reasoning connection in **Connections**. An administrator then opens an escalated incident's **Code repair** tab and registers the repository URL, protected base branch, and allowed paths. A proposal requires fresh incident evidence, including a trusted deployed revision and log signal.
+The normal Compose stack supplies PostgreSQL, the workload supervisor, and the UI. Configure an OpenAI-compatible reasoning connection in **Connections**, then register the repository in **Settings** or the incident's **Code repair** tab. Manual investigation remains available for escalated or failed-remediation incidents; a matching automatic grant can start directly from an alert. A proposal requires fresh incident evidence, including a trusted deployed revision and log signal.
 
 The investigation worker uses Docker Desktop from the host so the sandbox receives a private checkout without exposing the Docker socket to the Triovexa server. After preparing the runtime and its environment above, run this in a dedicated terminal on Windows while the Compose stack is up:
 
@@ -89,7 +133,7 @@ For draft PR publication and deployment verification, set the following server-s
 docker compose --profile code-repair up -d repair-publisher repair-verifier
 ```
 
-Configure a GitHub `pull_request` webhook to `POST /webhooks/github/repair` with the same secret. Keep the publisher token out of the investigation worker and browser. The registered repository must currently be cloneable without a Git credential; private repository checkout is not yet supported.
+Configure a GitHub `pull_request` webhook to `POST /webhooks/github/repair` with the same secret. Keep the publisher token out of the investigation worker and browser. Private checkout uses the separate read credential reference configured on the binding.
 
 The deployment pipeline sends two authenticated JSON requests to `POST /webhooks/deployment/repair` for the **merge commit SHA**, same case and deployment ID. Both the workload supervisor and Prometheus alert API must be reachable:
 

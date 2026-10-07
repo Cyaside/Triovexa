@@ -195,12 +195,12 @@ Triovexa currently supports a single-tenant deployment and one bounded Redis wor
 
 ## Code repair (staging)
 
-A staging workflow now links an unresolved incident to bounded repository investigation, a reviewed patch, and a draft pull request. Its deployment correlation and telemetry verification are separate from PR creation. See [Code repair (staging)](docs/operations/code-repair.md) for its controls, setup, and current limitations.
+A staging workflow links an incident to its registered GitHub repository, bounded source investigation, a reviewed patch, and a draft pull request. Repository profiles select language tools and tests; private checkout uses server-side credential references. An administrator can authorize direct alert investigation with an expiring, budgeted grant. Publication, deployment correlation, and telemetry verification remain separate. See [Code repair (staging)](docs/operations/code-repair.md) for setup and current limitations.
 
 ```text
-Unresolved incident
+Incident alert
 → collect logs, traces, deployed commit, and evidence
-→ operator authorizes code investigation
+→ operator approval or bounded admin grant authorizes investigation
 → coding agent investigates an isolated checkout
 → agent proposes a patch and runs the relevant tests
 → operator approves the exact patch; publisher opens a draft pull request

@@ -90,7 +90,15 @@ func (h *Handler) Handle(ctx context.Context, job coderepair.Job) error {
 	result := InvestigationResult{Status: coderepair.StateBlocked, Provider: selection.Provider, Model: selection.Model,
 		Prompt: selection.PromptVersion}
 	now := time.Now().UTC()
-	if !binding.Enabled || binding.ID != caseRecord.BindingID || binding.ServiceName != snapshot.ServiceName ||
+	var safetyErr error
+	if safety, ok := h.store.(interface {
+		CheckRepairInvestigationSafety(context.Context, string, time.Time) error
+	}); ok {
+		safetyErr = safety.CheckRepairInvestigationSafety(ctx, caseRecord.ID, now)
+	}
+	if safetyErr != nil {
+		result.Code, result.Reason = "SCOPE_REVOKED", "investigation authorization was revoked or expired before checkout"
+	} else if !binding.Enabled || binding.ID != caseRecord.BindingID || binding.ServiceName != snapshot.ServiceName ||
 		binding.Environment != snapshot.Environment || binding.PolicyVersion != caseRecord.PolicyVersion ||
 		snapshot.IncidentID != caseRecord.IncidentID || snapshot.DeployedRevision != caseRecord.DeployedSHA ||
 		!snapshot.VerifyDigest() || snapshot.CapturedAt.After(now.Add(5*time.Second)) {

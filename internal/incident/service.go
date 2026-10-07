@@ -20,18 +20,24 @@ import (
 var ErrResolvedAlertIgnored = errors.New("resolved alert ignored because there is no active incident")
 
 type Service struct {
-	repository storage.Repository
-	collector  ContextCollector
-	retriever  KnowledgeRetriever
-	generator  TriageGenerator
-	actions    ActionGenerator
-	workflow   PolicyWorkflow
-	metrics    *telemetry.Recorder
-	now        func() time.Time
+	repository             storage.Repository
+	collector              ContextCollector
+	retriever              KnowledgeRetriever
+	generator              TriageGenerator
+	actions                ActionGenerator
+	workflow               PolicyWorkflow
+	metrics                *telemetry.Recorder
+	now                    func() time.Time
+	automaticInvestigation func(context.Context, domain.Incident) (bool, error)
 }
 
 type ContextCollector interface {
 	Collect(context.Context, domain.Incident) ([]domain.EvidenceItem, error)
+}
+
+func (s *Service) WithAutomaticInvestigation(dispatch func(context.Context, domain.Incident) (bool, error)) *Service {
+	s.automaticInvestigation = dispatch
+	return s
 }
 
 func (s *Service) WithTelemetry(recorder *telemetry.Recorder) *Service {
@@ -315,6 +321,21 @@ func (s *Service) runReadOnlyTriage(ctx context.Context, incident domain.Inciden
 		}
 	}
 
+	if s.automaticInvestigation != nil {
+		handled, err := s.automaticInvestigation(ctx, incident)
+		if handled || err != nil {
+			status := "queued"
+			details := map[string]any{"automatic": true}
+			if err != nil {
+				status = "blocked"
+				details["error"] = err.Error()
+			}
+			if auditErr := s.audit(ctx, incident.ID, "code_investigation_dispatch", status, details, s.now(), s.now()); auditErr != nil {
+				return domain.Incident{}, auditErr
+			}
+			return incident, err
+		}
+	}
 	retrievedAt := s.now()
 	documents, retrievalErr := s.retriever.Retrieve(ctx, incident, evidence)
 	if retrievalErr != nil {
