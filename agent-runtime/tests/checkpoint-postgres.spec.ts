@@ -237,13 +237,9 @@ suite("Postgres checkpoint isolation and recovery", () => {
       }
       wires.push(body);
       const index = wires.length;
-      if (index === 2) {
-        const output = JSON.stringify(body.messages);
-        expect(output).toContain("/skills/go-investigation/SKILL.md#L8");
-      }
       return new Response(JSON.stringify(completion(start.transport.model, index === 1
         ? books.map((name, bookIndex) => ({ id: `book-${bookIndex}`, name: "read_file", args: { file_path: `/skills/${name}/SKILL.md`, offset: 0, limit: 200 } }))
-        : index === 2 ? [{ id: "targeted-instructions", name: "read_file", args: { file_path: "/skills/go-investigation/SKILL.md", offset: 7, limit: 1 } }]
+        : index === 2 ? [{ id: "targeted-instructions", name: "read_file", args: { file_path: "/skills/regression-patch/SKILL.md", offset: 7, limit: 1 } }]
           : index === 3 ? [{ id: "bounded-source", name: "repo_read", args: { path: "internal/worker/job.go", start_line: 1, end_line: 2 } }]
             : [{ id: "bounded-patch", name: "propose_patch", args: patchArgs }], index === 1 ? "Load relevant pinned playbooks" : "Keep the latest native thought")), { status: 200 });
     };
@@ -254,10 +250,14 @@ suite("Postgres checkpoint isolation and recovery", () => {
     };
     expect(await investigate(start, caller, new AbortController().signal, fetcher)).toMatchObject({ status: "completed", code: "PATCH_READY", model_requests: 4, tool_steps: 6 });
     expect(wires).toHaveLength(4); expect(effects).toBe(2);
+    // The largest completed result is offloaded first; smaller instructions
+    // remain inline when the gateway's measured cap already fits. Check the
+    // wire outside fetch so an assertion is not reported as provider failure.
+    expect(JSON.stringify(wires[1]!.messages)).toContain("/skills/regression-patch/SKILL.md#L8");
     expect(previews).toBeGreaterThanOrEqual(4); expect(previews).toBeLessThanOrEqual(8);
     for (const wire of wires) expect(Buffer.byteLength(JSON.stringify(wire)) + 1400).toBeLessThanOrEqual(6000);
     const instruction = (wires[2]!.messages as Array<{ tool_call_id?: string; content: unknown }>).find((message) => message.tool_call_id === "targeted-instructions")!;
-    expect(JSON.stringify(instruction.content)).toContain("Trace the observed failure to a specific path");
+    expect(JSON.stringify(instruction.content)).toContain("Use the baseline failure as a regression requirement");
     const saver = checkpointSaver(start);
     try {
       const stored = (await saver.getTuple(config(start)))!;
