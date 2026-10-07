@@ -8,9 +8,41 @@ import (
 	"github.com/Cyaside/Triovexa/internal/ai/modelgateway"
 )
 
+// A zero-value test result means no test ran, not a successful candidate.
+func recordedTestExit(recipe string, exit int) *int {
+	if recipe == "" {
+		return nil
+	}
+	return &exit
+}
+
+func TestProviderSmokeTestEvidenceDoesNotInventGreenResult(t *testing.T) {
+	if recordedTestExit("", 0) != nil {
+		t.Fatal("an absent candidate test was reported as passing")
+	}
+	for _, exit := range []int{0, 1, 137} {
+		got := recordedTestExit("go-test-workload", exit)
+		if got == nil || *got != exit {
+			t.Fatal("recorded test exit was changed")
+		}
+	}
+}
+
 // Run this before reading a saved credential. The campaign must already exist
 // in the shared ledger; the smoke harness cannot create a replacement budget.
 func validateProviderSmokeBudget(config modelgateway.BudgetConfig, stored admission.Campaign, priorRepairRequests int64) error {
+	if err := validateProviderSmokeLimits(config, stored); err != nil {
+		return err
+	}
+	if priorRepairRequests != 0 {
+		return admission.ErrUncertain
+	}
+	return nil
+}
+
+// Shared limits do not authorize a retry. The ordinary smoke rejects all prior
+// repair requests; the separate reviewed-attempt guard verifies retained proof.
+func validateProviderSmokeLimits(config modelgateway.BudgetConfig, stored admission.Campaign) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
@@ -26,7 +58,7 @@ func validateProviderSmokeBudget(config modelgateway.BudgetConfig, stored admiss
 	if !config.Pricing.InputBoundVerified || !config.Pricing.BillableOutputBound {
 		return admission.ErrBillingUnbounded
 	}
-	if stored.Blocked || stored.ReservedMicroUSD != 0 || priorRepairRequests != 0 {
+	if stored.Blocked || stored.ReservedMicroUSD != 0 {
 		return admission.ErrUncertain
 	}
 	if stored.Requests < 0 || stored.Requests >= stored.MaxRequests || stored.AdmittedInputTokens < 0 ||

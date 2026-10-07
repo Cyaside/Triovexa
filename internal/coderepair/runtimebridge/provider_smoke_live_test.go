@@ -26,8 +26,13 @@ import (
 // live-model repair on an isolated local repository, with synthetic approval.
 // It never publishes a PR, injects a fault into a running service, or deploys.
 func TestNativeProviderSmoke(t *testing.T) {
-	if _, ci := os.LookupEnv("CI"); ci || os.Getenv("RUN_NATIVE_PROVIDER_SMOKE") != "one-approved-case" {
+	mode := os.Getenv("RUN_NATIVE_PROVIDER_SMOKE")
+	reviewed := mode == "one-approved-case-after-reviewed-context-fix"
+	if _, ci := os.LookupEnv("CI"); ci || (mode != "one-approved-case" && !reviewed) {
 		t.Fatal("live provider validation requires explicit local opt-in and is forbidden in CI")
+	}
+	if !reviewed && (os.Getenv("LIVE_ACKNOWLEDGED_FAILURE_PATH") != "" || os.Getenv("LIVE_ACKNOWLEDGED_ATTEMPT_ID") != "") {
+		t.Fatal("reviewed attempt acknowledgment requires its explicit operator opt-in")
 	}
 	budgetPath, output := os.Getenv("AI_BUDGET_CONFIG_PATH"), os.Getenv("LIVE_PROVIDER_EVIDENCE_PATH")
 	if !filepath.IsAbs(budgetPath) || !filepath.IsAbs(output) || !strings.HasSuffix(output, ".json") {
@@ -128,7 +133,37 @@ func TestNativeProviderSmoke(t *testing.T) {
 	if shared.QueryRowContext(ctx, `SELECT count(*) FROM ai_model_requests WHERE campaign_id=$1 AND identity_json->>'phase'='repair'`, before.ID).Scan(&prior) != nil {
 		t.Fatal("previous repair dispatches could not be audited")
 	}
-	if err := validateProviderSmokeBudget(budget, before, prior); err != nil {
+	if reviewed {
+		previousPath := os.Getenv("LIVE_ACKNOWLEDGED_FAILURE_PATH")
+		acknowledgedAttempt := os.Getenv("LIVE_ACKNOWLEDGED_ATTEMPT_ID")
+		if previousPath == output || !filepath.IsAbs(previousPath) || !strings.HasSuffix(previousPath, ".json") {
+			t.Fatal("a retained private failure report and distinct new output are required")
+		}
+		resolved, err := filepath.EvalSymlinks(previousPath)
+		if err != nil {
+			t.Fatal("acknowledged failure report is unavailable")
+		}
+		relative, err := filepath.Rel(filepath.Join(repo, "artifacts"), resolved)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+			t.Fatal("acknowledged failure must remain in private artifacts")
+		}
+		previous, err := os.Open(resolved)
+		if err != nil {
+			t.Fatal("acknowledged failure report is unavailable")
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(previous, 65537))
+		_ = previous.Close()
+		var report reviewedProviderSmokeAttempt
+		if readErr != nil || len(raw) > 65536 || json.Unmarshal(raw, &report) != nil {
+			t.Fatal("acknowledged failure report is invalid")
+		}
+		retained, err := modelgateway.ReadSummary(ctx, ledger, budget.Campaign.ID, acknowledgedAttempt, "repair", 4)
+		if err != nil || validateReviewedProviderSmokeAttempt(budget, before, prior, acknowledgedAttempt, report, retained) != nil {
+			t.Fatal("reviewed attempt did not match the retained failure and original campaign")
+		}
+		proof["acknowledged_attempt_id"] = acknowledgedAttempt
+		proof["authorization_mode"] = mode
+	} else if err := validateProviderSmokeBudget(budget, before, prior); err != nil {
 		t.Fatal(err)
 	}
 	proof["campaign_before"] = before
@@ -184,7 +219,10 @@ func TestNativeProviderSmoke(t *testing.T) {
 	proof["status"] = "failed"
 	proof["wall_time_ms"], proof["investigation_status"], proof["code"], proof["runtime"] = time.Since(started).Milliseconds(), result.Status, result.Code, result.Runtime
 	proof["hypothesis"], proof["evidence_ids"], proof["patch_sha256"], proof["docker_tests"] = security.Redact(result.Hypothesis), result.EvidenceIDs, result.PatchReport.SHA256, tests.calls
-	proof["baseline_exit_code"], proof["candidate_exit_code"] = result.Before.ExitCode, result.After.ExitCode
+	proof["baseline_test_run"] = result.Before.RecipeID != ""
+	proof["candidate_test_run"] = result.After.RecipeID != ""
+	proof["baseline_exit_code"] = recordedTestExit(result.Before.RecipeID, result.Before.ExitCode)
+	proof["candidate_exit_code"] = recordedTestExit(result.After.RecipeID, result.After.ExitCode)
 	auditCtx, auditCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer auditCancel()
 	outcome, err := result.Outcome(job, repairCase.Version, "go-test-workload", time.Now().UTC())
@@ -199,7 +237,9 @@ func TestNativeProviderSmoke(t *testing.T) {
 		t.Fatal("live campaign accounting is unavailable")
 	}
 	proof["campaign_after"] = after
+	manifest("outcome-recorded")
 	if result.Status != coderepair.StatePatchReady || result.Before.ExitCode == 0 || result.After.ExitCode != 0 || result.Runtime == nil ||
+		result.Before.RecipeID == "" || result.After.RecipeID == "" ||
 		result.Runtime.Accounting.UsageStatus != "known" || result.Runtime.Accounting.ModelRequests < 1 || tests.calls < 2 || tests.calls > 8 ||
 		after.Blocked || after.ReservedMicroUSD != 0 || after.SpentMicroUSD > 100000 {
 		t.Fatal("live validation did not produce a compatible, accounted red-to-green patch inside the target budget; no retry")
