@@ -25,6 +25,27 @@ type NativeRunner struct {
 	Cipher           *secretstore.Cipher
 	CheckpointDSN    string
 	CheckpointSchema string
+	// MaxModelRequests can reduce the trusted profile allowance for this run.
+	// Zero keeps the profile default; it cannot grant a larger allowance.
+	MaxModelRequests int
+}
+
+func nativeModelRequestLimit(profile string, ceiling int) (int, error) {
+	limit := DefaultLimits().MaxModelRequests
+	switch profile {
+	case "offline-fixture", "final-smoke":
+	case "internal":
+		limit = 20
+	default:
+		return 0, errors.New("investigation execution profile is unavailable")
+	}
+	if ceiling < 0 || ceiling > limit {
+		return 0, errors.New("investigation request limit exceeds the trusted profile allowance")
+	}
+	if ceiling > 0 {
+		limit = ceiling
+	}
+	return limit, nil
 }
 
 func (n *NativeRunner) Investigate(ctx context.Context, w *sandbox.Workspace, b coderepair.RepositoryBinding, s coderepair.EvidenceSnapshot, selection coderepair.AgentSelection, recipe string) agent.InvestigationResult {
@@ -39,16 +60,18 @@ func (n *NativeRunner) Investigate(ctx context.Context, w *sandbox.Workspace, b 
 	if err != nil {
 		return fail("ENGINE_VERSION_UNAVAILABLE")
 	}
+	requestLimit, err := nativeModelRequestLimit(config.Budget.Campaign.Profile, n.MaxModelRequests)
+	if err != nil {
+		return fail("INVALID_SCOPE")
+	}
 	if err = n.Ledger.CreateCampaign(ctx, config.Budget.Campaign); err != nil {
 		return fail("MODEL_DISPATCH_BLOCKED")
 	}
 	limits := DefaultLimits()
+	limits.MaxModelRequests = requestLimit
 	limits.MaxOutputTokens = config.Budget.MaxOutputTokens
 	if config.Budget.RepairCandidateLimit > 0 {
 		limits.MaxCandidateCount = config.Budget.RepairCandidateLimit
-	}
-	if config.Budget.Campaign.Profile == "internal" {
-		limits.MaxModelRequests = 20
 	}
 	// The Go gateway accounts the full final payload; this independent byte
 	// limit includes system/tool definitions rather than only user messages.

@@ -211,8 +211,12 @@ func TestNativeProviderSmoke(t *testing.T) {
 	proof["case_id"], proof["attempt_id"], proof["base_sha"] = repairCase.ID, attempt.ID, base
 	manifest("prepared")
 	tests := &persistedDockerTester{image: f.image}
+	// The retained failed request consumed part of the same four-decision
+	// repair allocation. An explicitly reviewed attempt cannot replenish it.
+	repairRequestsRemaining := DefaultLimits().MaxModelRequests - int(prior)
+	proof["repair_requests_remaining"] = repairRequestsRemaining
 	runner := &NativeRunner{Process: Process{Executable: f.node, Entry: f.entry, Version: EngineVersion}, Tests: tests, Store: f.store,
-		Ledger: ledger, Cipher: cipher, CheckpointDSN: f.checkpointDSN, CheckpointSchema: f.checkpoint}
+		Ledger: ledger, Cipher: cipher, CheckpointDSN: f.checkpointDSN, CheckpointSchema: f.checkpoint, MaxModelRequests: repairRequestsRemaining}
 	claimed := agent.ClaimedInvestigation{Job: job, Case: repairCase, Attempt: attempt, ExpectedVersion: repairCase.Version}
 	started := time.Now()
 	result := runner.Investigate(agent.WithClaimedInvestigation(ctx, claimed), w, binding, snapshot, selection, "go-test-workload")

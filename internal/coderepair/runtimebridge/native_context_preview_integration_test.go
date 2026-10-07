@@ -193,7 +193,7 @@ func TestNativeContextPreviewFitsBatchedSkillReadsIntegration(t *testing.T) {
 	job, repairCase, attempt, snapshot := approveNativeFixture(t, f.store, binding, base, strings.Repeat("a", 40), selection)
 	ledger, _ := admission.NewService(f.store.ModelBudgetStore())
 	tests := &persistedDockerTester{image: f.image}
-	runner := &NativeRunner{Process: Process{Executable: f.node, Entry: f.entry, Version: EngineVersion}, Tests: tests, Store: f.store, Ledger: ledger, Cipher: cipher, CheckpointDSN: f.checkpointDSN, CheckpointSchema: f.checkpoint}
+	runner := &NativeRunner{Process: Process{Executable: f.node, Entry: f.entry, Version: EngineVersion}, Tests: tests, Store: f.store, Ledger: ledger, Cipher: cipher, CheckpointDSN: f.checkpointDSN, CheckpointSchema: f.checkpoint, MaxModelRequests: 3}
 	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Minute)
 	defer cancel()
 	claimed := agent.ClaimedInvestigation{Job: job, Case: repairCase, Attempt: attempt, ExpectedVersion: repairCase.Version}
@@ -237,7 +237,7 @@ func TestNativeContextPreviewFitsBatchedSkillReadsIntegration(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = fresh.Close() })
 	recoveredLedger, _ := admission.NewService(reopened.ModelBudgetStore())
-	restarted := &NativeRunner{Process: runner.Process, Tests: tests, Store: reopened, Ledger: recoveredLedger, Cipher: cipher, CheckpointDSN: f.checkpointDSN, CheckpointSchema: f.checkpoint}
+	restarted := &NativeRunner{Process: runner.Process, Tests: tests, Store: reopened, Ledger: recoveredLedger, Cipher: cipher, CheckpointDSN: f.checkpointDSN, CheckpointSchema: f.checkpoint, MaxModelRequests: 3}
 	recovered := restarted.Investigate(agent.WithClaimedInvestigation(ctx, claimed), fresh, binding, snapshot, selection, "go-test-workload")
 	mu.Lock()
 	afterCalls := len(bounds)
