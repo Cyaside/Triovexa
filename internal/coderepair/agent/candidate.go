@@ -33,7 +33,7 @@ func VerifyCandidate(ctx context.Context, workspace *sandbox.Workspace, binding 
 	// candidate. Callers must clear failed proof before persisting an outcome.
 	result.PatchReport = report
 	for _, path := range report.Files {
-		if !readPaths[path] || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if !readPaths[path] || !binding.CanPatchPath(path) {
 			return fail(coderepair.StateFailed, "UNGROUNDED_PATCH", "patch changed an unread or protected test file")
 		}
 	}
@@ -44,6 +44,9 @@ func VerifyCandidate(ctx context.Context, workspace *sandbox.Workspace, binding 
 		return fail(coderepair.StateFailed, "PATCH_APPLY_FAILED", "validated patch could not be applied")
 	}
 	for _, path := range report.Files {
+		if binding.ValidationProfile != nil || !strings.HasSuffix(path, ".go") {
+			continue
+		}
 		content, readErr := workspace.ReadFile(path)
 		formatted, formatErr := format.Source(content)
 		if readErr != nil || formatErr != nil || !bytes.Equal(content, formatted) {

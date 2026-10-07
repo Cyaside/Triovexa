@@ -3,7 +3,7 @@ import { Artifacts } from "../src/context/artifacts.js";
 import { offloadWireToolResults, type WireContentMessage } from "../src/context/wire-offload.js";
 import { PLAYBOOKS } from "../src/playbooks/registry.js";
 
-const book = PLAYBOOKS.find((item) => item.id === "go-investigation")!;
+const book = PLAYBOOKS.find((item) => item.id === "repository-investigation")!;
 const lines = book.content.split("\n"); lines.pop();
 const fullWindow = `@@ lines 1-${lines.length} of ${lines.length} @@\n${lines.join("\n")}`;
 function pair(args: unknown, text = fullWindow, resultID = "skill-one", name = "read_file"): WireContentMessage[] {

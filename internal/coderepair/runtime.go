@@ -19,9 +19,13 @@ type RuntimeSpec struct {
 	PlaybookDigest    string `json:"playbook_digest"`
 	SnapshotSHA256    string `json:"snapshot_sha256"`
 	SealedSnapshot    string `json:"sealed_snapshot"`
+	MaxModelRequests  int    `json:"max_model_requests,omitempty"`
 }
 
 func (s RuntimeSpec) Validate() error {
+	if s.MaxModelRequests < 0 || s.MaxModelRequests > 20 {
+		return errors.New("invalid pinned model request limit")
+	}
 	for _, value := range []string{s.EngineID, s.EngineVersion, s.ContractVersion, s.CheckpointVersion,
 		s.Profile, s.ConfigVersion, s.CampaignID} {
 		if !safeEvidenceIdentifier(value) {

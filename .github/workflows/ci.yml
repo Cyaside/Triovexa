@@ -259,6 +259,12 @@ jobs:
         env:
           TEST_REPAIR_SANDBOX_IMAGE: triovexa-repair-sandbox:gate2
         run: go test ./internal/coderepair/agent -run '^TestInvestigationDockerRedGreenIntegration$' -count=1 -v
+      - name: Build the Python repository sandbox
+        run: docker build -f Dockerfile.repair-sandbox --build-arg RUNTIME_IMAGE=python:3.12-alpine -t triovexa-repair-sandbox:python .
+      - name: Verify language-neutral patching with real Python tests
+        env:
+          TEST_REPAIR_PYTHON_IMAGE: triovexa-repair-sandbox:python
+        run: go test ./internal/coderepair/agent -run '^TestPythonInvestigationDockerRedGreenIntegration$' -count=1 -v
       - uses: actions/upload-artifact@v6
         if: always()
         with:

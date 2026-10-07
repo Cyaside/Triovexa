@@ -52,10 +52,10 @@ describe("bounded context and virtual artifacts", () => {
   it("denies host files, traversal, cross-attempt reads, mutable skills and invalid ranges", async () => {
     const artifacts = new Artifacts("attempt-1"); const path = artifacts.put("safe source");
     const backend = new VirtualBackend(new StateBackend({ state: { files: { ...selectPlaybooks(), ...artifacts.snapshot() } } }), "attempt-1", new AbortController().signal);
-    for (const denied of ["C:/private/key", "/etc/passwd", "/artifacts/attempt-2/" + path.split("/").at(-1), "/skills/../secret", "/skills/go-investigation\\SKILL.md"]) expect((await backend.read(denied)).error).toBe("VIRTUAL_READ_DENIED");
+    for (const denied of ["C:/private/key", "/etc/passwd", "/artifacts/attempt-2/" + path.split("/").at(-1), "/skills/../secret", "/skills/repository-investigation\\SKILL.md"]) expect((await backend.read(denied)).error).toBe("VIRTUAL_READ_DENIED");
     expect((await backend.read(path, 0, 201)).error).toBe("VIRTUAL_READ_DENIED");
     expect((await backend.read(path, -1, 1)).error).toBe("VIRTUAL_READ_DENIED");
-    expect((await backend.write("/skills/go-investigation/SKILL.md", "injected")).error).toBe("VIRTUAL_WRITE_DENIED");
+    expect((await backend.write("/skills/repository-investigation/SKILL.md", "injected")).error).toBe("VIRTUAL_WRITE_DENIED");
     expect((await backend.write(path, "changed")).error).toBe("VIRTUAL_WRITE_DENIED");
     const cancelled = new AbortController(); cancelled.abort();
     expect((await new VirtualBackend(new StateBackend({ state: { files: artifacts.snapshot() } }), "attempt-1", cancelled.signal).read(path)).error).toBe("VIRTUAL_READ_DENIED");
@@ -145,7 +145,7 @@ describe("typed runtime failure classification", () => {
 describe("trusted skills and cancellation", () => {
   it("loads a real trusted skill through native bounded read_file before a terminal decision", async () => {
     const gateway = await stub((request, i) => ({ body: completion(String(request.body.model), i === 1
-      ? [{ id: "skill-read", name: "read_file", args: { file_path: "/skills/go-investigation/SKILL.md" } }]
+      ? [{ id: "skill-read", name: "read_file", args: { file_path: "/skills/repository-investigation/SKILL.md" } }]
       : [{ id: "stop-skill", name: "cannot_determine", args: { reason: "evidence remains inconclusive" } }]) }));
     try {
       const start = await startFixture(); start.transport.model_gateway_url = gateway.url;

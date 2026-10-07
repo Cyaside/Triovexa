@@ -24,11 +24,11 @@ var imageReference = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,200}$`)
 type DockerTester struct{ Image string }
 
 func (r DockerTester) Run(ctx context.Context, checkout string, binding coderepair.RepositoryBinding, recipeID string) (TestResult, error) {
+	if binding.ValidationProfile != nil {
+		r.Image = binding.ValidationProfile.Image
+	}
 	if !imageReference.MatchString(r.Image) || strings.Contains(r.Image, "..") {
 		return TestResult{}, errors.New("invalid repair sandbox image")
-	}
-	if _, err := ResolveTestRecipe(binding, recipeID); err != nil {
-		return TestResult{}, err
 	}
 	checkout, err := filepath.Abs(checkout)
 	if err != nil {
@@ -42,18 +42,25 @@ func (r DockerTester) Run(ctx context.Context, checkout string, binding coderepa
 	if err != nil {
 		return TestResult{}, err
 	}
-	runCtx, cancel := context.WithTimeout(ctx, recipe.Timeout+time.Minute)
+	duration := recipe.Timeout + time.Minute
+	for _, check := range recipe.Checks {
+		duration += time.Duration(check.TimeoutSeconds) * time.Second
+	}
+	runCtx, cancel := context.WithTimeout(ctx, duration)
 	defer cancel()
+	// Credentials and investigation grants have no role inside repository tests.
+	testBinding := binding
+	testBinding.CredentialRef, testBinding.Automation = "", nil
 	request, err := json.Marshal(struct {
 		Operation string                       `json:"operation"`
 		RecipeID  string                       `json:"recipe_id"`
 		Binding   coderepair.RepositoryBinding `json:"binding"`
-	}{"run_allowed_test", recipeID, binding})
+	}{"run_allowed_test", recipeID, testBinding})
 	if err != nil {
 		return TestResult{}, err
 	}
 	command := exec.CommandContext(runCtx, "docker", "run", "--pull=never", "--rm", "-i", "--network", "none",
-		"--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "128",
+		"--read-only", "--user", "10001:10001", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "128",
 		"--memory", "2g", "--cpus", "2", "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=1g",
 		"--mount", "type=bind,source="+checkout+",target=/workspace,readonly", r.Image)
 	command.Stdin = bytes.NewReader(request)

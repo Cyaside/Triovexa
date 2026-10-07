@@ -13,8 +13,8 @@ import (
 )
 
 const EngineVersion = "1.14.1"
-const PromptVersion = "repair-native-v4"
-const PlaybookDigest = "7f698e35ce61618666730c1c15bb010be04c5cc55a00c7f002b1cce546ca6cb5"
+const PromptVersion = "repair-native-v5"
+const PlaybookDigest = "df884ea9dec05f192518558f1928178910ba280a7e654a9a920a8549bd211c24"
 
 type ClaimStore interface {
 	GetRepairJob(context.Context, string) (coderepair.Job, error)

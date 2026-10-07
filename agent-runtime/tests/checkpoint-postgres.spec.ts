@@ -226,7 +226,7 @@ suite("Postgres checkpoint isolation and recovery", () => {
 
   it("retrieves offloaded trusted instructions with a new bounded range before source and terminal patch in four requests", async () => {
     const start = await fixture(); start.scope.profile = "final-smoke"; start.transport.input_budget_mode = "gateway-preview";
-    const books = ["go-investigation", "incident-evidence", "regression-patch"];
+    const books = ["repository-investigation", "incident-evidence", "regression-patch"];
     const wires: Record<string, unknown>[] = []; let previews = 0; let effects = 0;
     const fetcher: typeof fetch = async (_input, init) => {
       const body = JSON.parse(String(init?.body)); const headers = new Headers(init?.headers);
@@ -281,7 +281,7 @@ suite("Postgres checkpoint isolation and recovery", () => {
       }
       wires.push(body);
       return response(completion(start.transport.model, wires.length === 1
-        ? ["go-investigation", "incident-evidence", "regression-patch"].map((name, index) => ({ id: `first-skill-${index}`, name: "read_file", args: { file_path: `/skills/${name}/SKILL.md`, offset: 0, limit: 100 } }))
+        ? ["repository-investigation", "incident-evidence", "regression-patch"].map((name, index) => ({ id: `first-skill-${index}`, name: "read_file", args: { file_path: `/skills/${name}/SKILL.md`, offset: 0, limit: 100 } }))
         : [{ id: "repeated-skill", name: "read_file", args: { file_path: "/skills/regression-patch/SKILL.md", offset: 0, limit: 100 } }]));
     };
     expect(await investigate(start, async () => { effects++; throw new Error("Only virtual skills are authorized in this fixture"); }, new AbortController().signal, fetcher))

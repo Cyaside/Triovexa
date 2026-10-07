@@ -52,17 +52,20 @@ func CanTransition(from, to State) bool {
 }
 
 type RepositoryBinding struct {
-	ID            string
-	ServiceName   string
-	Environment   string
-	RepositoryURL string
-	BaseRef       string
-	AllowedPaths  []string
-	TestRecipes   []string
-	PolicyVersion string
-	Enabled       bool
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                string
+	ServiceName       string
+	Environment       string
+	RepositoryURL     string
+	BaseRef           string
+	AllowedPaths      []string
+	TestRecipes       []string
+	ValidationProfile *ValidationProfile
+	CredentialRef     string
+	Automation        *AutomationPolicy
+	PolicyVersion     string
+	Enabled           bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 func (b RepositoryBinding) Validate() error {
@@ -79,6 +82,22 @@ func (b RepositoryBinding) Validate() error {
 		return errors.New("repository binding requires allowed paths and test recipes")
 	}
 	seenPaths := make(map[string]struct{}, len(b.AllowedPaths))
+	if b.Automation != nil {
+		if err := b.Automation.Validate(); err != nil {
+			return err
+		}
+	}
+	if b.ValidationProfile != nil {
+		if err := b.ValidationProfile.Validate(); err != nil {
+			return err
+		}
+		if len(b.TestRecipes) != 1 || b.TestRecipes[0] != b.ValidationProfile.ID {
+			return errors.New("binding recipe must match its validation profile")
+		}
+	}
+	if err := ValidateCredentialReference(b.CredentialRef); err != nil {
+		return err
+	}
 	for _, name := range b.AllowedPaths {
 		if err := ValidateRepoPath(name); err != nil {
 			return err
@@ -224,17 +243,23 @@ func ScopeDigest(c Case, b RepositoryBinding) (string, error) {
 		CaseID, IncidentID, BindingID, BaseSHA, DeployedSHA string
 		RepositoryURL, BaseRef, PolicyVersion               string
 		AllowedPaths, TestRecipes                           []string
+		ValidationProfile                                   *ValidationProfile `json:",omitempty"`
+		CredentialRef                                       string             `json:",omitempty"`
+		Automation                                          *AutomationPolicy  `json:",omitempty"`
 	}{
-		CaseID:        c.ID,
-		IncidentID:    c.IncidentID,
-		BindingID:     c.BindingID,
-		BaseSHA:       c.BaseSHA,
-		DeployedSHA:   c.DeployedSHA,
-		RepositoryURL: b.RepositoryURL,
-		BaseRef:       b.BaseRef,
-		PolicyVersion: b.PolicyVersion,
-		AllowedPaths:  paths,
-		TestRecipes:   recipes,
+		CaseID:            c.ID,
+		IncidentID:        c.IncidentID,
+		BindingID:         c.BindingID,
+		BaseSHA:           c.BaseSHA,
+		DeployedSHA:       c.DeployedSHA,
+		RepositoryURL:     b.RepositoryURL,
+		BaseRef:           b.BaseRef,
+		PolicyVersion:     b.PolicyVersion,
+		AllowedPaths:      paths,
+		TestRecipes:       recipes,
+		ValidationProfile: b.ValidationProfile,
+		CredentialRef:     b.CredentialRef,
+		Automation:        b.Automation,
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode repair scope: %w", err)

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const CONTRACT_VERSION = "1";
 export const ENGINE_VERSION = "1.14.1";
-export const PROMPT_VERSION = "repair-native-v4";
+export const PROMPT_VERSION = "repair-native-v5";
 export const MAX_FRAME_BYTES = 256 * 1024;
 export const INLINE_RESULT_BYTES = 8 * 1024;
 const identifier = z.string().min(1).max(200);

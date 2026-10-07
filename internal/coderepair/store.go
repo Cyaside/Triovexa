@@ -8,6 +8,9 @@ import (
 
 var ErrNoJobAvailable = errors.New("code repair: no job available")
 
+// Distinguish an absent binding from a failed storage lookup.
+var ErrRepositoryBindingNotFound = errors.New("repository binding not found")
+
 // CaseStore owns durable case transitions and investigation authorization.
 // Implementations must update state and audit in the same transaction.
 type CaseStore interface {

@@ -60,7 +60,11 @@ func (n *NativeRunner) Investigate(ctx context.Context, w *sandbox.Workspace, b 
 	if err != nil {
 		return fail("ENGINE_VERSION_UNAVAILABLE")
 	}
-	requestLimit, err := nativeModelRequestLimit(config.Budget.Campaign.Profile, n.MaxModelRequests)
+	ceiling := n.MaxModelRequests
+	if claim.Attempt.Runtime.MaxModelRequests > 0 && (ceiling == 0 || claim.Attempt.Runtime.MaxModelRequests < ceiling) {
+		ceiling = claim.Attempt.Runtime.MaxModelRequests
+	}
+	requestLimit, err := nativeModelRequestLimit(config.Budget.Campaign.Profile, ceiling)
 	if err != nil {
 		return fail("INVALID_SCOPE")
 	}

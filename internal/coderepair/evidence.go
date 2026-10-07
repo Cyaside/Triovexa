@@ -176,7 +176,7 @@ func (snapshot EvidenceSnapshot) VerifyDigest() bool {
 // CheckInvestigationEvidence fails closed when telemetry or repository
 // provenance is not adequate for a source-level investigation.
 func CheckInvestigationEvidence(incident domain.Incident, binding RepositoryBinding, snapshot EvidenceSnapshot, now time.Time) error {
-	if incident.State != domain.IncidentStateEscalated && incident.State != domain.IncidentStateFailedRemediation {
+	if !EligibleForInvestigation(incident, binding) {
 		return errors.New("incident is not eligible for code investigation")
 	}
 	if err := binding.Validate(); err != nil || !binding.Enabled || binding.ServiceName != incident.ServiceName ||

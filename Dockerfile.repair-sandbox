@@ -1,3 +1,4 @@
+ARG RUNTIME_IMAGE=golang:1.24-alpine
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -8,11 +9,10 @@ COPY internal/security ./internal/security
 COPY cmd/repair-sandbox ./cmd/repair-sandbox
 RUN CGO_ENABLED=0 go build -trimpath -o /out/triovexa-repair-sandbox ./cmd/repair-sandbox
 
-FROM golang:1.24-alpine
-RUN addgroup -S repair && adduser -S -G repair -u 10001 repair
+FROM ${RUNTIME_IMAGE}
 COPY --from=build /out/triovexa-repair-sandbox /usr/local/bin/triovexa-repair-sandbox
 COPY --from=build /go/pkg/mod /go/pkg/mod
 ENV GOPATH=/go GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOWORK=off GOENV=off CGO_ENABLED=0
 WORKDIR /workspace
-USER repair
+USER 10001:10001
 ENTRYPOINT ["triovexa-repair-sandbox"]

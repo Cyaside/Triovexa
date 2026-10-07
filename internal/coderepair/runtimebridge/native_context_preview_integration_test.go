@@ -134,7 +134,7 @@ func TestNativeContextPreviewFitsBatchedSkillReadsIntegration(t *testing.T) {
 		var calls []contextPreviewCall
 		switch ordinal {
 		case 1:
-			for index, path := range []string{"/skills/go-investigation/SKILL.md", "/skills/incident-evidence/SKILL.md", "/skills/regression-patch/SKILL.md", "internal/workload/worker_regression_test.go"} {
+			for index, path := range []string{"/skills/repository-investigation/SKILL.md", "/skills/incident-evidence/SKILL.md", "/skills/regression-patch/SKILL.md", "internal/workload/worker_regression_test.go"} {
 				calls = append(calls, contextPreviewCall{fmt.Sprintf("context-skill-%d", index), "read_file", map[string]any{"file_path": path, "offset": 0, "limit": 200}})
 			}
 		case 2:

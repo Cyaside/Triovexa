@@ -10,14 +10,17 @@ import (
 )
 
 type TestRecipe struct {
-	ID               string
-	Version          string
-	Executable       string
-	Arguments        []string
-	ExpectedTestName string
-	ExpectedFailure  string
-	Timeout          time.Duration
-	MaxOutputBytes   int
+	ID                 string
+	Version            string
+	Executable         string
+	Arguments          []string
+	ExpectedTestName   string
+	ExpectedFailure    string
+	Timeout            time.Duration
+	MaxOutputBytes     int
+	Checks             []coderepair.ValidationCommand
+	RootFiles          []string
+	RequireEmptyOutput bool
 }
 
 // GoTestRecipeSpec is trusted operator/build configuration. It cannot select a
@@ -105,5 +108,17 @@ func (c *RecipeCatalog) Resolve(binding coderepair.RepositoryBinding, id string)
 // ResolveTestRecipe accepts an opaque ID from an approved repository binding.
 // Executable, arguments and bounds come from the trusted sandbox image catalog.
 func ResolveTestRecipe(binding coderepair.RepositoryBinding, id string) (TestRecipe, error) {
+	if binding.ValidationProfile != nil {
+		if err := binding.Validate(); err != nil {
+			return TestRecipe{}, err
+		}
+		p := binding.ValidationProfile
+		if !binding.Enabled || id != p.ID {
+			return TestRecipe{}, errors.New("validation profile is not enabled for this recipe")
+		}
+		return TestRecipe{ID: p.ID, Version: p.Version, Executable: p.Test.Executable, Arguments: append([]string{}, p.Test.Arguments...),
+			ExpectedTestName: p.ExpectedTestName, ExpectedFailure: p.ExpectedFailure, Timeout: time.Duration(p.Test.TimeoutSeconds) * time.Second,
+			MaxOutputBytes: 64 * 1024, Checks: p.Checks, RootFiles: p.RootFiles, RequireEmptyOutput: p.Test.RequireEmptyOutput}, nil
+	}
 	return builtinCatalog.Resolve(binding, id)
 }
