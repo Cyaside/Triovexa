@@ -124,9 +124,24 @@ func (g *Gateway) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		http.Error(writer, "request ordinal invalid", http.StatusConflict)
 		return
 	}
+	preview := request.Header.Values("X-Triovexa-Context-Preview")
+	if len(preview) > 1 || (len(preview) == 1 && preview[0] != "1") {
+		http.Error(writer, "context preview invalid", http.StatusConflict)
+		return
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 256*1024))
 	if err != nil {
 		http.Error(writer, "model payload exceeds bound", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if len(preview) == 1 {
+		result, err := g.PreviewInput(request.Context(), body)
+		if err != nil {
+			http.Error(writer, denialCode(err), http.StatusConflict)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(result)
 		return
 	}
 	response, status, _, err := g.DispatchAt(request.Context(), ordinal, body)
@@ -149,13 +164,7 @@ func (g *Gateway) DispatchAt(ctx context.Context, ordinal int, body []byte) ([]b
 	if err := g.config.Fence(ctx); err != nil {
 		return nil, 0, 0, errors.New("LEASE_LOST")
 	}
-	if err := ValidatePayload(body, g.config.Provider.Model, g.config.MaxOutputTokens); err != nil {
-		return nil, 0, 0, err
-	}
-	if err := validateStageTools(body, g.config.AllowedTools); err != nil {
-		return nil, 0, 0, err
-	}
-	bound, err := inputTokenBound(g.config.Pricing, body)
+	bound, err := g.validateInput(body)
 	if err != nil {
 		return nil, 0, 0, err
 	}
