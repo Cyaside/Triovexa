@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, APIError } from '../../api'
 import { RequestState } from '../../shared/components'
 
-type Binding = { ID: string; ServiceName: string; Environment: string; RepositoryURL: string; BaseRef: string; AllowedPaths: string[]; Enabled: boolean; CredentialRef: string; ValidationProfile?: { image: string; id: string }; Automation?: { enabled: boolean; expires_at: string; campaign_id: string; max_investigations: number; max_model_requests: number } }
+type Binding = { ID: string; ServiceName: string; Environment: string; RepositoryURL: string; BaseRef: string; AllowedPaths: string[]; Enabled: boolean; CredentialRef: string; ValidationProfile?: { image: string; id: string }; Automation?: { enabled: boolean; expires_at: string; campaign_id: string; max_investigations: number; max_model_requests: number; publish_draft_pr?: boolean } }
 const splitPaths = (value: FormDataEntryValue | null) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean)
 
 export function RepositorySetup({ service = '', environment = '', onCreated }: { service?: string; environment?: string; onCreated?: () => void }) {
@@ -24,7 +24,7 @@ export function RepositorySetup({ service = '', environment = '', onCreated }: {
           protected_paths: splitPaths(data.get('protected_paths')), checks, test: { executable: String(data.get('executable')).trim(), arguments: args, timeout_seconds: 120 },
           expected_test_name: String(data.get('expected_test_name')).trim(), expected_failure: String(data.get('expected_failure')).trim() },
         automation: automatic ? { enabled: true, expires_at: new Date(String(data.get('expires_at'))).toISOString(), campaign_id: String(data.get('campaign_id')).trim(),
-          max_investigations: Number(data.get('max_investigations')), max_model_requests: Number(data.get('max_model_requests')) } : null })
+          max_investigations: Number(data.get('max_investigations')), max_model_requests: Number(data.get('max_model_requests')), publish_draft_pr: data.get('publish_draft_pr') === 'on' } : null })
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Invalid repository configuration.') }
   }
   return <form className="repair-setup" onSubmit={submit}>
@@ -47,12 +47,14 @@ export function RepositorySetup({ service = '', environment = '', onCreated }: {
     </fieldset>
     <fieldset><legend>Investigation policy</legend>
       <label><input type="checkbox" checked={automatic} onChange={(event) => setAutomatic(event.target.checked)} /> Automatically investigate incoming alerts</label>
-      <p className="muted">Investigations can start without a restart. This grant does not authorize automatic PR publication, merge or deployment.</p>
+      <p className="muted">Investigations can start without a restart. Draft PR publication requires the separate permission below. Merge and deployment remain outside this grant.</p>
       {automatic && <>
         <label>Existing model campaign ID<input name="campaign_id" required /></label>
         <label>Grant expiry<input name="expires_at" type="datetime-local" required /></label>
         <label>Maximum investigations<input name="max_investigations" type="number" min={1} max={100} defaultValue={1} required /></label>
         <label>Maximum model requests per investigation<input name="max_model_requests" type="number" min={1} max={20} defaultValue={4} required /></label>
+        <label><input name="publish_draft_pr" type="checkbox" /> Publish a draft PR after the patch passes validation</label>
+        <p className="muted">Authorizes one draft PR per successful investigation within this grant. Failed tests, expired grants and changed scope block publication. CI and human review still precede merge.</p>
       </>}
     </fieldset>
     {error && <p role="alert">{error}</p>}{create.isError && <RequestState error={create.error} retry={() => create.reset()} />}
@@ -69,7 +71,7 @@ export function RepositorySettings() {
   return <section className="repair-content"><h2>Source repositories</h2>
     {result.isError && <RequestState error={result.error} retry={() => result.refetch()} />}
     {result.data?.items.map((binding) => <section key={binding.ID} className="setting-row"><div><h3>{binding.ServiceName} · {binding.Environment}</h3><p>{binding.RepositoryURL}</p><p>{binding.Enabled ? (binding.Automation?.enabled ? 'Automatic investigation enabled' : 'Manual investigation') : 'Disabled'}</p>
-      <details><summary>Configuration</summary><p>Branch: {binding.BaseRef} · Scope: {binding.AllowedPaths.join(', ')}</p><p>Sandbox: {binding.ValidationProfile?.image || 'Legacy Go fixture'} · Credential: {binding.CredentialRef || 'Public repository'}</p>
+      <details><summary>Configuration</summary><p>Branch: {binding.BaseRef} · Scope: {binding.AllowedPaths.join(', ')}</p><p>Sandbox: {binding.ValidationProfile?.image || 'Legacy Go fixture'} · Credential: {binding.CredentialRef || 'Public repository'}</p><p>Draft PR publication: {binding.Automation?.publish_draft_pr ? 'Automatic after validation' : 'Operator approval required'}</p>
         {binding.Automation?.enabled && <p>Campaign: {binding.Automation.campaign_id} · Up to {binding.Automation.max_investigations} investigations, {binding.Automation.max_model_requests} model requests each · Expires {new Date(binding.Automation.expires_at).toLocaleString()}</p>}
       </details></div><div className="setting-action">
       {binding.Enabled && <><button disabled={operation.isPending} onClick={() => operation.mutate({ id: binding.ID, action: 'check' })}>Check repository access</button><button disabled={operation.isPending} onClick={() => operation.mutate({ id: binding.ID, action: 'disable' })}>Disable</button></>}

@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -169,32 +168,8 @@ func (s *Store) ApproveRepairPublication(ctx context.Context, caseID, actorID, r
 	if err != nil || actualReviewDigest != reviewDigest {
 		return coderepair.Publication{}, false, errors.New("reviewed patch or policy changed")
 	}
-	branch, err := coderepair.PublicationBranch(c.ID, a.Number)
+	p, err := queuePublicationTx(ctx, tx, c, a, actorID, "publication", reviewDigest, patchDigest, now.Add(15*time.Minute), now)
 	if err != nil {
-		return coderepair.Publication{}, false, err
-	}
-	approvalID := uuid.NewString()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO repair_approvals
-		(id,case_id,case_version,phase,actor_id,decision,scope_digest,policy_version,expires_at,created_at,patch_sha256)
-		VALUES ($1,$2,$3,'publication',$4,'approved',$5,$6,$7,$8,$9)`,
-		approvalID, caseID, c.Version, actorID, reviewDigest, c.PolicyVersion, now.Add(15*time.Minute).UTC(), now.UTC(), patchDigest); err != nil {
-		return coderepair.Publication{}, false, err
-	}
-	p := coderepair.Publication{ID: uuid.NewString(), CaseID: caseID, AttemptID: a.ID, ApprovalID: approvalID,
-		OperationID: fmt.Sprintf("repair-publish:%s:%d", caseID, a.Number), BranchName: branch,
-		PatchSHA256: patchDigest, State: coderepair.PublicationQueued, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO repair_publications
-		(id,case_id,attempt_id,approval_id,operation_id,branch_name,patch_sha256,state,available_at,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, p.ID, p.CaseID, p.AttemptID, p.ApprovalID,
-		p.OperationID, p.BranchName, p.PatchSHA256, p.State, now.UTC(), now.UTC(), now.UTC()); err != nil {
-		return coderepair.Publication{}, false, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE repair_cases SET state='publishing',version=version+1,updated_at=$1 WHERE id=$2`, now.UTC(), caseID); err != nil {
-		return coderepair.Publication{}, false, err
-	}
-	details, _ := json.Marshal(map[string]string{"attempt_id": a.ID, "patch_sha256": patchDigest, "review_digest": reviewDigest, "operation_id": p.OperationID})
-	if err := insertRepairEventTx(ctx, tx, coderepair.Event{ID: uuid.NewString(), CaseID: caseID, ActorID: actorID,
-		Type: "publication_approved", DetailsJSON: string(details), CreatedAt: now.UTC()}); err != nil {
 		return coderepair.Publication{}, false, err
 	}
 	return p, true, tx.Commit()

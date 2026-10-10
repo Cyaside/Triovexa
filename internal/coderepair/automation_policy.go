@@ -7,7 +7,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/domain"
 )
 
-// This grant authorizes investigation only. Automatic publication is separate.
+// Publication requires its own explicit opt-in within the bounded admin grant.
 type AutomationPolicy struct {
 	Enabled           bool      `json:"enabled"`
 	AuthorizedBy      string    `json:"authorized_by"`
@@ -15,10 +15,14 @@ type AutomationPolicy struct {
 	CampaignID        string    `json:"campaign_id"`
 	MaxInvestigations int       `json:"max_investigations"`
 	MaxModelRequests  int       `json:"max_model_requests"`
+	PublishDraftPR    bool      `json:"publish_draft_pr,omitempty"`
 }
 
 func (p AutomationPolicy) Validate() error {
 	if !p.Enabled {
+		if p.PublishDraftPR {
+			return errors.New("automatic publication requires an enabled investigation grant")
+		}
 		return nil
 	}
 	if !safeEvidenceIdentifier(p.AuthorizedBy) || !safeEvidenceIdentifier(p.CampaignID) || p.ExpiresAt.IsZero() ||

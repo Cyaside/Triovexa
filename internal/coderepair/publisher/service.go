@@ -41,7 +41,7 @@ func (s *Service) Publish(ctx context.Context, p coderepair.Publication, in Inpu
 	if ctx == nil || now.IsZero() || p.ID == "" || p.LeaseToken == "" || p.State != coderepair.PublicationRunning ||
 		!p.LeaseUntil.After(now) || in.Case.State != coderepair.StatePublishing ||
 		p.CaseID != in.Case.ID || p.AttemptID != in.Attempt.ID || p.ApprovalID != in.Approval.ID ||
-		p.OperationID == "" || in.Approval.Phase != "publication" || in.Approval.Decision != "approved" ||
+		p.OperationID == "" || (in.Approval.Phase != "publication" && in.Approval.Phase != "automatic_publication") || in.Approval.Decision != "approved" ||
 		in.Approval.CaseID != in.Case.ID || in.Approval.CaseVersion+1 != in.Case.Version ||
 		in.Approval.PolicyVersion != in.Case.PolicyVersion || in.Attempt.Status != "succeeded" {
 		return PullRequest{}, "", errors.New("publication no longer matches an approved repair case")
@@ -121,6 +121,13 @@ func (s *Service) Publish(ctx context.Context, p coderepair.Publication, in Inpu
 	if !in.Approval.ExpiresAt.After(now) || in.Approval.CreatedAt.After(now) ||
 		in.Approval.ExpiresAt.Sub(in.Approval.CreatedAt) > 15*time.Minute {
 		return PullRequest{}, "", errors.New("publication approval expired before GitHub write")
+	}
+	if in.Approval.Phase == "automatic_publication" {
+		grant := in.Binding.Automation
+		if grant == nil || !grant.Enabled || !grant.PublishDraftPR || grant.Validate() != nil ||
+			grant.AuthorizedBy != in.Approval.ActorID || !grant.ExpiresAt.After(time.Now().UTC()) {
+			return PullRequest{}, "", errors.New("automatic draft PR grant changed or expired before GitHub write")
+		}
 	}
 	if err := s.allowWrite(ctx); err != nil {
 		return PullRequest{}, "", err

@@ -150,6 +150,9 @@ func (s *Store) CompleteRepairJob(ctx context.Context, jobID, leaseToken string,
 	if err := insertRepairEventTx(ctx, tx, repairEvent(job.CaseID, "investigation_job_completed", "patch outcome persisted", now)); err != nil {
 		return false, err
 	}
+	if err := queueAutomaticPublicationTx(ctx, tx, job.CaseID, now); err != nil {
+		return false, err
+	}
 	return true, tx.Commit()
 }
 
@@ -293,6 +296,9 @@ func (s *Store) RecoverRepairJobs(ctx context.Context, now time.Time) (int, erro
 			}
 			if err := insertRepairEventTx(ctx, tx, repairEvent(job.caseID, "repair_job_reconciled",
 				"case already moved to "+string(job.caseState), now)); err != nil {
+				return 0, err
+			}
+			if err := queueAutomaticPublicationTx(ctx, tx, job.caseID, now); err != nil {
 				return 0, err
 			}
 			continue

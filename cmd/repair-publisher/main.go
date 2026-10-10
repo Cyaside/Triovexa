@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,7 +16,6 @@ import (
 	"github.com/Cyaside/Triovexa/internal/coderepair/publisher"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/security"
-	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 )
 
@@ -49,26 +47,6 @@ func run(logger *slog.Logger) error {
 	}
 	defer os.RemoveAll(parent)
 	checkout := publisher.Checkout(agent.DefaultCheckoutFactory(parent))
-	service, err := publisher.NewService(github, checkout, func(ctx context.Context) error {
-		if cfg.KillSwitchEnabled {
-			return errors.New("publication blocked by kill switch")
-		}
-		value, err := store.GetSetting(ctx, "safety.kill_switch")
-		if errors.Is(err, storage.ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return errors.New("publication safety state unavailable")
-		}
-		enabled, err := strconv.ParseBool(value)
-		if err != nil || enabled {
-			return errors.New("publication blocked by kill switch")
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	logger.Info("repair publisher started", "checkout_parent", filepath.Base(parent))
@@ -95,10 +73,20 @@ func run(logger *slog.Logger) error {
 		var pr publisher.PullRequest
 		var head string
 		if err == nil {
-			pr, head, err = service.Publish(workCtx, p, publisher.Input{
-				Case: input.Case, Attempt: input.Attempt, Binding: input.Binding,
-				Approval: input.Approval, Patch: input.Patch, ReportJSON: input.ReportJSON,
-			}, time.Now().UTC())
+			service, serviceErr := publisher.NewService(github, checkout, func(ctx context.Context) error {
+				if cfg.KillSwitchEnabled {
+					return errors.New("publication blocked by kill switch")
+				}
+				return store.CheckRepairPublicationSafety(ctx, p.CaseID, time.Now().UTC())
+			})
+			if serviceErr != nil {
+				err = serviceErr
+			} else {
+				pr, head, err = service.Publish(workCtx, p, publisher.Input{
+					Case: input.Case, Attempt: input.Attempt, Binding: input.Binding,
+					Approval: input.Approval, Patch: input.Patch, ReportJSON: input.ReportJSON,
+				}, time.Now().UTC())
+			}
 		}
 		cancel()
 		resultCtx, resultCancel := context.WithTimeout(context.Background(), 10*time.Second)
