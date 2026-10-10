@@ -23,16 +23,20 @@ import (
 )
 
 // This opt-in test is excluded from ordinary builds and CI. It performs one
-// live-model repair on an isolated local repository, with synthetic approval.
-// It never publishes a PR, injects a fault into a running service, or deploys.
+// live-model repair on a synthetic repository or an explicitly configured
+// isolated test branch. It never publishes a PR or changes production services.
 func TestNativeProviderSmoke(t *testing.T) {
 	mode := os.Getenv("RUN_NATIVE_PROVIDER_SMOKE")
 	reviewed := mode == "one-approved-case-after-reviewed-context-fix"
-	if _, ci := os.LookupEnv("CI"); ci || (mode != "one-approved-case" && !reviewed) {
+	repositorySmoke := mode == "last-repair-slot-on-isolated-repository"
+	if _, ci := os.LookupEnv("CI"); ci || (mode != "one-approved-case" && !reviewed && !repositorySmoke) {
 		t.Fatal("live provider validation requires explicit local opt-in and is forbidden in CI")
 	}
 	if !reviewed && (os.Getenv("LIVE_ACKNOWLEDGED_FAILURE_PATH") != "" || os.Getenv("LIVE_ACKNOWLEDGED_ATTEMPT_ID") != "") {
 		t.Fatal("reviewed attempt acknowledgment requires its explicit operator opt-in")
+	}
+	if !repositorySmoke && (os.Getenv("LIVE_ACKNOWLEDGED_FAILURE_PATHS") != "" || os.Getenv("LIVE_REPOSITORY_CONFIG_PATH") != "") {
+		t.Fatal("external repository validation requires its explicit local opt-in")
 	}
 	budgetPath, output := os.Getenv("AI_BUDGET_CONFIG_PATH"), os.Getenv("LIVE_PROVIDER_EVIDENCE_PATH")
 	if !filepath.IsAbs(budgetPath) || !filepath.IsAbs(output) || !strings.HasSuffix(output, ".json") {
@@ -133,7 +137,23 @@ func TestNativeProviderSmoke(t *testing.T) {
 	if shared.QueryRowContext(ctx, `SELECT count(*) FROM ai_model_requests WHERE campaign_id=$1 AND identity_json->>'phase'='repair'`, before.ID).Scan(&prior) != nil {
 		t.Fatal("previous repair dispatches could not be audited")
 	}
-	if reviewed {
+	if repositorySmoke {
+		paths := filepath.SplitList(os.Getenv("LIVE_ACKNOWLEDGED_FAILURE_PATHS"))
+		var reports []reviewedProviderSmokeAttempt
+		var summaries []modelgateway.Summary
+		for _, path := range paths {
+			report := readRepositorySmokeFailure(t, repo, path, output)
+			summary, err := modelgateway.ReadSummary(ctx, ledger, budget.Campaign.ID, report.AttemptID, "repair", 4)
+			if err != nil {
+				t.Fatal("retained ledger receipt is unavailable")
+			}
+			reports, summaries = append(reports, report), append(summaries, summary)
+		}
+		if err := validateRemainingProviderSmoke(budget, before, prior, reports, summaries); err != nil {
+			t.Fatal("the final repair slot does not match both retained failures and original allocation")
+		}
+		proof["authorization_mode"], proof["approval_source"] = mode, "operator-authorized-isolated-repository"
+	} else if reviewed {
 		previousPath := os.Getenv("LIVE_ACKNOWLEDGED_FAILURE_PATH")
 		acknowledgedAttempt := os.Getenv("LIVE_ACKNOWLEDGED_ATTEMPT_ID")
 		if previousPath == output || !filepath.IsAbs(previousPath) || !strings.HasSuffix(previousPath, ".json") {
@@ -202,12 +222,13 @@ func TestNativeProviderSmoke(t *testing.T) {
 	if err := os.Mkdir(checkout, 0700); err != nil {
 		t.Fatal("a new private retained fixture checkout is required")
 	}
-	w, binding, base := compatibilityFixtureAt(t, checkout)
 	selection, err := SealSelection(client, budget, cipher)
 	if err != nil {
 		t.Fatal("saved provider selection could not be sealed")
 	}
-	job, repairCase, attempt, snapshot := approveNativeFixture(t, f.store, binding, base, strings.Repeat("a", 40), selection)
+	prepared := prepareProviderSmokeFixture(t, ctx, f, checkout, selection, repositorySmoke, proof)
+	w, binding, base := prepared.workspace, prepared.binding, prepared.base
+	job, repairCase, attempt, snapshot := prepared.job, prepared.repairCase, prepared.attempt, prepared.snapshot
 	proof["case_id"], proof["attempt_id"], proof["base_sha"] = repairCase.ID, attempt.ID, base
 	manifest("prepared")
 	tests := &persistedDockerTester{image: f.image}
@@ -219,7 +240,7 @@ func TestNativeProviderSmoke(t *testing.T) {
 		Ledger: ledger, Cipher: cipher, CheckpointDSN: f.checkpointDSN, CheckpointSchema: f.checkpoint, MaxModelRequests: repairRequestsRemaining}
 	claimed := agent.ClaimedInvestigation{Job: job, Case: repairCase, Attempt: attempt, ExpectedVersion: repairCase.Version}
 	started := time.Now()
-	result := runner.Investigate(agent.WithClaimedInvestigation(ctx, claimed), w, binding, snapshot, selection, "go-test-workload")
+	result := runner.Investigate(agent.WithClaimedInvestigation(ctx, claimed), w, binding, snapshot, selection, prepared.recipe)
 	proof["status"] = "failed"
 	proof["wall_time_ms"], proof["investigation_status"], proof["code"], proof["runtime"] = time.Since(started).Milliseconds(), result.Status, result.Code, result.Runtime
 	proof["hypothesis"], proof["evidence_ids"], proof["patch_sha256"], proof["docker_tests"] = security.Redact(result.Hypothesis), result.EvidenceIDs, result.PatchReport.SHA256, tests.calls
@@ -229,12 +250,15 @@ func TestNativeProviderSmoke(t *testing.T) {
 	proof["candidate_exit_code"] = recordedTestExit(result.After.RecipeID, result.After.ExitCode)
 	auditCtx, auditCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer auditCancel()
-	outcome, err := result.Outcome(job, repairCase.Version, "go-test-workload", time.Now().UTC())
+	outcome, err := result.Outcome(job, repairCase.Version, prepared.recipe, time.Now().UTC())
 	if err != nil {
 		t.Fatal("live outcome could not be constructed")
 	}
 	if ok, err := f.store.RecordRepairInvestigationOutcome(auditCtx, outcome); err != nil || !ok {
 		t.Fatal("live outcome could not be durably recorded")
+	}
+	if ok, err := f.store.CompleteRepairJob(auditCtx, job.ID, job.LeaseToken, time.Now().UTC()); err != nil || !ok {
+		t.Fatal("live job completion could not be durably recorded")
 	}
 	after, err := ledger.GetCampaign(auditCtx, budget.Campaign.ID)
 	if err != nil {
