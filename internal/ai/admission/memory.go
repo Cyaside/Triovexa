@@ -22,7 +22,7 @@ func (m *MemoryStore) CreateCampaign(_ context.Context, c Campaign) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if previous, ok := m.campaigns[c.ID]; ok {
-		if previous.Profile != c.Profile || previous.Offline != c.Offline || previous.MaxSpendMicroUSD != c.MaxSpendMicroUSD || previous.MaxInputTokens != c.MaxInputTokens || previous.MaxRequests != c.MaxRequests {
+		if previous.Profile != c.Profile || previous.Offline != c.Offline || previous.ProviderManaged != c.ProviderManaged || previous.MaxSpendMicroUSD != c.MaxSpendMicroUSD || previous.MaxInputTokens != c.MaxInputTokens || previous.MaxRequests != c.MaxRequests {
 			return ErrMismatch
 		}
 		return nil
@@ -73,7 +73,7 @@ func (m *MemoryStore) Reserve(_ context.Context, r Reservation) (Reservation, er
 	if c.Blocked || m.pending(c.ID) {
 		return r, ErrUncertain
 	}
-	if c.Requests >= c.MaxRequests || r.Request.InputTokenBound > c.MaxInputTokens-c.AdmittedInputTokens || r.ReservedMicroUSD > c.MaxSpendMicroUSD-c.SpentMicroUSD-c.ReservedMicroUSD {
+	if c.ExceedsLimits(r) {
 		return r, ErrBudgetExceeded
 	}
 	c.ReservedMicroUSD += r.ReservedMicroUSD

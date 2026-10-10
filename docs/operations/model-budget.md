@@ -11,6 +11,7 @@ Start with [the configuration example](model-budget.example.json). It is intenti
 | `campaign.id` | Stable identifier for the cumulative accounting campaign. Reuse it after a restart. |
 | `campaign.profile` | `internal`, `final-smoke`, or `offline-fixture`. |
 | `campaign.offline` | Must be true for `offline-fixture`; external model requests are rejected. |
+| `campaign.provider_managed` | Defaults to false. Explicitly delegates cumulative billing limits to the provider account for the `internal` profile while retaining durable accounting. |
 | `campaign.max_spend_micro_usd` | Cumulative spend ceiling in integer micro-US dollars. `1000000` means US$1. |
 | `campaign.max_input_tokens` | Cumulative admitted input bound across requests in the campaign. |
 | `campaign.max_requests` | Maximum admitted request count, including requests from different components. |
@@ -32,6 +33,14 @@ For conversion, a tariff of US$1 per million tokens is `1000000` in either per-m
 The input bound covers the final serialized request, including system messages, tool schemas, and transcript. A characters-per-token estimate is not sufficient verification. Check the provider's documented contract before enabling either bounding flag.
 
 The `final-smoke` profile additionally limits the campaign to US$0.20, six requests, and 12000 cumulative admitted input tokens; per-request input and output are capped at 6000 and 1500 respectively. It permits one repair candidate. These are ceilings, not a promise that a complete investigation fits within them. Admission can stop earlier when the estimated request would exceed any remaining bound.
+
+## Provider-managed billing limits
+
+For an explicitly authorized investigation controlled by the provider's account limit, set `campaign.provider_managed` to true and select the `internal` profile. Set all three campaign ceilings (`max_spend_micro_usd`, `max_input_tokens`, `max_requests`) to zero. Zero means no cumulative application cap only in this explicit mode; it does not make a capped campaign unlimited. Configure the provider account's billing limit before dispatch. Triovexa cannot verify that external account setting.
+
+The ledger still records requests, token usage, estimated cost, dispatch markers and encrypted response receipts. Missing usage and uncertain dispatches still block subsequent calls. Per-request context/output limits, the investigation deadline, scope checks, sandbox restrictions and a maximum of 20 model decisions per internal investigation remain execution safeguards. This mode does not grant an infinite agent loop, automatic retries, merge or deployment permission.
+
+Campaign mode is immutable. Existing capped campaigns retain their counters and receipts after migration; they cannot be converted by editing their configuration. A separately authorized provider-managed run uses a distinct campaign and retains its own history. Neither `final-smoke` nor `offline-fixture` accepts this mode.
 
 ## Restart and uncertain requests
 

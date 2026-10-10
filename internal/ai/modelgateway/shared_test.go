@@ -69,6 +69,7 @@ func TestBudgetConfigCannotRaiseFinalSmokeLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, modify := range []func(*BudgetConfig){
+		func(c *BudgetConfig) { c.Campaign.ProviderManaged = true },
 		func(c *BudgetConfig) { c.Campaign.MaxSpendMicroUSD++ }, func(c *BudgetConfig) { c.Campaign.MaxRequests++ },
 		func(c *BudgetConfig) { c.Campaign.MaxInputTokens++ }, func(c *BudgetConfig) { c.MaxInputTokens++ }, func(c *BudgetConfig) { c.MaxOutputTokens++ },
 	} {
@@ -77,5 +78,20 @@ func TestBudgetConfigCannotRaiseFinalSmokeLimits(t *testing.T) {
 		if changed.Validate() == nil {
 			t.Fatal("final smoke cap could be raised")
 		}
+	}
+}
+
+func TestProviderManagedConfigKeepsExecutionLimits(t *testing.T) {
+	c := BudgetConfig{Campaign: admission.Campaign{ID: "internal", Profile: "internal", ProviderManaged: true}, ConfigVersion: "v1", MaxInputTokens: 65536, MaxOutputTokens: 4096}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	d := &SharedDispatcher{config: c}
+	if d.requestLimit() != 20 {
+		t.Fatal("workflow loop guard lost")
+	}
+	c.Campaign.MaxRequests = 1
+	if c.Validate() == nil {
+		t.Fatal("mixed accounting modes accepted")
 	}
 }

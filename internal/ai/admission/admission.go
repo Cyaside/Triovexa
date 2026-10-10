@@ -40,14 +40,17 @@ const (
 )
 
 type Campaign struct {
-	ID               string `json:"id"`
-	Profile          string `json:"profile"`
-	Offline          bool   `json:"offline"`
-	MaxSpendMicroUSD int64  `json:"max_spend_micro_usd"`
-	MaxInputTokens   int64  `json:"max_input_tokens"`
-	MaxRequests      int64  `json:"max_requests"`
-	SpentMicroUSD    int64  `json:"spent_micro_usd"`
-	ReservedMicroUSD int64  `json:"reserved_micro_usd"`
+	ID      string `json:"id"`
+	Profile string `json:"profile"`
+	Offline bool   `json:"offline"`
+	// ProviderManaged retains durable accounting without application campaign
+	// caps. Only an explicitly selected internal profile may use this mode.
+	ProviderManaged  bool  `json:"provider_managed,omitempty"`
+	MaxSpendMicroUSD int64 `json:"max_spend_micro_usd"`
+	MaxInputTokens   int64 `json:"max_input_tokens"`
+	MaxRequests      int64 `json:"max_requests"`
+	SpentMicroUSD    int64 `json:"spent_micro_usd"`
+	ReservedMicroUSD int64 `json:"reserved_micro_usd"`
 	// AdmittedInputTokens is actual prompt usage for accounted requests plus
 	// verified input bounds for every unsettled request. Cancellation releases
 	// only undispatched bounds; uncertain dispatches keep their full allowance.
@@ -145,7 +148,7 @@ func NewService(store Store) (*Service, error) {
 
 func (s *Service) CreateCampaign(ctx context.Context, c Campaign) error {
 	if !identifier(c.ID) || !identifier(c.Profile) || c.MaxSpendMicroUSD < 0 ||
-		c.MaxInputTokens <= 0 || c.MaxRequests <= 0 || c.SpentMicroUSD != 0 ||
+		!c.ValidLimits() || c.SpentMicroUSD != 0 ||
 		c.ReservedMicroUSD != 0 || c.AdmittedInputTokens != 0 || c.Requests != 0 || c.Blocked {
 		return ErrInvalid
 	}
@@ -153,6 +156,19 @@ func (s *Service) CreateCampaign(ctx context.Context, c Campaign) error {
 		c.CreatedAt = time.Now().UTC()
 	}
 	return s.store.CreateCampaign(ctx, c)
+}
+
+func (c Campaign) ValidLimits() bool {
+	if c.ProviderManaged {
+		return c.Profile == "internal" && !c.Offline && c.MaxSpendMicroUSD == 0 && c.MaxInputTokens == 0 && c.MaxRequests == 0
+	}
+	return c.MaxSpendMicroUSD >= 0 && c.MaxInputTokens > 0 && c.MaxRequests > 0
+}
+
+// ExceedsLimits is evaluated under the store's campaign lock. Dispatch fencing,
+// uncertain-response handling and receipt validation apply in both modes.
+func (c Campaign) ExceedsLimits(r Reservation) bool {
+	return !c.ProviderManaged && (c.Requests >= c.MaxRequests || r.Request.InputTokenBound > c.MaxInputTokens-c.AdmittedInputTokens || r.ReservedMicroUSD > c.MaxSpendMicroUSD-c.SpentMicroUSD-c.ReservedMicroUSD)
 }
 func (s *Service) GetCampaign(ctx context.Context, id string) (Campaign, error) {
 	return s.store.GetCampaign(ctx, id)

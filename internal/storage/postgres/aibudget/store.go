@@ -19,7 +19,7 @@ func New(db *sql.DB) *Store { return &Store{db: db} }
 var _ admission.Store = (*Store)(nil)
 
 const campaignColumns = `id,profile,offline,max_spend_micro_usd,max_input_tokens,max_requests,
- spent_micro_usd,reserved_micro_usd,admitted_input_tokens,requests,blocked,created_at`
+ spent_micro_usd,reserved_micro_usd,admitted_input_tokens,requests,blocked,created_at,provider_managed`
 const requestColumns = `identity_json::text,pricing_json::text,reserved_micro_usd,actual_micro_usd,
  state,receipt_json::text,response,response_sha256,created_at,dispatched_at,finished_at`
 
@@ -28,7 +28,7 @@ type scanner interface{ Scan(...any) error }
 func scanCampaign(row scanner) (admission.Campaign, error) {
 	var c admission.Campaign
 	err := row.Scan(&c.ID, &c.Profile, &c.Offline, &c.MaxSpendMicroUSD, &c.MaxInputTokens, &c.MaxRequests,
-		&c.SpentMicroUSD, &c.ReservedMicroUSD, &c.AdmittedInputTokens, &c.Requests, &c.Blocked, &c.CreatedAt)
+		&c.SpentMicroUSD, &c.ReservedMicroUSD, &c.AdmittedInputTokens, &c.Requests, &c.Blocked, &c.CreatedAt, &c.ProviderManaged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, admission.ErrNotFound
 	}
@@ -76,8 +76,8 @@ func (s *Store) GetRequest(ctx context.Context, id string) (admission.Reservatio
 }
 
 func (s *Store) CreateCampaign(ctx context.Context, c admission.Campaign) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO ai_budget_campaigns(id,profile,offline,max_spend_micro_usd,max_input_tokens,max_requests,created_at)
-	VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING`, c.ID, c.Profile, c.Offline, c.MaxSpendMicroUSD, c.MaxInputTokens, c.MaxRequests, c.CreatedAt)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO ai_budget_campaigns(id,profile,offline,max_spend_micro_usd,max_input_tokens,max_requests,created_at,provider_managed)
+	VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO NOTHING`, c.ID, c.Profile, c.Offline, c.MaxSpendMicroUSD, c.MaxInputTokens, c.MaxRequests, c.CreatedAt, c.ProviderManaged)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (s *Store) CreateCampaign(ctx context.Context, c admission.Campaign) error 
 	if err != nil {
 		return err
 	}
-	if stored.Profile != c.Profile || stored.Offline != c.Offline || stored.MaxSpendMicroUSD != c.MaxSpendMicroUSD || stored.MaxInputTokens != c.MaxInputTokens || stored.MaxRequests != c.MaxRequests {
+	if stored.Profile != c.Profile || stored.Offline != c.Offline || stored.ProviderManaged != c.ProviderManaged || stored.MaxSpendMicroUSD != c.MaxSpendMicroUSD || stored.MaxInputTokens != c.MaxInputTokens || stored.MaxRequests != c.MaxRequests {
 		return admission.ErrMismatch
 	}
 	return nil
@@ -130,7 +130,7 @@ func (s *Store) Reserve(ctx context.Context, r admission.Reservation) (admission
 	if pending {
 		return r, admission.ErrUncertain
 	}
-	if c.Requests >= c.MaxRequests || r.Request.InputTokenBound > c.MaxInputTokens-c.AdmittedInputTokens || r.ReservedMicroUSD > c.MaxSpendMicroUSD-c.SpentMicroUSD-c.ReservedMicroUSD {
+	if c.ExceedsLimits(r) {
 		return r, admission.ErrBudgetExceeded
 	}
 	identity, _ := json.Marshal(r.Request)

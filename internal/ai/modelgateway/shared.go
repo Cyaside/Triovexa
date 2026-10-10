@@ -55,7 +55,7 @@ func (c BudgetConfig) Validate() error {
 	if c.RepairCandidateLimit < 0 || c.RepairCandidateLimit > 3 || (c.Campaign.Profile != "internal" && c.RepairCandidateLimit > 1) {
 		return admission.ErrInvalid
 	}
-	if c.ConfigVersion == "" || c.MaxInputTokens <= 0 || c.MaxOutputTokens <= 0 || c.Campaign.MaxRequests > 100 || c.Campaign.MaxRequests < 1 {
+	if c.ConfigVersion == "" || c.MaxInputTokens <= 0 || c.MaxOutputTokens <= 0 || !c.Campaign.ValidLimits() || c.Campaign.MaxRequests > 100 {
 		return admission.ErrInvalid
 	}
 	if c.Campaign.Profile == "final-smoke" {
@@ -78,6 +78,14 @@ type SharedDispatcher struct {
 	cipher *secretstore.Cipher
 }
 
+func (d *SharedDispatcher) requestLimit() int {
+	if d.config.Campaign.ProviderManaged {
+		// Per-workflow loop protection is independent of cumulative billing caps.
+		return 20
+	}
+	return int(d.config.Campaign.MaxRequests)
+}
+
 func NewSharedDispatcher(ctx context.Context, config BudgetConfig, ledger *admission.Service, cipher *secretstore.Cipher) (*SharedDispatcher, error) {
 	if config.Validate() != nil || ledger == nil || cipher == nil {
 		return nil, admission.ErrInvalid
@@ -98,7 +106,7 @@ func (d *SharedDispatcher) Dispatch(ctx context.Context, provider ai.ProviderCon
 	gateway, err := New(Config{Provider: provider, Pricing: d.config.Pricing, CampaignID: d.config.Campaign.ID,
 		AttemptID: scope.RunID, Phase: scope.Phase, ConfigVersion: d.config.ConfigVersion,
 		MaxInputTokens: d.config.MaxInputTokens, MaxOutputTokens: d.config.MaxOutputTokens,
-		MaxRequests: int(d.config.Campaign.MaxRequests), Cipher: d.cipher, Fence: func(ctx context.Context) error { return ctx.Err() }}, d.ledger)
+		MaxRequests: d.requestLimit(), Cipher: d.cipher, Fence: func(ctx context.Context) error { return ctx.Err() }}, d.ledger)
 	if err != nil {
 		return nil, 0, 0, err
 	}
