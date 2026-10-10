@@ -28,7 +28,8 @@ import (
 func TestNativeProviderSmoke(t *testing.T) {
 	mode := os.Getenv("RUN_NATIVE_PROVIDER_SMOKE")
 	reviewed := mode == "one-approved-case-after-reviewed-context-fix"
-	repositorySmoke := mode == "last-repair-slot-on-isolated-repository"
+	providerManaged := mode == "provider-managed-on-isolated-repository"
+	repositorySmoke := mode == "last-repair-slot-on-isolated-repository" || providerManaged
 	if _, ci := os.LookupEnv("CI"); ci || (mode != "one-approved-case" && !reviewed && !repositorySmoke) {
 		t.Fatal("live provider validation requires explicit local opt-in and is forbidden in CI")
 	}
@@ -51,7 +52,17 @@ func TestNativeProviderSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal("live model admission configuration is unavailable")
 	}
-	if err := validateProviderSmokeBudget(budget, budget.Campaign, 0); err != nil {
+	if !providerManaged {
+		if err := validateProviderSmokeBudget(budget, budget.Campaign, 0); err != nil {
+			t.Fatal(err)
+		}
+	} else if !budget.Campaign.ProviderManaged || budget.Campaign.Profile != "internal" || budget.Campaign.ID == "triovexa-cr56-final-smoke-v1" {
+		t.Fatal("provider-managed validation requires a distinct explicitly configured internal campaign")
+	}
+	if providerManaged && os.Getenv("LIVE_ACKNOWLEDGED_FAILURE_PATHS") != "" {
+		t.Fatal("provider-managed validation must not borrow the previous campaign allocation")
+	}
+	if err := budget.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	if budget.Campaign.ID != os.Getenv("LIVE_EXPECTED_CAMPAIGN_ID") {
@@ -71,7 +82,7 @@ func TestNativeProviderSmoke(t *testing.T) {
 		t.Fatal("evidence path must be new; existing proof must not be overwritten")
 	}
 	proof := map[string]any{"status": "blocked", "campaign_id": budget.Campaign.ID, "model": budget.Pricing.Model,
-		"profile": "final-smoke", "approval_source": "synthetic-local-fixture", "real_github_writes": 0, "real_deployments": 0,
+		"profile": budget.Campaign.Profile, "provider_managed": providerManaged, "approval_source": "synthetic-local-fixture", "real_github_writes": 0, "real_deployments": 0,
 		"provider_invoice_reconciled": false, "created_at": time.Now().UTC()}
 	t.Cleanup(func() {
 		if err := json.NewEncoder(file).Encode(proof); err != nil {
@@ -128,16 +139,23 @@ func TestNativeProviderSmoke(t *testing.T) {
 		defer unlockCancel()
 		_, _ = lock.ExecContext(unlockCtx, `SELECT pg_advisory_unlock(1433770070, hashtext($1))`, budget.Campaign.ID)
 	}()
-	ledger, _ := admission.NewService(aibudget.New(shared))
-	before, err := ledger.GetCampaign(ctx, budget.Campaign.ID)
-	if err != nil {
-		t.Fatal("the configured campaign must already exist in the shared ledger")
-	}
+	var ledger *admission.Service
+	var before admission.Campaign
 	var prior int64
-	if shared.QueryRowContext(ctx, `SELECT count(*) FROM ai_model_requests WHERE campaign_id=$1 AND identity_json->>'phase'='repair'`, before.ID).Scan(&prior) != nil {
-		t.Fatal("previous repair dispatches could not be audited")
+	if !providerManaged {
+		ledger, _ = admission.NewService(aibudget.New(shared))
+		before, err = ledger.GetCampaign(ctx, budget.Campaign.ID)
+		if err != nil {
+			t.Fatal("the configured campaign must already exist in the shared ledger")
+		}
+		if shared.QueryRowContext(ctx, `SELECT count(*) FROM ai_model_requests WHERE campaign_id=$1 AND identity_json->>'phase'='repair'`, before.ID).Scan(&prior) != nil {
+			t.Fatal("previous repair dispatches could not be audited")
+		}
 	}
-	if repositorySmoke {
+	if providerManaged {
+		proof["authorization_mode"], proof["approval_source"] = mode, "operator-authorized-provider-limit"
+		proof["ledger_scope"] = "retained-isolated-test-schema"
+	} else if repositorySmoke {
 		paths := filepath.SplitList(os.Getenv("LIVE_ACKNOWLEDGED_FAILURE_PATHS"))
 		var reports []reviewedProviderSmokeAttempt
 		var summaries []modelgateway.Summary
@@ -217,6 +235,25 @@ func TestNativeProviderSmoke(t *testing.T) {
 		manifest("allocated")
 	})
 	proof["checkpoint_initialization_complete"] = true
+	if providerManaged {
+		// New explicitly authorized test mode; the original shared campaign and
+		// its exhausted allocation remain untouched in the application database.
+		ledger, _ = admission.NewService(f.store.ModelBudgetStore())
+		if schema := os.Getenv("LIVE_PROVIDER_ACCOUNTING_SCHEMA"); schema != "" {
+			ledger = retainedProviderSmokeLedger(t, isolated, schema, budget.Campaign.ID)
+			proof["retained_accounting_schema"] = schema
+		} else {
+			proof["retained_accounting_schema"] = f.appSchema
+		}
+		if err := ledger.CreateCampaign(ctx, budget.Campaign); err != nil {
+			t.Fatal("provider-managed accounting could not be initialized")
+		}
+		before, err = ledger.GetCampaign(ctx, budget.Campaign.ID)
+		if err != nil {
+			t.Fatal("provider-managed accounting is unavailable")
+		}
+		proof["campaign_before"] = before
+	}
 	checkout := strings.TrimSuffix(output, ".json") + "-repository"
 	proof["retained_checkout"] = checkout
 	if err := os.Mkdir(checkout, 0700); err != nil {
@@ -235,6 +272,12 @@ func TestNativeProviderSmoke(t *testing.T) {
 	// The retained failed request consumed part of the same four-decision
 	// repair allocation. An explicitly reviewed attempt cannot replenish it.
 	repairRequestsRemaining := DefaultLimits().MaxModelRequests - int(prior)
+	if providerManaged {
+		repairRequestsRemaining, err = nativeModelRequestLimit("internal", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	proof["repair_requests_remaining"] = repairRequestsRemaining
 	runner := &NativeRunner{Process: Process{Executable: f.node, Entry: f.entry, Version: EngineVersion}, Tests: tests, Store: f.store,
 		Ledger: ledger, Cipher: cipher, CheckpointDSN: f.checkpointDSN, CheckpointSchema: f.checkpoint, MaxModelRequests: repairRequestsRemaining}
@@ -269,8 +312,8 @@ func TestNativeProviderSmoke(t *testing.T) {
 	if result.Status != coderepair.StatePatchReady || result.Before.ExitCode == 0 || result.After.ExitCode != 0 || result.Runtime == nil ||
 		result.Before.RecipeID == "" || result.After.RecipeID == "" ||
 		result.Runtime.Accounting.UsageStatus != "known" || result.Runtime.Accounting.ModelRequests < 1 || tests.calls < 2 || tests.calls > 8 ||
-		after.Blocked || after.ReservedMicroUSD != 0 || after.SpentMicroUSD > 100000 {
-		t.Fatal("live validation did not produce a compatible, accounted red-to-green patch inside the target budget; no retry")
+		after.Blocked || after.ReservedMicroUSD != 0 || (!providerManaged && after.SpentMicroUSD > 100000) {
+		t.Fatal("live validation did not produce a compatible, accounted red-to-green patch; no retry")
 	}
 	proof["status"] = "passed"
 	manifest("completed")
