@@ -90,6 +90,13 @@ func checkoutGitRepository(ctx context.Context, parent, repositoryURL, baseRef, 
 	if _, err := git(ctx, "-C", checkoutPath, "config", "--local", "core.autocrlf", "false"); err != nil {
 		return "", err
 	}
+	// Private investigations compare exact Git blobs. Repository attributes must
+	// not normalize line endings, expand identifiers or invoke local filters.
+	// This override is Git metadata, never a proposed source change.
+	attributes := filepath.Join(checkoutPath, ".git", "info", "attributes")
+	if err := os.WriteFile(attributes, []byte("* -text -eol -filter -ident -working-tree-encoding\n"), 0600); err != nil {
+		return "", errors.New("private checkout attributes could not be pinned")
+	}
 	actual, err := git(ctx, "-C", checkoutPath, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
