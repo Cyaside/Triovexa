@@ -134,7 +134,9 @@ export async function investigate(start: Start, call: ToolCaller, signal: AbortS
             if (!feedback.success || start.scope.profile !== "internal" || feedback.data.max_candidates !== start.scope.limits.max_candidate_count || feedback.data.candidate_count !== candidateCount || candidateCount >= feedback.data.max_candidates) throw new RuntimeFailure("TERMINAL_RESULT_INVALID");
           } else if (name === "cannot_determine") throw new RuntimeFailure("TERMINAL_RESULT_INVALID");
           const message = new ToolMessage({ content: artifacts.result(result.value ?? {}), tool_call_id: item.id, name });
-          return new Command({ update: { messages: [message], files: artifacts.snapshot(), candidate_count: candidateCount, ...(terminal ? { terminal_result: terminal } : {}) }, ...(terminal ? { goto: END } : {}) });
+          // Read tools may arrive as a batch even when parallel_tool_calls is
+          // false. Only a proposal changes the single-value candidate channel.
+          return new Command({ update: { messages: [message], files: artifacts.snapshot(), ...(name === "propose_patch" ? { candidate_count: candidateCount } : {}), ...(terminal ? { terminal_result: terminal } : {}) }, ...(terminal ? { goto: END } : {}) });
         });
         serial = action.catch(() => undefined);
         return action;
