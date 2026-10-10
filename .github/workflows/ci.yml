@@ -109,6 +109,7 @@ jobs:
       TEST_REDIS_ADDRESS: 127.0.0.1:6379
       TEST_AGENT_RUNTIME_ENTRY: ${{ github.workspace }}/agent-runtime/dist/src/main.js
       TEST_REPAIR_SANDBOX_IMAGE: triovexa-repair-sandbox:agent-runtime
+      TEST_REPAIR_PYTHON_IMAGE: triovexa-repair-sandbox:agent-runtime-python
       AI_RUNTIME_BASELINE_REPORT: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-baseline.json
       AI_NATIVE_REPORT: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-native-payload.json
       AI_MATCHED_CORPUS_REPORT: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-matched-corpus.json
@@ -192,13 +193,15 @@ jobs:
           test -s "$AI_MATCHED_CORPUS_REPORT"
       - name: Verify native IPC and both registered sandbox recipes
         run: |
+          docker build --build-arg RUNTIME_IMAGE=python:3.12-alpine -f Dockerfile.repair-sandbox -t "$TEST_REPAIR_PYTHON_IMAGE" .
+          go test ./internal/coderepair/runtimebridge -run '^TestAutomaticPythonAlertToDraftPRIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-python-alert-pr.jsonl
           go test ./internal/coderepair/runtimebridge -run '^TestNativeRuntimeIPCProducesGoVerifiedPatchIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-native-ipc.jsonl
           go test ./internal/coderepair/runtimebridge -run '^TestPersistedNativeRepairRecoversTerminalProofIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-persisted-native.jsonl
           go test ./internal/coderepair/runtimebridge -run '^TestNativeContextPreviewFitsBatchedSkillReadsIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-context-preview.jsonl
           go test ./internal/coderepair/runtimebridge -run '^TestProviderSmokeFixture(RejectsSchemaCompatibilityRegression|RetainsRecoveryState)Integration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-smoke-guards.jsonl
           go test ./internal/coderepair/runtimebridge -run '^TestProviderSmokeRejectsSharedDatabaseIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-smoke-isolation.jsonl
           go test ./internal/coderepair/sandbox -run '^TestRegisteredPositiveIntegerRecipeRedGreenIntegration$' -count=1 -json | tee artifacts/code-repair/agent-runtime-positive-int.jsonl
-          for report in artifacts/code-repair/agent-runtime-{native-ipc,persisted-native,context-preview,smoke-guards,smoke-isolation,positive-int}.jsonl; do
+          for report in artifacts/code-repair/agent-runtime-{python-alert-pr,native-ipc,persisted-native,context-preview,smoke-guards,smoke-isolation,positive-int}.jsonl; do
             if ! grep -q '"Action":"run".*"Test":' "$report" || grep -q '"Action":"skip"' "$report"; then
               echo "A required sandbox integration suite ran no tests or skipped a test."
               exit 1

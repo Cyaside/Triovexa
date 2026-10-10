@@ -51,6 +51,10 @@ func gitBlob(content string) string {
 }
 
 func newLocalGitHubFixture(t *testing.T, binding coderepair.RepositoryBinding, publication coderepair.Publication, base, original, changed string) (*publisher.GitHub, *localGitHubFixture) {
+	return newLocalGitHubFileFixture(t, binding, publication, base, "internal/workload/worker.go", original, changed)
+}
+
+func newLocalGitHubFileFixture(t *testing.T, binding coderepair.RepositoryBinding, publication coderepair.Publication, base, sourcePath, original, changed string) (*publisher.GitHub, *localGitHubFixture) {
 	t.Helper()
 	head := sha1.Sum([]byte("synthetic-head:" + publication.OperationID))
 	fixture := &localGitHubFixture{base: base, head: hex.EncodeToString(head[:]), baseTree: strings.Repeat("3", 40), patchTree: strings.Repeat("4", 40),
@@ -91,16 +95,16 @@ func newLocalGitHubFixture(t *testing.T, binding coderepair.RepositoryBinding, p
 				writer.WriteHeader(http.StatusNotFound)
 				return
 			}
-			respond(map[string]any{"truncated": false, "tree": []any{map[string]string{"path": "internal/workload/worker.go", "mode": "100644", "type": "blob", "sha": sha}}})
+			respond(map[string]any{"truncated": false, "tree": []any{map[string]string{"path": sourcePath, "mode": "100644", "type": "blob", "sha": sha}}})
 		case request.Method == http.MethodGet && request.URL.Path == prefix+"/compare/"+fixture.base+"..."+fixture.head:
 			respond(map[string]any{"ahead_by": 1, "behind_by": 0, "total_commits": 1,
-				"files": []any{map[string]string{"filename": "internal/workload/worker.go", "status": "modified", "sha": fixture.patchBlob}}})
+				"files": []any{map[string]string{"filename": sourcePath, "status": "modified", "sha": fixture.patchBlob}}})
 		case request.Method == http.MethodPost && request.URL.Path == prefix+"/git/trees":
 			var body struct {
 				BaseTree string                                       `json:"base_tree"`
 				Tree     []struct{ Path, Mode, Type, Content string } `json:"tree"`
 			}
-			if json.NewDecoder(request.Body).Decode(&body) != nil || body.BaseTree != fixture.baseTree || len(body.Tree) != 1 || body.Tree[0].Path != "internal/workload/worker.go" || body.Tree[0].Content != changed || body.Tree[0].Mode != "100644" || body.Tree[0].Type != "blob" {
+			if json.NewDecoder(request.Body).Decode(&body) != nil || body.BaseTree != fixture.baseTree || len(body.Tree) != 1 || body.Tree[0].Path != sourcePath || body.Tree[0].Content != changed || body.Tree[0].Mode != "100644" || body.Tree[0].Type != "blob" {
 				t.Error("native approved patch did not become the exact published tree")
 			}
 			respond(map[string]string{"sha": fixture.patchTree})
