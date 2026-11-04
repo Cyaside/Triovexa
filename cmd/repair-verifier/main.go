@@ -30,10 +30,6 @@ func run(logger *slog.Logger) error {
 	if cfg.DatabaseURL == "" || strings.EqualFold(cfg.DatabaseURL, "memory") {
 		return errors.New("repair verifier requires PostgreSQL")
 	}
-	client, err := repairverify.NewWorkloadClient(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken, cfg.PrometheusBaseURL)
-	if err != nil {
-		return err
-	}
 	store, err := postgres.NewPostgresStore(cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -60,7 +56,11 @@ func run(logger *slog.Logger) error {
 			continue
 		}
 		workCtx, workCancel := context.WithTimeout(ctx, 2*time.Minute)
-		recovered, reason := observe(workCtx, store, client, d)
+		client, clientErr := repairverify.NewClient(repairverify.ClientConfig{WorkloadURL: cfg.WorkloadControlBaseURL, WorkloadToken: cfg.WorkloadControlToken, PrometheusURL: cfg.PrometheusBaseURL}, d.Contract)
+		recovered, reason := false, "Configured telemetry profile is unavailable"
+		if clientErr == nil {
+			recovered, reason = observe(workCtx, store, client, d)
+		}
 		workCancel()
 		if ctx.Err() != nil {
 			continue
@@ -84,15 +84,13 @@ type sampleFetcher interface {
 
 func observe(ctx context.Context, writer sampleWriter, fetcher sampleFetcher, d postgres.RepairDeployment) (bool, string) {
 	consecutive := 0
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
 	for {
 		now := time.Now().UTC()
 		sample, err := fetcher.Snapshot(ctx)
 		if err != nil {
 			return false, "telemetry missing or stale"
 		}
-		passed := repairverify.Check(d.Baseline, sample, d.RevisionSHA)
+		passed := repairverify.CheckFor(d.Contract, d.Baseline, sample, d.RevisionSHA)
 		if err := writer.RecordRepairVerificationSample(ctx, d, sample, passed, now); err != nil {
 			return false, "verification sample could not be persisted"
 		}
@@ -107,7 +105,7 @@ func observe(ctx context.Context, writer sampleWriter, fetcher sampleFetcher, d 
 		select {
 		case <-ctx.Done():
 			return false, "recovery was not proven within two minutes"
-		case <-ticker.C:
+		case <-time.After(10 * time.Second):
 		}
 	}
 }

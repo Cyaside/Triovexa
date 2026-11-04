@@ -1,13 +1,49 @@
 package verification
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/Cyaside/Triovexa/internal/coderepair"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestConfiguredQueueProfileRequiresObservedEnvironment(t *testing.T) {
+	environment := "production"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now().UTC()
+		var body any
+		switch r.URL.Path {
+		case "/state":
+			body = Sample{Target: "queue-worker", Environment: environment, Source: "redis-streams", Timestamp: now, Complete: true, WorkerHealthy: true, DeployedRevision: strings.Repeat("1", 40)}
+		case "/api/v1/rules":
+			body = map[string]any{"status": "success", "data": map[string]any{"groups": []any{map[string]any{"rules": []any{map[string]any{"name": "QueueBacklog", "type": "alerting", "health": "ok", "lastEvaluation": now}}}}}}
+		case "/api/v1/alerts":
+			body = map[string]any{"status": "success", "data": map[string]any{"alerts": []any{}}}
+		default:
+			w.WriteHeader(404)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	defer server.Close()
+	contract := &coderepair.TelemetryContract{ServiceName: "queue-worker", Environment: "staging", Profile: coderepair.TelemetryProfile{Version: coderepair.TelemetryVersion, Kind: "queue", AlertName: "QueueBacklog", LogSources: []string{"grafana-loki"}}}
+	client, err := NewClient(ClientConfig{WorkloadURL: server.URL, WorkloadToken: "fixture-token", PrometheusURL: server.URL}, contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Snapshot(t.Context()); err == nil {
+		t.Fatal("configured environment was substituted for the observed environment")
+	}
+	environment = "staging"
+	if sample, err := client.Snapshot(t.Context()); err != nil || !sample.Matches(contract) {
+		t.Fatalf("matching queue observation rejected: %v", err)
+	}
+}
 
 func TestRecoveryRequiresDeployedRevisionAndMeasuredProgress(t *testing.T) {
 	now := time.Now().UTC()

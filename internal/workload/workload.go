@@ -161,7 +161,7 @@ func (s *Supervisor) Handler(ctx context.Context) http.Handler {
 		if parsed, err := time.Parse(time.RFC3339Nano, heartbeat); err == nil {
 			fresh = time.Since(parsed) < 10*time.Second
 		}
-		writeJSON(w, 200, map[string]any{"target": "queue-worker", "source": "redis-streams", "timestamp": time.Now().UTC(), "complete": true, "worker_healthy": fresh, "consumer_paused": paused, "queue_backlog": backlog, "jobs_processed": processed, "jobs_produced": produced, "errors": failures, "generation": s.generation.Load(), "episode": episode, "deployed_revision": os.Getenv("WORKLOAD_DEPLOYED_REVISION")})
+		writeJSON(w, 200, map[string]any{"target": "queue-worker", "source": "redis-streams", "environment": os.Getenv("WORKLOAD_ENVIRONMENT"), "timestamp": time.Now().UTC(), "complete": true, "worker_healthy": fresh, "consumer_paused": paused, "queue_backlog": backlog, "jobs_processed": processed, "jobs_produced": produced, "errors": failures, "generation": s.generation.Load(), "episode": episode, "deployed_revision": os.Getenv("WORKLOAD_DEPLOYED_REVISION")})
 	})
 	mux.HandleFunc("/operations", func(w http.ResponseWriter, r *http.Request) {
 		if !s.authorized(r) {

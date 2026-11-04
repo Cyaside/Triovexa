@@ -60,6 +60,7 @@ type RepositoryBinding struct {
 	AllowedPaths      []string
 	TestRecipes       []string
 	ValidationProfile *ValidationProfile
+	TelemetryProfile  *TelemetryProfile
 	CredentialRef     string
 	Automation        *AutomationPolicy
 	PolicyVersion     string
@@ -69,6 +70,9 @@ type RepositoryBinding struct {
 }
 
 func (b RepositoryBinding) Validate() error {
+	if b.PolicyVersion == "repair-v3" && b.TelemetryProfile == nil {
+		return errors.New("current binding policy requires an explicit telemetry profile")
+	}
 	if b.ID == "" || b.ServiceName == "" || b.Environment == "" || b.RepositoryURL == "" || b.BaseRef == "" || b.PolicyVersion == "" {
 		return errors.New("repository binding has missing required fields")
 	}
@@ -82,6 +86,11 @@ func (b RepositoryBinding) Validate() error {
 		return errors.New("repository binding requires allowed paths and test recipes")
 	}
 	seenPaths := make(map[string]struct{}, len(b.AllowedPaths))
+	if b.TelemetryProfile != nil {
+		if err := b.TelemetryContract().Validate(); err != nil {
+			return err
+		}
+	}
 	if b.Automation != nil {
 		if err := b.Automation.Validate(); err != nil {
 			return err
@@ -246,6 +255,7 @@ func ScopeDigest(c Case, b RepositoryBinding) (string, error) {
 		ValidationProfile                                   *ValidationProfile `json:",omitempty"`
 		CredentialRef                                       string             `json:",omitempty"`
 		Automation                                          *AutomationPolicy  `json:",omitempty"`
+		TelemetryProfile                                    *TelemetryProfile  `json:",omitempty"`
 	}{
 		CaseID:            c.ID,
 		IncidentID:        c.IncidentID,
@@ -260,6 +270,7 @@ func ScopeDigest(c Case, b RepositoryBinding) (string, error) {
 		ValidationProfile: b.ValidationProfile,
 		CredentialRef:     b.CredentialRef,
 		Automation:        b.Automation,
+		TelemetryProfile:  b.TelemetryProfile,
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode repair scope: %w", err)

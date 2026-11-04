@@ -85,14 +85,8 @@ func (c *GrafanaCollector) Collect(ctx context.Context, incident domain.Incident
 		lookback = 15 * time.Minute
 	}
 
-	if rendered := c.renderer.Render(c.signals.LogsQuery, incident); rendered != "" {
-		lines, err := c.client.LokiLines(ctx, rendered, observedAt.Add(-lookback), observedAt, 5)
-		if err == nil && len(lines) > 0 {
-			items = append(items, newEvidenceItem(incident.ID, "log", "grafana-loki", lines[0], observedAt, map[string]any{
-				"log_count": len(lines),
-				"lines":     lines,
-			}))
-		}
+	if logs, err := c.applicationLogs(ctx, incident, observedAt, lookback); err == nil {
+		items = append(items, logs...)
 	}
 
 	if rendered := c.renderer.Render(c.signals.DeployLogsQuery, incident); rendered != "" {

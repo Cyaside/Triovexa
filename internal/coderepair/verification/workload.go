@@ -14,18 +14,21 @@ import (
 )
 
 type Sample struct {
-	Target           string    `json:"target"`
-	Source           string    `json:"source"`
-	Timestamp        time.Time `json:"timestamp"`
-	Complete         bool      `json:"complete"`
-	WorkerHealthy    bool      `json:"worker_healthy"`
-	ConsumerPaused   bool      `json:"consumer_paused"`
-	QueueBacklog     int64     `json:"queue_backlog"`
-	JobsProcessed    int64     `json:"jobs_processed"`
-	Errors           int64     `json:"errors"`
-	DeployedRevision string    `json:"deployed_revision"`
-	AlertObserved    bool      `json:"alert_observed"`
-	AlertCleared     bool      `json:"alert_cleared"`
+	Target           string           `json:"target"`
+	Source           string           `json:"source"`
+	Timestamp        time.Time        `json:"timestamp"`
+	Complete         bool             `json:"complete"`
+	WorkerHealthy    bool             `json:"worker_healthy"`
+	ConsumerPaused   bool             `json:"consumer_paused"`
+	QueueBacklog     int64            `json:"queue_backlog"`
+	JobsProcessed    int64            `json:"jobs_processed"`
+	Errors           int64            `json:"errors"`
+	DeployedRevision string           `json:"deployed_revision"`
+	AlertObserved    bool             `json:"alert_observed"`
+	AlertCleared     bool             `json:"alert_cleared"`
+	Environment      string           `json:"environment,omitempty"`
+	ProfileSHA256    string           `json:"profile_sha256,omitempty"`
+	HTTP             *HTTPObservation `json:"http,omitempty"`
 }
 
 // Deployment ties verification to the revision observed after a reviewed PR.
@@ -39,6 +42,7 @@ type Deployment struct {
 	Phase              string
 	VerificationStatus string
 	Baseline           Sample
+	Contract           *coderepair.TelemetryContract
 	CompletedAt        time.Time
 	LeaseToken         string
 	LeaseUntil         time.Time
@@ -46,7 +50,11 @@ type Deployment struct {
 }
 
 func (s Sample) Valid(now time.Time) bool {
-	return s.Complete && s.AlertObserved && s.Target == "queue-worker" && s.Source == "redis-streams" &&
+	if s.HTTP != nil {
+		return s.validHTTP(now)
+	}
+	matchedTarget := (s.Target == "queue-worker" && s.ProfileSHA256 == "") || (s.Target != "" && s.Environment != "" && len(s.ProfileSHA256) == 64)
+	return s.Complete && s.AlertObserved && matchedTarget && s.Source == "redis-streams" &&
 		coderepair.ValidGitRevision(s.DeployedRevision) && !s.Timestamp.IsZero() &&
 		!s.Timestamp.After(now.Add(5*time.Second)) && now.Sub(s.Timestamp) <= time.Minute &&
 		s.QueueBacklog >= 0 && s.JobsProcessed >= 0 && s.Errors >= 0
@@ -84,6 +92,22 @@ func httpRoot(raw string) (string, bool) {
 }
 
 func (c *WorkloadClient) Snapshot(ctx context.Context) (Sample, error) {
+	sample, err := c.snapshot(ctx)
+	if err != nil {
+		return Sample{}, err
+	}
+	cleared, err := c.alertCleared(ctx)
+	if err != nil {
+		return Sample{}, err
+	}
+	sample.AlertObserved, sample.AlertCleared = true, cleared
+	if !sample.Valid(time.Now().UTC()) {
+		return Sample{}, errors.New("workload telemetry is incomplete or stale")
+	}
+	return sample, nil
+}
+
+func (c *WorkloadClient) snapshot(ctx context.Context) (Sample, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint, nil)
 	if err != nil {
 		return Sample{}, err
@@ -101,92 +125,12 @@ func (c *WorkloadClient) Snapshot(ctx context.Context) (Sample, error) {
 	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<10)).Decode(&sample); err != nil {
 		return Sample{}, errors.New("workload telemetry response is invalid")
 	}
-	cleared, err := c.alertCleared(ctx)
-	if err != nil {
-		return Sample{}, err
-	}
-	sample.AlertObserved = true
-	sample.AlertCleared = cleared
-	if !sample.Valid(time.Now().UTC()) {
-		return Sample{}, errors.New("workload telemetry is incomplete or stale")
-	}
+
 	return sample, nil
 }
 
 func (c *WorkloadClient) alertCleared(ctx context.Context) (bool, error) {
-	if err := c.requireAlertRule(ctx); err != nil {
-		return false, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.alertsEndpoint, nil)
-	if err != nil {
-		return false, err
-	}
-	response, err := c.client.Do(req)
-	if err != nil {
-		return false, errors.New("Prometheus alert status unavailable")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return false, errors.New("Prometheus alert status returned non-success")
-	}
-	var payload struct {
-		Status string `json:"status"`
-		Data   struct {
-			Alerts []struct {
-				Labels struct {
-					AlertName string `json:"alertname"`
-				} `json:"labels"`
-				State string `json:"state"`
-			} `json:"alerts"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&payload); err != nil || payload.Status != "success" {
-		return false, errors.New("Prometheus alert status is invalid")
-	}
-	for _, alert := range payload.Data.Alerts {
-		if alert.Labels.AlertName == "TriovexaQueueBacklogHigh" && alert.State != "inactive" {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-func (c *WorkloadClient) requireAlertRule(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.rulesEndpoint, nil)
-	if err != nil {
-		return err
-	}
-	response, err := c.client.Do(req)
-	if err != nil {
-		return errors.New("Prometheus alert rule unavailable")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return errors.New("Prometheus alert rule returned non-success")
-	}
-	var payload struct {
-		Status string `json:"status"`
-		Data   struct {
-			Groups []struct {
-				Rules []struct {
-					Name   string `json:"name"`
-					Type   string `json:"type"`
-					Health string `json:"health"`
-				} `json:"rules"`
-			} `json:"groups"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 256<<10)).Decode(&payload); err != nil || payload.Status != "success" {
-		return errors.New("Prometheus alert rule status is invalid")
-	}
-	for _, group := range payload.Data.Groups {
-		for _, rule := range group.Rules {
-			if rule.Name == "TriovexaQueueBacklogHigh" && rule.Type == "alerting" && rule.Health == "ok" {
-				return nil
-			}
-		}
-	}
-	return errors.New("required Prometheus alert rule is missing or unhealthy")
+	return readAlertStatus(ctx, c.client, c.alertsEndpoint, c.rulesEndpoint, nil)
 }
 
 // Check requires a new deployed revision and measurable worker progress.

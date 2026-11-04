@@ -103,12 +103,12 @@ func (s *Store) createRepairCaseTx(ctx context.Context, tx *sql.Tx, repairCase c
 	if !coderepair.ValidGitRevision(repairCase.BaseSHA) || !coderepair.ValidGitRevision(repairCase.DeployedSHA) {
 		return errors.New("repair case requires complete Git revision IDs")
 	}
-	deployed, err := trustedDeployedRevisionTx(ctx, tx, repairCase.IncidentID, service, time.Now().UTC())
+	deployed, err := trustedDeployedRevisionTx(ctx, tx, repairCase.IncidentID, binding, time.Now().UTC())
 	if err != nil || deployed != repairCase.DeployedSHA {
 		return errors.New("repair case deployed revision does not match fresh workload evidence")
 	}
 	if snapshot != nil {
-		freshLog, err := hasFreshRepairLogTx(ctx, tx, repairCase.IncidentID, time.Now().UTC())
+		freshLog, err := hasFreshRepairLogTx(ctx, tx, repairCase.IncidentID, binding, time.Now().UTC())
 		if err != nil {
 			return err
 		}
@@ -166,10 +166,10 @@ func (s *Store) GetRepairEvidenceSnapshot(ctx context.Context, caseID string) (c
 	return snapshot, nil
 }
 
-func trustedDeployedRevisionTx(ctx context.Context, tx *sql.Tx, incidentID, service string, now time.Time) (string, error) {
+func trustedDeployedRevisionTx(ctx context.Context, tx *sql.Tx, incidentID string, binding coderepair.RepositoryBinding, now time.Time) (string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id,incident_id,type,source,snippet,timestamp,metadata_json::text
-		FROM evidence_items WHERE incident_id=$1 AND source='workload-control' AND type='metric'
-		AND timestamp >= $2 ORDER BY timestamp DESC LIMIT 20`, incidentID, now.Add(-time.Minute))
+		FROM evidence_items WHERE incident_id=$1 AND source=$3 AND type='metric'
+		AND timestamp >= $2 ORDER BY timestamp DESC LIMIT 20`, incidentID, now.Add(-time.Minute), binding.MetricEvidenceSource())
 	if err != nil {
 		return "", err
 	}
@@ -187,14 +187,22 @@ func trustedDeployedRevisionTx(ctx context.Context, tx *sql.Tx, incidentID, serv
 		return "", err
 	}
 	rows.Close()
-	return coderepair.TrustedDeployedRevision(domain.Incident{ID: incidentID, ServiceName: service}, items, now)
+	return coderepair.TrustedDeployedRevisionForBinding(domain.Incident{ID: incidentID, ServiceName: binding.ServiceName, Environment: binding.Environment}, binding, items, now)
 }
 
-func hasFreshRepairLogTx(ctx context.Context, tx *sql.Tx, incidentID string, now time.Time) (bool, error) {
+func hasFreshRepairLogTx(ctx context.Context, tx *sql.Tx, incidentID string, binding coderepair.RepositoryBinding, now time.Time) (bool, error) {
+	var sources any
+	if binding.TelemetryProfile != nil {
+		data, err := json.Marshal(binding.TelemetryProfile.LogSources)
+		if err != nil {
+			return false, err
+		}
+		sources = string(data)
+	}
 	var fresh bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM evidence_items
-		WHERE incident_id=$1 AND type='log' AND snippet<>'' AND timestamp >= $2 AND timestamp <= $3)`,
-		incidentID, now.Add(-time.Minute), now.Add(5*time.Second)).Scan(&fresh)
+		WHERE incident_id=$1 AND type='log' AND snippet<>'' AND timestamp >= $2 AND timestamp <= $3 AND ($4::jsonb IS NULL OR source IN (SELECT jsonb_array_elements_text($4::jsonb))))`,
+		incidentID, now.Add(-time.Minute), now.Add(5*time.Second), sources).Scan(&fresh)
 	return fresh, err
 }
 
@@ -392,11 +400,11 @@ func (s *Store) approveRepairInvestigationTx(ctx context.Context, tx *sql.Tx, ap
 		snapshot.DeployedRevision != c.DeployedSHA {
 		return false, errors.New("repair approval evidence snapshot is corrupt or mismatched")
 	}
-	deployed, err := trustedDeployedRevisionTx(ctx, tx, c.IncidentID, binding.ServiceName, time.Now().UTC())
+	deployed, err := trustedDeployedRevisionTx(ctx, tx, c.IncidentID, binding, time.Now().UTC())
 	if err != nil || deployed != c.DeployedSHA {
 		return false, errors.New("repair approval requires fresh matching deployed revision")
 	}
-	freshLog, err := hasFreshRepairLogTx(ctx, tx, c.IncidentID, time.Now().UTC())
+	freshLog, err := hasFreshRepairLogTx(ctx, tx, c.IncidentID, binding, time.Now().UTC())
 	if err != nil {
 		return false, err
 	}

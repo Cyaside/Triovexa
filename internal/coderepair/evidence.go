@@ -41,6 +41,7 @@ type EvidenceSnapshot struct {
 	Environment      string          `json:"environment"`
 	CapturedAt       time.Time       `json:"captured_at"`
 	DeployedRevision string          `json:"deployed_revision,omitempty"`
+	TelemetrySHA256  string          `json:"telemetry_sha256,omitempty"`
 	Entries          []EvidenceEntry `json:"entries"`
 	SHA256           string          `json:"sha256"`
 }
@@ -76,6 +77,31 @@ func CaptureEvidence(ctx context.Context, source EvidenceLister, incident domain
 		return EvidenceSnapshot{}, fmt.Errorf("list incident evidence: %s", security.Redact(err.Error()))
 	}
 	return BuildEvidenceSnapshot(incident, items, now, limits)
+}
+
+func CaptureEvidenceForBinding(ctx context.Context, source EvidenceLister, incident domain.Incident, binding RepositoryBinding, now time.Time, limits EvidenceLimits) (EvidenceSnapshot, error) {
+	items, err := source.ListEvidenceItems(ctx, incident.ID)
+	if err != nil {
+		return EvidenceSnapshot{}, err
+	}
+	snapshot, err := BuildEvidenceSnapshot(incident, items, now, limits)
+	if err != nil {
+		return snapshot, err
+	}
+	revision, err := TrustedDeployedRevisionForBinding(incident, binding, items, now)
+	if err != nil {
+		return EvidenceSnapshot{}, err
+	}
+	snapshot.DeployedRevision = revision
+	snapshot.TelemetrySHA256 = binding.TelemetryContract().Digest()
+	snapshot.SHA256 = ""
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return EvidenceSnapshot{}, err
+	}
+	sum := sha256.Sum256(data)
+	snapshot.SHA256 = hex.EncodeToString(sum[:])
+	return snapshot, nil
 }
 
 // BuildEvidenceSnapshot serializes only known fields. Arbitrary metadata JSON
@@ -188,20 +214,23 @@ func CheckInvestigationEvidence(incident domain.Incident, binding RepositoryBind
 		snapshot.Environment != incident.Environment || !ValidGitRevision(snapshot.DeployedRevision) {
 		return errors.New("fresh deployed revision is unavailable")
 	}
+	if snapshot.TelemetrySHA256 != binding.TelemetryContract().Digest() {
+		return errors.New("evidence telemetry profile changed")
+	}
 	metric, log := false, false
 	for _, entry := range snapshot.Entries {
-		if entry.Status != EvidenceAvailable {
+		if entry.Status != EvidenceAvailable || entry.ObservedAt.IsZero() || entry.ObservedAt.After(now.Add(5*time.Second)) || now.Sub(entry.ObservedAt) > time.Minute {
 			continue
 		}
-		if entry.Type == "metric" && entry.Source == "workload-control" {
+		if entry.Type == "metric" && entry.Source == binding.MetricEvidenceSource() {
 			metric = true
 		}
-		if entry.Type == "log" {
+		if entry.Type == "log" && binding.AllowsLogSource(entry.Source) {
 			log = true
 		}
 	}
 	if !metric || !log {
-		return errors.New("fresh workload metric and log evidence are required")
+		return errors.New("fresh profile-matched metric and log evidence are required")
 	}
 	return nil
 }

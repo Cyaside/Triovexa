@@ -63,7 +63,7 @@ func (s *ProposalService) Propose(ctx context.Context, incidentID, actorID strin
 }
 
 func (s *ProposalService) prepare(ctx context.Context, incident domain.Incident, binding RepositoryBinding, actorID string, now time.Time) (Case, Event, EvidenceSnapshot, error) {
-	snapshot, err := CaptureEvidence(ctx, s.repository, incident, now, s.limits)
+	snapshot, err := CaptureEvidenceForBinding(ctx, s.repository, incident, binding, now, s.limits)
 	if err != nil {
 		return Case{}, Event{}, EvidenceSnapshot{}, err
 	}

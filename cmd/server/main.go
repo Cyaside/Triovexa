@@ -16,6 +16,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/auth"
 	"github.com/Cyaside/Triovexa/internal/coderepair"
 	"github.com/Cyaside/Triovexa/internal/coderepair/sandbox"
+	repairverify "github.com/Cyaside/Triovexa/internal/coderepair/verification"
 	appconfig "github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/connections"
 	"github.com/Cyaside/Triovexa/internal/domain"
@@ -119,17 +120,23 @@ func main() {
 		Lookback:        cfg.GrafanaQueryLookback,
 	}
 	queryRenderer := observability.NewQueryRenderer()
+	grafanaCollector := observability.NewGrafanaCollector(grafanaClient, grafanaSignals, queryRenderer)
 	var localCollector interface {
 		Collect(context.Context, domain.Incident) ([]domain.EvidenceItem, error)
 	} = observability.NewDemoCollector(cfg.DemoServiceBaseURL)
 	if strings.TrimSpace(cfg.WorkloadControlBaseURL) != "" {
 		localCollector = observability.NewWorkloadCollector(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken)
 	}
-	collector := observability.NewSwitchingCollector(
+	var collector observability.IncidentCollector = observability.NewSwitchingCollector(
 		runtimeModes,
 		localCollector,
-		observability.NewGrafanaCollector(grafanaClient, grafanaSignals, queryRenderer),
+		grafanaCollector,
 	)
+	if bindings, ok := repository.(interface {
+		GetActiveRepositoryBinding(context.Context, string, string) (coderepair.RepositoryBinding, error)
+	}); ok {
+		collector = observability.NewRepairCollector(bindings, collector, observability.NewRepairLogCollector(grafanaCollector), repairverify.ClientConfig{WorkloadURL: cfg.WorkloadControlBaseURL, WorkloadToken: cfg.WorkloadControlToken, PrometheusURL: cfg.PrometheusBaseURL})
+	}
 	generator := triage.NewSwitchingGenerator(
 		runtimeModes,
 		triage.NewHeuristicGenerator(),

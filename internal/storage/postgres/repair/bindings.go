@@ -21,6 +21,14 @@ func (s *Store) CreateRepositoryBinding(ctx context.Context, binding coderepair.
 	if err != nil {
 		return err
 	}
+	var telemetry any
+	if binding.TelemetryProfile != nil {
+		encoded, err := json.Marshal(binding.TelemetryProfile)
+		if err != nil {
+			return err
+		}
+		telemetry = string(encoded)
+	}
 	var profile any
 	var automation any
 	if binding.Automation != nil {
@@ -38,10 +46,10 @@ func (s *Store) CreateRepositoryBinding(ctx context.Context, binding coderepair.
 		profile = string(encoded)
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO repository_bindings
-		(id, service_name, environment, repository_url, base_ref, allowed_paths_json, test_recipes_json, policy_version, enabled, created_at, updated_at, validation_profile_json, credential_ref, automation_json)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb)`,
+		(id, service_name, environment, repository_url, base_ref, allowed_paths_json, test_recipes_json, policy_version, enabled, created_at, updated_at, validation_profile_json, credential_ref, automation_json, telemetry_profile_json)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb,$15::jsonb)`,
 		binding.ID, binding.ServiceName, binding.Environment, binding.RepositoryURL, binding.BaseRef,
-		string(paths), string(recipes), binding.PolicyVersion, binding.Enabled, binding.CreatedAt.UTC(), binding.UpdatedAt.UTC(), profile, binding.CredentialRef, automation)
+		string(paths), string(recipes), binding.PolicyVersion, binding.Enabled, binding.CreatedAt.UTC(), binding.UpdatedAt.UTC(), profile, binding.CredentialRef, automation, telemetry)
 	return err
 }
 
@@ -50,8 +58,9 @@ func scanRepositoryBinding(row repairScanner) (coderepair.RepositoryBinding, err
 	var paths, recipes string
 	var profile sql.NullString
 	var automation sql.NullString
+	var telemetry sql.NullString
 	err := row.Scan(&binding.ID, &binding.ServiceName, &binding.Environment, &binding.RepositoryURL,
-		&binding.BaseRef, &paths, &recipes, &binding.PolicyVersion, &binding.Enabled, &binding.CreatedAt, &binding.UpdatedAt, &profile, &binding.CredentialRef, &automation)
+		&binding.BaseRef, &paths, &recipes, &binding.PolicyVersion, &binding.Enabled, &binding.CreatedAt, &binding.UpdatedAt, &profile, &binding.CredentialRef, &automation, &telemetry)
 	if errors.Is(err, sql.ErrNoRows) {
 		return coderepair.RepositoryBinding{}, ErrNotFound
 	}
@@ -69,6 +78,11 @@ func scanRepositoryBinding(row repairScanner) (coderepair.RepositoryBinding, err
 			return coderepair.RepositoryBinding{}, err
 		}
 	}
+	if telemetry.Valid {
+		if err := json.Unmarshal([]byte(telemetry.String), &binding.TelemetryProfile); err != nil {
+			return coderepair.RepositoryBinding{}, err
+		}
+	}
 	if automation.Valid {
 		if err := json.Unmarshal([]byte(automation.String), &binding.Automation); err != nil {
 			return coderepair.RepositoryBinding{}, err
@@ -78,7 +92,7 @@ func scanRepositoryBinding(row repairScanner) (coderepair.RepositoryBinding, err
 }
 
 const repairBindingColumns = `id, service_name, environment, repository_url, base_ref,
-	allowed_paths_json::text, test_recipes_json::text, policy_version, enabled, created_at, updated_at, validation_profile_json::text, credential_ref, automation_json::text`
+	allowed_paths_json::text, test_recipes_json::text, policy_version, enabled, created_at, updated_at, validation_profile_json::text, credential_ref, automation_json::text, telemetry_profile_json::text`
 
 func (s *Store) GetActiveRepositoryBinding(ctx context.Context, service, environment string) (coderepair.RepositoryBinding, error) {
 	binding, err := scanRepositoryBinding(s.db.QueryRowContext(ctx, `SELECT `+repairBindingColumns+`

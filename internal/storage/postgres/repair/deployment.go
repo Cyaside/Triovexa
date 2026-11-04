@@ -16,15 +16,15 @@ import (
 type RepairDeployment = repairverify.Deployment
 
 const deploymentColumns = `id,case_id,environment,revision_sha,deployment_id,observed_at,phase,
-	verification_status,baseline_json::text,completed_at,lease_token,lease_until,attempts`
+	verification_status,baseline_json::text,completed_at,lease_token,lease_until,attempts,telemetry_contract_json::text`
 
 func scanDeployment(row repairScanner) (RepairDeployment, error) {
 	var d RepairDeployment
-	var baseline sql.NullString
+	var baseline, contract sql.NullString
 	var completed, leaseUntil sql.NullTime
 	err := row.Scan(&d.ID, &d.CaseID, &d.Environment, &d.RevisionSHA,
 		&d.DeploymentID, &d.ObservedAt, &d.Phase, &d.VerificationStatus,
-		&baseline, &completed, &d.LeaseToken, &leaseUntil, &d.Attempts)
+		&baseline, &completed, &d.LeaseToken, &leaseUntil, &d.Attempts, &contract)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RepairDeployment{}, ErrNotFound
 	}
@@ -34,6 +34,11 @@ func scanDeployment(row repairScanner) (RepairDeployment, error) {
 	if baseline.Valid {
 		if err := json.Unmarshal([]byte(baseline.String), &d.Baseline); err != nil {
 			return RepairDeployment{}, err
+		}
+	}
+	if contract.Valid {
+		if err := json.Unmarshal([]byte(contract.String), &d.Contract); err != nil || d.Contract == nil || d.Contract.Validate() != nil {
+			return RepairDeployment{}, errors.New("stored telemetry contract is invalid")
 		}
 	}
 	if completed.Valid {
@@ -75,21 +80,29 @@ func (s *Store) StartRepairDeployment(ctx context.Context, caseID, deploymentID,
 	if p.State != coderepair.PublicationMerged || p.MergeSHA != revision {
 		return false, errors.New("deployment revision does not match merged PR")
 	}
-	binding, err := getRepairBindingTx(ctx, tx, c.BindingID)
+	contract, err := deploymentContractTx(ctx, tx, c, environment)
 	if err != nil {
 		return false, err
 	}
-	if binding.Environment != environment || !binding.Enabled {
+	if !baseline.Matches(contract) {
 		return false, errors.New("deployment environment or binding changed")
+	}
+	var contractJSON any
+	if contract != nil {
+		data, err := json.Marshal(contract)
+		if err != nil {
+			return false, err
+		}
+		contractJSON = string(data)
 	}
 	content, err := json.Marshal(baseline)
 	if err != nil {
 		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO repair_deployments
-		(id,case_id,environment,revision_sha,deployment_id,observed_at,verification_status,created_at,phase,baseline_json)
-		VALUES ($1,$2,$3,$4,$5,$6,'pending',$6,'started',$7::jsonb)`,
-		uuid.NewString(), caseID, environment, revision, deploymentID, now.UTC(), string(content)); err != nil {
+		(id,case_id,environment,revision_sha,deployment_id,observed_at,verification_status,created_at,phase,baseline_json,telemetry_contract_json)
+		VALUES ($1,$2,$3,$4,$5,$6,'pending',$6,'started',$7::jsonb,$8::jsonb)`,
+		uuid.NewString(), caseID, environment, revision, deploymentID, now.UTC(), string(content), contractJSON); err != nil {
 		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE repair_cases SET state='awaiting_deployment',version=version+1,updated_at=$1 WHERE id=$2`, now.UTC(), caseID); err != nil {
@@ -123,6 +136,10 @@ func (s *Store) CompleteRepairDeployment(ctx context.Context, caseID, deployment
 	}
 	if d.CaseID != caseID || d.Environment != environment || d.RevisionSHA != revision || d.Phase != "started" || now.Before(d.ObservedAt) {
 		return false, errors.New("deployment completion does not match its start event")
+	}
+	contract, err := deploymentContractTx(ctx, tx, c, environment)
+	if err != nil || contract.Digest() != d.Contract.Digest() {
+		return false, errors.New("deployment telemetry profile changed")
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE repair_deployments SET phase='completed',completed_at=$1 WHERE deployment_id=$2`, now.UTC(), deploymentID); err != nil {
 		return false, err
@@ -167,30 +184,43 @@ func (s *Store) ClaimRepairVerification(ctx context.Context, now time.Time, leas
 }
 
 func (s *Store) RecordRepairVerificationSample(ctx context.Context, d RepairDeployment, sample repairverify.Sample, passed bool, now time.Time) error {
-	if d.DeploymentID == "" || d.LeaseToken == "" || now.IsZero() || !sample.Valid(now) ||
-		!sample.Timestamp.After(d.CompletedAt) || passed != repairverify.Check(d.Baseline, sample, d.RevisionSHA) {
-		return errors.New("invalid repair verification sample")
+	if d.DeploymentID == "" || d.LeaseToken == "" || now.IsZero() {
+		return errors.New("invalid repair verification identity")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	current, err := scanDeployment(tx.QueryRowContext(ctx, `SELECT `+deploymentColumns+` FROM repair_deployments WHERE deployment_id=$1 FOR UPDATE`, d.DeploymentID))
+	if err != nil {
+		return err
+	}
+	if current.LeaseToken != d.LeaseToken || !current.LeaseUntil.After(now) || current.VerificationStatus != "pending" {
+		return ErrRepairConflict
+	}
+	c, err := scanRepairCase(tx.QueryRowContext(ctx, `SELECT `+repairCaseColumns+` FROM repair_cases WHERE id=$1`, current.CaseID))
+	if err != nil {
+		return err
+	}
+	if c.State != coderepair.StateVerifying {
+		return ErrRepairConflict
+	}
+	contract, err := deploymentContractTx(ctx, tx, c, current.Environment)
+	if err != nil || contract.Digest() != current.Contract.Digest() || !sample.Valid(now) || !sample.Matches(current.Contract) ||
+		!sample.Timestamp.After(current.CompletedAt) || passed != repairverify.CheckFor(current.Contract, current.Baseline, sample, current.RevisionSHA) {
+		return errors.New("invalid repair verification sample or changed binding")
 	}
 	content, err := json.Marshal(sample)
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO repair_verification_samples
-		(deployment_id,observation_number,captured_at,sample_json,passed)
-		SELECT $1,COALESCE((SELECT max(observation_number)+1 FROM repair_verification_samples WHERE deployment_id=$1),1),$2,$3::jsonb,$4
-		WHERE EXISTS (SELECT 1 FROM repair_deployments WHERE deployment_id=$1 AND lease_token=$5 AND lease_until>$2 AND verification_status='pending')`,
-		d.DeploymentID, now.UTC(), string(content), passed, d.LeaseToken)
+	_, err = tx.ExecContext(ctx, `INSERT INTO repair_verification_samples (deployment_id,observation_number,captured_at,sample_json,passed)
+ VALUES ($1,COALESCE((SELECT max(observation_number)+1 FROM repair_verification_samples WHERE deployment_id=$1),1),$2,$3::jsonb,$4)`, current.DeploymentID, now.UTC(), string(content), passed)
 	if err != nil {
 		return err
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return ErrRepairConflict
-	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *Store) FinishRepairVerification(ctx context.Context, d RepairDeployment, recovered bool, reason string, now time.Time) (bool, error) {
@@ -209,12 +239,19 @@ func (s *Store) FinishRepairVerification(ctx context.Context, d RepairDeployment
 	if current.VerificationStatus != "pending" || current.LeaseToken != d.LeaseToken || !current.LeaseUntil.After(now) {
 		return false, nil
 	}
-	c, err := scanRepairCase(tx.QueryRowContext(ctx, `SELECT `+repairCaseColumns+` FROM repair_cases WHERE id=$1 FOR UPDATE`, d.CaseID))
+	c, err := scanRepairCase(tx.QueryRowContext(ctx, `SELECT `+repairCaseColumns+` FROM repair_cases WHERE id=$1 FOR UPDATE`, current.CaseID))
 	if err != nil {
 		return false, err
 	}
 	if c.State != coderepair.StateVerifying {
 		return false, nil
+	}
+	contract, err := deploymentContractTx(ctx, tx, c, current.Environment)
+	if err != nil || contract.Digest() != current.Contract.Digest() {
+		if recovered {
+			return false, errors.New("verification telemetry profile changed")
+		}
+		reason = "telemetry binding disabled or changed; recovery is unproven"
 	}
 	if recovered {
 		rows, err := tx.QueryContext(ctx, `SELECT sample_json::text,captured_at,passed FROM repair_verification_samples
@@ -238,7 +275,7 @@ func (s *Store) FinishRepairVerification(ctx context.Context, d RepairDeployment
 				return false, err
 			}
 			if !passed || !sample.Valid(at) || !sample.Timestamp.After(current.CompletedAt) ||
-				!repairverify.Check(current.Baseline, sample, current.RevisionSHA) {
+				(!sample.Matches(current.Contract) || !repairverify.CheckFor(current.Contract, current.Baseline, sample, current.RevisionSHA)) {
 				rows.Close()
 				return false, errors.New("recovery samples do not match deployed revision")
 			}
@@ -265,10 +302,10 @@ func (s *Store) FinishRepairVerification(ctx context.Context, d RepairDeployment
 		lease_token='',lease_until=NULL WHERE deployment_id=$3`, status, string(result), d.DeploymentID); err != nil {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE repair_cases SET state=$1,version=version+1,updated_at=$2 WHERE id=$3`, next, now.UTC(), d.CaseID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE repair_cases SET state=$1,version=version+1,updated_at=$2 WHERE id=$3`, next, now.UTC(), current.CaseID); err != nil {
 		return false, err
 	}
-	if err := insertRepairEventTx(ctx, tx, repairEventActor(d.CaseID, "repair-verifier", "deployment_verification", status+": "+reason, now)); err != nil {
+	if err := insertRepairEventTx(ctx, tx, repairEventActor(current.CaseID, "repair-verifier", "deployment_verification", status+": "+reason, now)); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()

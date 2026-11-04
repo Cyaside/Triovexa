@@ -96,6 +96,8 @@ func registerRepairRoutes(mux *http.ServeMux, cfg config.Config, repository stor
 		writeJSON(w, http.StatusOK, map[string]any{"applied": applied})
 	})
 	deploymentStore, _ := repository.(interface {
+		GetRepairCase(context.Context, string) (coderepair.Case, error)
+		GetRepositoryBinding(context.Context, string) (coderepair.RepositoryBinding, error)
 		StartRepairDeployment(context.Context, string, string, string, string, repairverify.Sample, time.Time) (bool, error)
 		CompleteRepairDeployment(context.Context, string, string, string, string, time.Time) (bool, error)
 	})
@@ -104,7 +106,7 @@ func registerRepairRoutes(mux *http.ServeMux, cfg config.Config, repository stor
 			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed.")
 			return
 		}
-		if deploymentStore == nil || cfg.RepairDeploymentToken == "" || cfg.WorkloadControlToken == "" {
+		if deploymentStore == nil || cfg.RepairDeploymentToken == "" {
 			writeAPIError(w, http.StatusServiceUnavailable, "repair_deployment_unavailable", "Repair deployment correlation is not configured.")
 			return
 		}
@@ -128,7 +130,17 @@ func registerRepairRoutes(mux *http.ServeMux, cfg config.Config, repository stor
 		var err error
 		switch body.Phase {
 		case "started":
-			client, clientErr := repairverify.NewWorkloadClient(cfg.WorkloadControlBaseURL, cfg.WorkloadControlToken, cfg.PrometheusBaseURL)
+			c, loadErr := deploymentStore.GetRepairCase(r.Context(), body.CaseID)
+			if loadErr != nil {
+				writeAPIError(w, 404, "not_found", "Repair case was not found.")
+				return
+			}
+			binding, loadErr := deploymentStore.GetRepositoryBinding(r.Context(), c.BindingID)
+			if loadErr != nil || !binding.Enabled || binding.Environment != body.Environment {
+				writeAPIError(w, 409, "binding_changed", "Deployment target no longer matches the binding.")
+				return
+			}
+			client, clientErr := repairverify.NewClient(repairverify.ClientConfig{WorkloadURL: cfg.WorkloadControlBaseURL, WorkloadToken: cfg.WorkloadControlToken, PrometheusURL: cfg.PrometheusBaseURL}, binding.TelemetryContract())
 			if clientErr != nil {
 				writeAPIError(w, http.StatusServiceUnavailable, "telemetry_unavailable", "Workload telemetry is not configured.")
 				return

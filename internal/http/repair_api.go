@@ -91,6 +91,7 @@ func registerRepairAPI(mux *http.ServeMux, cfg config.Config, repository storage
 				AllowedPaths      []string                      `json:"allowed_paths"`
 				TestRecipes       []string                      `json:"test_recipes"`
 				ValidationProfile *coderepair.ValidationProfile `json:"validation_profile"`
+				TelemetryProfile  *coderepair.TelemetryProfile  `json:"telemetry_profile"`
 				CredentialRef     string                        `json:"credential_ref"`
 				Automation        *coderepair.AutomationPolicy  `json:"automation"`
 			}
@@ -109,8 +110,12 @@ func registerRepairAPI(mux *http.ServeMux, cfg config.Config, repository storage
 			binding := coderepair.RepositoryBinding{ID: uuid.NewString(), ServiceName: body.ServiceName,
 				Environment: body.Environment, RepositoryURL: body.RepositoryURL, BaseRef: body.BaseRef,
 				AllowedPaths: body.AllowedPaths, TestRecipes: body.TestRecipes,
-				PolicyVersion: "repair-v2", Enabled: true, CreatedAt: now, UpdatedAt: now,
-				ValidationProfile: body.ValidationProfile, CredentialRef: body.CredentialRef, Automation: body.Automation}
+				PolicyVersion: "repair-v3", Enabled: true, CreatedAt: now, UpdatedAt: now,
+				ValidationProfile: body.ValidationProfile, TelemetryProfile: body.TelemetryProfile, CredentialRef: body.CredentialRef, Automation: body.Automation}
+			if binding.TelemetryProfile == nil {
+				writeAPIError(w, http.StatusBadRequest, "telemetry_profile_required", "Configure evidence sources and recovery signals for this service.")
+				return
+			}
 			if binding.ValidationProfile == nil {
 				writeAPIError(w, http.StatusBadRequest, "profile_required", "Configure a repository validation profile.")
 				return

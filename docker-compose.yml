@@ -41,6 +41,7 @@ services:
       CONTROL_PORT: "8091"
       CONTROL_API_TOKEN: ${WORKLOAD_CONTROL_TOKEN:-local-control-token}
       WORKLOAD_DEPLOYED_REVISION: ${WORKLOAD_DEPLOYED_REVISION:-}
+      WORKLOAD_ENVIRONMENT: ${WORKLOAD_ENVIRONMENT:-local}
     depends_on:
       redis:
         condition: service_healthy
