@@ -226,7 +226,9 @@ suite("Postgres checkpoint isolation and recovery", () => {
 
   it("retrieves offloaded trusted instructions with a new bounded range before source and terminal patch in four requests", async () => {
     const start = await fixture(); start.scope.profile = "final-smoke"; start.transport.input_budget_mode = "gateway-preview";
-    const books = ["repository-investigation", "incident-evidence", "regression-patch"];
+    // Retrieve only the relevant investigation/patch skills. The unchanged
+    // strict 6K fixture budget also includes the publication metadata schema.
+    const books = ["repository-investigation", "regression-patch"];
     const wires: Record<string, unknown>[] = []; let previews = 0; let effects = 0;
     const fetcher: typeof fetch = async (_input, init) => {
       const body = JSON.parse(String(init?.body)); const headers = new Headers(init?.headers);
@@ -249,7 +251,7 @@ suite("Postgres checkpoint isolation and recovery", () => {
       return { call_id: id, status: "ok" as const, value: name === "repo_read" ? { path: "internal/worker/job.go", digest: "pinned-source", start_line: 1, content: "package worker\nfunc old() {}" }
         : { terminal: true, outcome: "patch_ready", code: "PATCH_READY" } };
     };
-    expect(await investigate(start, caller, new AbortController().signal, fetcher)).toMatchObject({ status: "completed", code: "PATCH_READY", model_requests: 4, tool_steps: 6 });
+    expect(await investigate(start, caller, new AbortController().signal, fetcher)).toMatchObject({ status: "completed", code: "PATCH_READY", model_requests: 4, tool_steps: 5 });
     expect(wires).toHaveLength(4); expect(effects).toBe(2);
     // The largest completed result is offloaded first; smaller instructions
     // remain inline when the gateway's measured cap already fits. Check the
@@ -266,7 +268,7 @@ suite("Postgres checkpoint isolation and recovery", () => {
       expect(messages.filter(isAIMessage).map((message) => message.additional_kwargs.reasoning_content)).toContain("Load relevant pinned playbooks");
       expect(JSON.stringify(stored.checkpoint.channel_values.files)).toContain("Untrusted".toLowerCase());
     } finally { if ("end" in saver) await saver.end(); }
-    expect(await investigate(start, caller, new AbortController().signal, fetcher)).toMatchObject({ status: "completed", model_requests: 4, tool_steps: 6 });
+    expect(await investigate(start, caller, new AbortController().signal, fetcher)).toMatchObject({ status: "completed", model_requests: 4, tool_steps: 5 });
     expect(wires).toHaveLength(4); expect(effects).toBe(2);
   }, 30000);
 
@@ -281,7 +283,7 @@ suite("Postgres checkpoint isolation and recovery", () => {
       }
       wires.push(body);
       return response(completion(start.transport.model, wires.length === 1
-        ? ["repository-investigation", "incident-evidence", "regression-patch"].map((name, index) => ({ id: `first-skill-${index}`, name: "read_file", args: { file_path: `/skills/${name}/SKILL.md`, offset: 0, limit: 100 } }))
+        ? ["repository-investigation", "regression-patch"].map((name, index) => ({ id: `first-skill-${index}`, name: "read_file", args: { file_path: `/skills/${name}/SKILL.md`, offset: 0, limit: 100 } }))
         : [{ id: "repeated-skill", name: "read_file", args: { file_path: "/skills/regression-patch/SKILL.md", offset: 0, limit: 100 } }]));
     };
     expect(await investigate(start, async () => { effects++; throw new Error("Only virtual skills are authorized in this fixture"); }, new AbortController().signal, fetcher))
