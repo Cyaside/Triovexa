@@ -70,6 +70,9 @@ func validateToolSnapshot(ctx context.Context, state toolSnapshot, session *Tool
 func validateRestoredPatch(ctx context.Context, state toolSnapshot, session *ToolSession, recipe sandbox.TestRecipe) error {
 	invalid := errors.New("restored patch has no consistent red-to-green proof")
 	result := state.Result
+	if result.Summary.Validate() != nil {
+		return invalid
+	}
 	after := result.After
 	if !state.Terminal || state.Candidates < 1 || result.Code != "PATCH_VERIFIED" || after.RecipeID != session.recipeID || after.ExitCode != 0 || after.TimedOut || after.Truncated || after.Duration < 0 || len(after.Output) > recipe.MaxOutputBytes ||
 		result.Patch == "" || len(result.Patch) > 64*1024 {

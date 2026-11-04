@@ -58,8 +58,7 @@ func newLocalGitHubFileFixture(t *testing.T, binding coderepair.RepositoryBindin
 	t.Helper()
 	head := sha1.Sum([]byte("synthetic-head:" + publication.OperationID))
 	fixture := &localGitHubFixture{base: base, head: hex.EncodeToString(head[:]), baseTree: strings.Repeat("3", 40), patchTree: strings.Repeat("4", 40),
-		baseBlob: gitBlob(original), patchBlob: gitBlob(changed),
-		commitMessage: "Repair incident (Triovexa)\n\nOperation: " + publication.OperationID + "\nPatch-SHA256: " + publication.PatchSHA256}
+		baseBlob: gitBlob(original), patchBlob: gitBlob(changed)}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		fixture.mu.Lock()
 		defer fixture.mu.Unlock()
@@ -113,9 +112,10 @@ func newLocalGitHubFileFixture(t *testing.T, binding coderepair.RepositoryBindin
 				Message, Tree string
 				Parents       []string
 			}
-			if json.NewDecoder(request.Body).Decode(&body) != nil || body.Message != fixture.commitMessage || body.Tree != fixture.patchTree || len(body.Parents) != 1 || body.Parents[0] != fixture.base {
+			if json.NewDecoder(request.Body).Decode(&body) != nil || !strings.HasPrefix(body.Message, "fix(") || !strings.HasSuffix(body.Message, "\n\nOperation: "+publication.OperationID+"\nPatch-SHA256: "+publication.PatchSHA256) || body.Tree != fixture.patchTree || len(body.Parents) != 1 || body.Parents[0] != fixture.base {
 				t.Error("native publication changed commit provenance")
 			}
+			fixture.commitMessage = body.Message
 			respond(map[string]string{"sha": fixture.head})
 		case request.Method == http.MethodPost && request.URL.Path == prefix+"/git/refs":
 			var body struct{ Ref, SHA string }
@@ -134,10 +134,10 @@ func newLocalGitHubFileFixture(t *testing.T, binding coderepair.RepositoryBindin
 				"head": map[string]string{"sha": fixture.head, "ref": publication.BranchName}, "base": map[string]string{"ref": binding.BaseRef, "sha": fixture.base}}})
 		case request.Method == http.MethodPost && request.URL.Path == prefix+"/pulls":
 			var body struct {
-				Head, Base string
-				Draft      bool
+				Head, Base, Title, Body string
+				Draft                   bool
 			}
-			if json.NewDecoder(request.Body).Decode(&body) != nil || body.Head != publication.BranchName || body.Base != binding.BaseRef || !body.Draft {
+			if json.NewDecoder(request.Body).Decode(&body) != nil || body.Head != publication.BranchName || body.Base != binding.BaseRef || !body.Draft || body.Title != strings.SplitN(fixture.commitMessage, "\n", 2)[0] || !strings.Contains(body.Body, "## Problem") || !strings.Contains(body.Body, "## Changes") || !strings.Contains(body.Body, "## Validation") {
 				t.Error("publisher did not create the approved draft PR")
 			}
 			fixture.prWrites++

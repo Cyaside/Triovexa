@@ -19,7 +19,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/coderepair"
 )
 
-func TestLegacyInvestigationReportStillPublishable(t *testing.T) {
+func TestVerifiedReportPublishesSpecificDescriptionWithoutRuntimeMetadata(t *testing.T) {
 	root := t.TempDir()
 	name := "internal/workload/legacy_fixture.go"
 	original := "package workload\n\nfunc Limit() int { return 1 }\n"
@@ -41,6 +41,7 @@ func TestLegacyInvestigationReportStillPublishable(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	git("init", "--quiet")
+	git("config", "core.autocrlf", "false")
 	git("add", "--", name)
 	git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "fixture")
 	baseSHA := git("rev-parse", "HEAD")
@@ -53,7 +54,9 @@ func TestLegacyInvestigationReportStillPublishable(t *testing.T) {
 		t.Fatalf("legacy attempt no longer readable: %v", err)
 	}
 	report, _ := json.Marshal(map[string]any{"status": coderepair.StatePatchReady, "recipe_id": "go-test-workload",
-		"patch_sha256": patchSHA, "before_exit": 1, "after_exit": 0, "evidence_ids": []string{"legacy-evidence"}})
+		"patch_sha256": patchSHA, "before_exit": 1, "after_exit": 0, "evidence_ids": []string{"legacy-evidence"},
+		"hypothesis": "The worker limit rejects supported input.",
+		"summary":    coderepair.ChangeSummary{Title: "fix(worker): accept supported limit", Changes: "Raise the worker limit from one to two."}})
 	binding := coderepair.RepositoryBinding{ID: "binding", ServiceName: "worker", Environment: "staging",
 		RepositoryURL: "https://github.com/acme/worker", BaseRef: "main", AllowedPaths: []string{"internal/workload"},
 		TestRecipes: []string{"go-test-workload"}, PolicyVersion: "v1", Enabled: true}
@@ -79,6 +82,7 @@ func TestLegacyInvestigationReportStillPublishable(t *testing.T) {
 	branches := map[string]string{"main": baseSHA}
 	prExists := false
 	prCreates, writeChecks := 0, 0
+	var publishedMessage string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer synthetic-legacy-key" {
 			t.Error("missing fake GitHub credential")
@@ -99,7 +103,7 @@ func TestLegacyInvestigationReportStillPublishable(t *testing.T) {
 			sha := strings.TrimPrefix(r.URL.Path, prefix+"/git/commits/")
 			tree, message := testBaseTree, "fixture base"
 			if sha == testHeadSHA {
-				tree, message = testPatchTree, commitMessage(p.OperationID, patchSHA)
+				tree, message = testPatchTree, publishedMessage
 			} else if sha != baseSHA {
 				t.Errorf("unexpected commit requested: %s", sha)
 			}
@@ -116,6 +120,11 @@ func TestLegacyInvestigationReportStillPublishable(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == prefix+"/git/trees":
 			body = map[string]string{"sha": testPatchTree}
 		case r.Method == http.MethodPost && r.URL.Path == prefix+"/git/commits":
+			var commit struct{ Message string }
+			if json.NewDecoder(r.Body).Decode(&commit) != nil || !strings.HasPrefix(commit.Message, "fix(worker): accept supported limit\n\nThe worker limit rejects supported input.") || !strings.Contains(commit.Message, "Raise the worker limit from one to two.") {
+				t.Error("commit lacks the verified problem/change summary")
+			}
+			publishedMessage = commit.Message
 			body = map[string]string{"sha": testHeadSHA}
 		case r.Method == http.MethodPost && r.URL.Path == prefix+"/git/refs":
 			branches[p.BranchName] = testHeadSHA
@@ -128,8 +137,8 @@ func TestLegacyInvestigationReportStillPublishable(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == prefix+"/pulls":
 			prCreates++
 			prExists = true
-			var request struct{ Body string }
-			if json.NewDecoder(r.Body).Decode(&request) != nil || !strings.Contains(request.Body, patchSHA) || !strings.Contains(request.Body, "go-test-workload") {
+			var request struct{ Title, Body string }
+			if json.NewDecoder(r.Body).Decode(&request) != nil || !strings.Contains(request.Body, patchSHA) || !strings.Contains(request.Body, "go-test-workload") || request.Title != "fix(worker): accept supported limit" || !strings.Contains(request.Body, "## Problem\n\nThe worker limit rejects supported input.") || !strings.Contains(request.Body, "## Changes") || !strings.Contains(request.Body, "## Validation") {
 				t.Error("legacy proof did not reach the reviewed PR body")
 			}
 			body = legacyPullRequest(p, baseSHA)
@@ -160,6 +169,27 @@ func TestLegacyInvestigationReportStillPublishable(t *testing.T) {
 		Approval: approval, Patch: patch, ReportJSON: report}, now)
 	if err != nil || pr.Number != 7 || head != testHeadSHA || prCreates != 1 || writeChecks != 1 || cleanups != 1 {
 		t.Fatalf("legacy proof was not safely publishable: pr=%+v head=%s creates=%d writes=%d cleanup=%d err=%v", pr, head, prCreates, writeChecks, cleanups, err)
+	}
+	// An already-created historical PR remains recoverable after upgrade even
+	// when its old report has no summary and the publication approval expired.
+	git("checkout", baseSHA, "--", name)
+	// Keep the original fixture bytes independent of host checkout EOL rules.
+	if err := os.WriteFile(filepath.Join(root, name), []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var historical map[string]any
+	if err := json.Unmarshal(report, &historical); err != nil {
+		t.Fatal(err)
+	}
+	delete(historical, "summary")
+	delete(historical, "hypothesis")
+	historicalReport, _ := json.Marshal(historical)
+	publishedMessage = "Repair incident (Triovexa)\n\nOperation: " + p.OperationID + "\nPatch-SHA256: " + patchSHA
+	approval.ExpiresAt = now.Add(-time.Second)
+	pr, head, err = service.Publish(context.Background(), p, Input{Case: c, Attempt: attempt, Binding: binding,
+		Approval: approval, Patch: patch, ReportJSON: historicalReport}, now)
+	if err != nil || pr.Number != 7 || head != testHeadSHA || prCreates != 1 || writeChecks != 1 || cleanups != 2 {
+		t.Fatalf("historical PR reconciliation changed remote effects or lost proof: %v", err)
 	}
 }
 

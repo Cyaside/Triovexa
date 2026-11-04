@@ -265,6 +265,7 @@ func TestRestoredTerminalProofRejectsInternalDigestAndCounterCorruption(t *testi
 	}{
 		{"patch digest", func(state *toolSnapshot) { state.Result.PatchReport.SHA256 = strings.Repeat("a", 64) }},
 		{"false green", func(state *toolSnapshot) { state.Result.After.TimedOut = true }},
+		{"missing change summary", func(state *toolSnapshot) { state.Result.Summary = coderepair.ChangeSummary{} }},
 		{"missing candidate", func(state *toolSnapshot) { state.Candidates = 0 }},
 		{"overflow steps", func(state *toolSnapshot) { state.Result.Steps = 999999 }},
 	} {

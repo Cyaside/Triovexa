@@ -226,12 +226,12 @@ func (g *GitHub) createTree(ctx context.Context, repo, baseTreeSHA string, files
 	return response.SHA, nil
 }
 
-func (g *GitHub) createCommit(ctx context.Context, repo, treeSHA, baseSHA, operationID, patchSHA string) (string, error) {
+func (g *GitHub) createCommit(ctx context.Context, repo, treeSHA, baseSHA, operationID, patchSHA string, description Description) (string, error) {
 	var response struct {
 		SHA string `json:"sha"`
 	}
 	_, err := g.request(ctx, http.MethodPost, "/repos/"+repo+"/git/commits", map[string]any{
-		"message": commitMessage(operationID, patchSHA), "tree": treeSHA, "parents": []string{baseSHA},
+		"message": commitMessage(description, operationID, patchSHA), "tree": treeSHA, "parents": []string{baseSHA},
 	}, &response)
 	if err != nil {
 		return "", err
@@ -240,10 +240,6 @@ func (g *GitHub) createCommit(ctx context.Context, repo, treeSHA, baseSHA, opera
 		return "", errors.New("GitHub returned an invalid commit ID")
 	}
 	return response.SHA, nil
-}
-
-func commitMessage(operationID, patchSHA string) string {
-	return "Repair incident (Triovexa)\n\nOperation: " + operationID + "\nPatch-SHA256: " + patchSHA
 }
 
 func (g *GitHub) createBranch(ctx context.Context, repo, branch, sha string) error {
@@ -370,7 +366,7 @@ func (g *GitHub) Existing(ctx context.Context, binding coderepair.RepositoryBind
 	if err != nil {
 		return PullRequest{}, "", false, err
 	}
-	if message != commitMessage(p.OperationID, p.PatchSHA256) || parent != baseSHA {
+	if !commitMatchesPublication(message, p.OperationID, p.PatchSHA256) || parent != baseSHA {
 		return PullRequest{}, "", false, errors.New("repair branch was changed or belongs to another operation")
 	}
 	if err := g.matchesApprovedFiles(ctx, repo, baseSHA, head, files); err != nil {
@@ -390,7 +386,10 @@ func (g *GitHub) Existing(ctx context.Context, binding coderepair.RepositoryBind
 // possibly ambiguous write. The final PR is always read back, including after
 // a create request reports a timeout or 422 conflict.
 func (g *GitHub) Ensure(ctx context.Context, binding coderepair.RepositoryBinding, p coderepair.Publication,
-	baseSHA string, files []changedFile, title, body string) (PullRequest, string, error) {
+	baseSHA string, files []changedFile, description Description) (PullRequest, string, error) {
+	if !description.valid() || !publicationOperation.MatchString(p.OperationID) {
+		return PullRequest{}, "", errors.New("publication requires a valid change description and operation identity")
+	}
 	repo, owner, err := githubRepositoryPath(binding)
 	if err != nil {
 		return PullRequest{}, "", err
@@ -433,11 +432,11 @@ func (g *GitHub) Ensure(ctx context.Context, binding coderepair.RepositoryBindin
 		if err != nil {
 			return PullRequest{}, "", err
 		}
-		if tree != treeSHA || message != commitMessage(p.OperationID, p.PatchSHA256) || parent != baseSHA {
+		if tree != treeSHA || !commitMatchesPublication(message, p.OperationID, p.PatchSHA256) || parent != baseSHA {
 			return PullRequest{}, "", errors.New("existing repair branch does not match the approved patch")
 		}
 	} else {
-		commitSHA, err := g.createCommit(ctx, repo, treeSHA, baseSHA, p.OperationID, p.PatchSHA256)
+		commitSHA, err := g.createCommit(ctx, repo, treeSHA, baseSHA, p.OperationID, p.PatchSHA256, description)
 		if err != nil {
 			return PullRequest{}, "", err
 		}
@@ -453,7 +452,7 @@ func (g *GitHub) Ensure(ctx context.Context, binding coderepair.RepositoryBindin
 		if err != nil {
 			return PullRequest{}, "", err
 		}
-		if tree != treeSHA || message != commitMessage(p.OperationID, p.PatchSHA256) || parent != baseSHA {
+		if tree != treeSHA || !commitMatchesPublication(message, p.OperationID, p.PatchSHA256) || parent != baseSHA {
 			return PullRequest{}, "", errors.New("repair branch appeared with a different commit")
 		}
 	}
@@ -462,7 +461,7 @@ func (g *GitHub) Ensure(ctx context.Context, binding coderepair.RepositoryBindin
 		return PullRequest{}, "", err
 	}
 	if !found {
-		createErr := g.createPR(ctx, repo, p.BranchName, binding.BaseRef, title, body)
+		createErr := g.createPR(ctx, repo, p.BranchName, binding.BaseRef, description.Title, description.Body)
 		pr, found, err = g.findPR(ctx, repo, owner, p.BranchName, binding.BaseRef, baseSHA)
 		if err != nil {
 			return PullRequest{}, "", err

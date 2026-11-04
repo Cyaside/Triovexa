@@ -165,6 +165,8 @@ Send `started` immediately before rollout so Triovexa captures the pre-deploy wo
 
 Publication approval lasts 15 minutes and binds the case, repository scope, base commit, policy, attempt, and patch SHA-256. The publisher has its own credential and stable operation ID. After an uncertain GitHub response or process restart, it checks the dedicated branch and PR before writing again; a conflicting branch or PR blocks publication. Verified GitHub webhook deliveries are deduplicated and cannot authorize deployment.
 
+Each patch proposal includes a concise `fix(scope): description` title and a summary of the actual source change. The publisher uses this title for both the commit and draft PR. The PR body explains the observed problem, the proposed changes and affected files, and the server-recorded regression result before and after the patch. Incident references, revision and patch digests appear in an expandable verification section; operation and patch identity remain commit trailers. Generating this metadata requires no separate model request. Missing descriptions block new publication instead of producing a generic title. Previously published commits remain readable for reconciliation; old investigation checkpoints cannot resume under a changed proposal contract.
+
 The UI shows evidence, test proof, diff, approval, PR, deployment, and verification state. `patch_ready`, `pr_open`, and `merged` do **not** mean the incident recovered. The deployment pipeline and a reviewer remain separate decision makers. The deterministic CI gate uses a scripted model and fake GitHub API; a live provider and real GitHub staging run must be evaluated separately before relying on this workflow for operational use.
 
 ## Validate a configured provider

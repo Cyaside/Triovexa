@@ -19,26 +19,28 @@ func (r InvestigationResult) Outcome(job coderepair.Job, expectedVersion int64, 
 		return coderepair.InvestigationOutcome{}, errors.New("investigation returned no final state")
 	}
 	report, err := json.Marshal(struct {
-		Status      coderepair.State   `json:"status"`
-		RecipeID    string             `json:"recipe_id"`
-		PatchSHA256 string             `json:"patch_sha256,omitempty"`
-		Hypothesis  string             `json:"hypothesis,omitempty"`
-		EvidenceIDs []string           `json:"evidence_ids,omitempty"`
-		BeforeExit  int                `json:"before_exit"`
-		AfterExit   int                `json:"after_exit"`
-		BeforeNS    int64              `json:"before_duration_ns"`
-		AfterNS     int64              `json:"after_duration_ns"`
-		BeforeText  string             `json:"before_output,omitempty"`
-		AfterText   string             `json:"after_output,omitempty"`
-		Usage       ai.CompletionUsage `json:"usage"`
-		Provider    string             `json:"provider"`
-		Model       string             `json:"model"`
-		Prompt      string             `json:"prompt_version"`
-		Steps       int                `json:"steps"`
-		Code        string             `json:"code"`
-		Reason      string             `json:"reason,omitempty"`
-		Runtime     *RuntimeTrace      `json:"runtime,omitempty"`
-	}{r.Status, recipeID, r.PatchReport.SHA256, security.Redact(r.Hypothesis), r.EvidenceIDs,
+		Status      coderepair.State         `json:"status"`
+		RecipeID    string                   `json:"recipe_id"`
+		PatchSHA256 string                   `json:"patch_sha256,omitempty"`
+		Hypothesis  string                   `json:"hypothesis,omitempty"`
+		Summary     coderepair.ChangeSummary `json:"summary"`
+		EvidenceIDs []string                 `json:"evidence_ids,omitempty"`
+		BeforeExit  int                      `json:"before_exit"`
+		AfterExit   int                      `json:"after_exit"`
+		BeforeNS    int64                    `json:"before_duration_ns"`
+		AfterNS     int64                    `json:"after_duration_ns"`
+		BeforeText  string                   `json:"before_output,omitempty"`
+		AfterText   string                   `json:"after_output,omitempty"`
+		Usage       ai.CompletionUsage       `json:"usage"`
+		Provider    string                   `json:"provider"`
+		Model       string                   `json:"model"`
+		Prompt      string                   `json:"prompt_version"`
+		Steps       int                      `json:"steps"`
+		Code        string                   `json:"code"`
+		Reason      string                   `json:"reason,omitempty"`
+		Runtime     *RuntimeTrace            `json:"runtime,omitempty"`
+	}{r.Status, recipeID, r.PatchReport.SHA256, security.Redact(r.Hypothesis),
+		coderepair.ChangeSummary{Title: security.Redact(r.Summary.Title), Changes: security.Redact(r.Summary.Changes)}, r.EvidenceIDs,
 		r.Before.ExitCode, r.After.ExitCode, int64(r.Before.Duration), int64(r.After.Duration),
 		security.Redact(r.Before.Output), security.Redact(r.After.Output), r.Usage,
 		r.Provider, r.Model, r.Prompt, r.Steps, r.Code, security.Redact(r.Reason), r.Runtime})

@@ -63,6 +63,8 @@ func TestQueuedAttemptEngineMismatchBlocks(t *testing.T) {
 		"prompt":                     func(a *coderepair.Attempt) { a.PromptVersion = "repair-native-v3" },
 		"previous edit contract":     func(a *coderepair.Attempt) { a.PromptVersion = "repair-native-v5" },
 		"previous citation contract": func(a *coderepair.Attempt) { a.PromptVersion = "repair-native-v6" },
+		"previous summary contract":  func(a *coderepair.Attempt) { a.PromptVersion = "repair-native-v7" },
+		"previous summary proof":     func(a *coderepair.Attempt) { a.Runtime.CheckpointVersion = "2" },
 		"previous proof format":      func(a *coderepair.Attempt) { a.Runtime.CheckpointVersion = "1" },
 		"thread":                     func(a *coderepair.Attempt) { a.Runtime.ThreadID = "other:attempt" },
 		"digest":                     func(a *coderepair.Attempt) { a.Runtime.SnapshotSHA256 = strings.Repeat("0", 64) },

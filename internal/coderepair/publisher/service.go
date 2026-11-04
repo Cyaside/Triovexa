@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/Cyaside/Triovexa/internal/coderepair"
@@ -66,14 +65,7 @@ func (s *Service) Publish(ctx context.Context, p coderepair.Publication, in Inpu
 	if err != nil || reviewDigest != in.Approval.ScopeDigest {
 		return PullRequest{}, "", errors.New("publication approval does not bind the current patch")
 	}
-	var report struct {
-		Status      coderepair.State `json:"status"`
-		RecipeID    string           `json:"recipe_id"`
-		PatchSHA256 string           `json:"patch_sha256"`
-		BeforeExit  int              `json:"before_exit"`
-		AfterExit   int              `json:"after_exit"`
-		EvidenceIDs []string         `json:"evidence_ids"`
-	}
+	var report publicationReport
 	if err := json.Unmarshal(in.ReportJSON, &report); err != nil || report.Status != coderepair.StatePatchReady ||
 		report.PatchSHA256 != patchSHA || report.RecipeID == "" || report.BeforeExit == 0 || report.AfterExit != 0 || len(report.EvidenceIDs) == 0 {
 		return PullRequest{}, "", errors.New("publication report lacks matching test proof")
@@ -118,6 +110,10 @@ func (s *Service) Publish(ctx context.Context, p coderepair.Publication, in Inpu
 	} else if found {
 		return pr, head, nil
 	}
+	description, err := describeChange(in, p, report, patchReport.Files)
+	if err != nil {
+		return PullRequest{}, "", err
+	}
 	if !in.Approval.ExpiresAt.After(now) || in.Approval.CreatedAt.After(now) ||
 		in.Approval.ExpiresAt.Sub(in.Approval.CreatedAt) > 15*time.Minute {
 		return PullRequest{}, "", errors.New("publication approval expired before GitHub write")
@@ -132,8 +128,5 @@ func (s *Service) Publish(ctx context.Context, p coderepair.Publication, in Inpu
 	if err := s.allowWrite(ctx); err != nil {
 		return PullRequest{}, "", err
 	}
-	title := "Repair incident " + in.Case.IncidentID
-	body := fmt.Sprintf("## Incident\n\n%s\n\n## Verified change\n\nPatch SHA-256: `%s`\nRegression recipe: `%s` (failed before, passed after).\nEvidence references: %d.\n\nOperation: `%s`\n\nCI and human review are required before merge. Deployment recovery is verified separately.\n",
-		in.Case.IncidentID, patchSHA, report.RecipeID, len(report.EvidenceIDs), p.OperationID)
-	return s.github.Ensure(ctx, in.Binding, p, in.Case.BaseSHA, files, title, body)
+	return s.github.Ensure(ctx, in.Binding, p, in.Case.BaseSHA, files, description)
 }

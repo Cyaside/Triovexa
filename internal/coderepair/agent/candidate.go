@@ -63,6 +63,7 @@ func VerifyCandidate(ctx context.Context, workspace *sandbox.Workspace, binding 
 	}
 	result.Status, result.Code = coderepair.StatePatchReady, "PATCH_VERIFIED"
 	result.Hypothesis, result.EvidenceIDs = decision.Hypothesis, append([]string(nil), decision.EvidenceIDs...)
+	result.Summary = decision.Summary
 	result.Patch, result.PatchReport = decision.Patch, report
 	return result
 }

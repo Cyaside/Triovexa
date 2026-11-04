@@ -110,6 +110,7 @@ func (s *ToolSession) clearCandidateProof() {
 	s.result.Patch = ""
 	s.result.PatchReport = sandbox.PatchReport{}
 	s.result.Hypothesis = ""
+	s.result.Summary = coderepair.ChangeSummary{}
 	s.result.EvidenceIDs = nil
 }
 
@@ -216,10 +217,11 @@ func (s *ToolSession) dispatch(ctx context.Context, request ToolRequest) (any, e
 		return map[string]any{"exit_code": s.result.Before.ExitCode, "output": security.Redact(s.result.Before.Output), "baseline": true}, nil
 	case "propose_patch":
 		var args struct {
-			Format      string              `json:"format"`
-			Files       []sandbox.FileEdits `json:"files"`
-			Hypothesis  string              `json:"hypothesis"`
-			EvidenceIDs []string            `json:"evidence_ids"`
+			Format      string                   `json:"format"`
+			Files       []sandbox.FileEdits      `json:"files"`
+			Hypothesis  string                   `json:"hypothesis"`
+			EvidenceIDs []string                 `json:"evidence_ids"`
+			Summary     coderepair.ChangeSummary `json:"summary"`
 		}
 		if err := DecodeStrict(request.Args, &args); err != nil {
 			return nil, err
@@ -227,7 +229,10 @@ func (s *ToolSession) dispatch(ctx context.Context, request ToolRequest) (any, e
 		if len(request.Args) > 64*1024 || args.Format != sandbox.EditFormat {
 			return nil, errors.New("proposal byte limit or format is invalid")
 		}
-		decision := agent.Decision{Operation: agent.ProposePatch, Hypothesis: args.Hypothesis, EvidenceIDs: args.EvidenceIDs}
+		if err := args.Summary.Validate(); err != nil {
+			return nil, err
+		}
+		decision := agent.Decision{Operation: agent.ProposePatch, Hypothesis: args.Hypothesis, EvidenceIDs: args.EvidenceIDs, Summary: args.Summary}
 		if err := decision.ValidateGrounding(s.snapshot); err != nil {
 			return nil, err
 		}

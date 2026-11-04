@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const CONTRACT_VERSION = "1";
 export const ENGINE_VERSION = "1.14.1";
-export const PROMPT_VERSION = "repair-native-v7";
+export const PROMPT_VERSION = "repair-native-v8";
 export const MAX_FRAME_BYTES = 256 * 1024;
 export const INLINE_RESULT_BYTES = 8 * 1024;
 const identifier = z.string().min(1).max(200);
@@ -80,7 +80,9 @@ export const toolSchemas = {
   propose_patch: z.strictObject({ format: z.enum(["text-edits-v1"]), files: z.array(z.strictObject({
     path: scopedPath, expected_digest: z.string().regex(/^[a-f0-9]{64}$/),
     edits: z.array(z.strictObject({ old_text: z.string().min(1).max(16384), new_text: z.string().max(16384) })).min(1).max(10),
-  })).min(1).max(5), hypothesis: z.string().min(1).max(2048), evidence_ids: z.array(identifier).min(1).max(20) }),
+  })).min(1).max(5), hypothesis: z.string().min(1).max(2048), evidence_ids: z.array(identifier).min(1).max(20),
+  summary: z.strictObject({ title: z.string().min(1).max(96).regex(/^fix(\([a-z0-9][a-z0-9._/-]{0,39}\))?: \S[^\r\n]*$/),
+    changes: z.string().min(1).max(1024).regex(/^\S(?:[^\r\n]*\S)?$/) }) }),
   cannot_determine: z.strictObject({ reason: z.string().min(1).max(2048) }),
 };
 export type GoToolName = keyof typeof toolSchemas;

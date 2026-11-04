@@ -31,6 +31,7 @@ func TestGitHubPublicationReconcilesAmbiguousBranchAndPRCreation(t *testing.T) {
 	prExists := false
 	operation := "repair-publish:case-one:1"
 	patchSHA := strings.Repeat("a", 64)
+	description := Description{Title: "fix(worker): accept supported input", Body: "Reviewed source correction", CommitBody: "Correct the input predicate."}
 	content := "package workload\n"
 	blob := sha1.Sum([]byte("blob 17\x00" + content))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +54,7 @@ func TestGitHubPublicationReconcilesAmbiguousBranchAndPRCreation(t *testing.T) {
 		case r.Method == "GET" && r.URL.Path == prefix+"/git/commits/"+testBaseSHA:
 			json.NewEncoder(w).Encode(map[string]any{"message": "base", "tree": map[string]string{"sha": testBaseTree}, "parents": []any{map[string]string{"sha": strings.Repeat("0", 40)}}})
 		case r.Method == "GET" && r.URL.Path == prefix+"/git/commits/"+testHeadSHA:
-			json.NewEncoder(w).Encode(map[string]any{"message": commitMessage(operation, patchSHA), "tree": map[string]string{"sha": testPatchTree}, "parents": []any{map[string]string{"sha": testBaseSHA}}})
+			json.NewEncoder(w).Encode(map[string]any{"message": commitMessage(description, operation, patchSHA), "tree": map[string]string{"sha": testPatchTree}, "parents": []any{map[string]string{"sha": testBaseSHA}}})
 		case r.Method == "GET" && r.URL.Path == prefix+"/git/trees/"+testBaseTree:
 			json.NewEncoder(w).Encode(map[string]any{"truncated": false, "tree": []any{map[string]string{
 				"path": "internal/workload/repair_fixture.go", "mode": "100644", "type": "blob", "sha": strings.Repeat("5", 40)}}})
@@ -104,7 +105,7 @@ func TestGitHubPublicationReconcilesAmbiguousBranchAndPRCreation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		pr, head, err := github.Ensure(ctx, binding, p, testBaseSHA,
 			[]changedFile{{Path: "internal/workload/repair_fixture.go", Content: content}},
-			"Repair incident", "Reviewed patch")
+			description)
 		cancel()
 		if err != nil {
 			t.Fatal(err)

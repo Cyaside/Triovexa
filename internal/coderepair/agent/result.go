@@ -18,6 +18,7 @@ type InvestigationResult struct {
 	Code        string
 	Reason      string
 	Hypothesis  string
+	Summary     coderepair.ChangeSummary
 	EvidenceIDs []string
 	Patch       string
 	PatchReport sandbox.PatchReport

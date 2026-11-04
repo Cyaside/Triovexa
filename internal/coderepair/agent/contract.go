@@ -20,10 +20,11 @@ const ProposePatch Operation = "propose_patch"
 // Decision is the internal candidate-proof shape. Native model proposals use
 // structured edits; repository tools have their own strict transport schemas.
 type Decision struct {
-	Operation   Operation `json:"operation"`
-	Patch       string    `json:"patch,omitempty"`
-	Hypothesis  string    `json:"hypothesis,omitempty"`
-	EvidenceIDs []string  `json:"evidence_ids,omitempty"`
+	Operation   Operation                `json:"operation"`
+	Patch       string                   `json:"patch,omitempty"`
+	Hypothesis  string                   `json:"hypothesis,omitempty"`
+	EvidenceIDs []string                 `json:"evidence_ids,omitempty"`
+	Summary     coderepair.ChangeSummary `json:"summary"`
 }
 
 // ParseDecision rejects unknown fields, trailing objects and fields that do

@@ -60,5 +60,5 @@ func structuredArgs(t *testing.T, root, patch, hypothesis string, ids []string) 
 		}
 	}
 	flush()
-	return map[string]any{"format": sandbox.EditFormat, "files": files, "hypothesis": hypothesis, "evidence_ids": ids}
+	return map[string]any{"format": sandbox.EditFormat, "files": files, "hypothesis": hypothesis, "evidence_ids": ids, "summary": coderepair.ChangeSummary{Title: "fix(worker): accept supported input", Changes: "Correct the input predicate in the affected source file."}}
 }
