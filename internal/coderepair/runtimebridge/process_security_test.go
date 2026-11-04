@@ -54,6 +54,13 @@ func TestProcessRejectsForgedSuccessOverIPC(t *testing.T) {
 	}
 }
 
+func TestToolRejectionKeepsItsCodeWithoutChildReason(t *testing.T) {
+	result, err := validatedChildResult(ChildResult{Status: "failed", Code: "TOOL_REJECTED", Reason: "arbitrary child content"}, &ToolSession{})
+	if err != nil || result.Status != "failed" || result.Code != "TOOL_REJECTED" || strings.Contains(result.Reason, "arbitrary") {
+		t.Fatalf("tool rejection became an unknown runtime error: %+v %v", result, err)
+	}
+}
+
 func TestProcessNeverReturnsUntrustedDiagnostics(t *testing.T) {
 	const private = "private-unlabelled-material-7e8b17"
 	encoded, _ := json.Marshal(private)

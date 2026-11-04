@@ -227,6 +227,7 @@ var runtimeFailureCodes = map[string]bool{
 	"TOOL_SCHEMA_REPRESENTATION_INVALID": false,
 	"CALL_ID_INVALID":                    false, "CALL_ID_MISMATCH": false, "CALL_PAIR_INVALID": false,
 	"TOOL_ARGUMENT_INVALID": false, "TOOL_LIMIT": false, "TOOL_TIMEOUT": false,
+	"TOOL_REJECTED": false, "TOOL_FAILED": false,
 	"TERMINAL_CALL_MIXED": false, "TERMINAL_ALREADY_REACHED": false, "TERMINAL_CALL_INVALID": false,
 	"TERMINAL_RESULT_INVALID": false, "RECIPE_DENIED": false, "CONCURRENT_TOOL": false,
 	"CHECKPOINT_IDENTITY_MISMATCH": false, "CHECKPOINT_REQUIRED": false, "CONTRACT_INVALID": false,

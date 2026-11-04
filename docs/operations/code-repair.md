@@ -58,6 +58,8 @@ Disabling the binding, expiry, removal of its administrator role, or the kill sw
 
 The native agent proposes `text-edits-v1` replacements rather than writing unified diffs. Each proposal identifies an existing file, its full-byte SHA-256 returned by `repo_read`, and exact old/new text. Read text uses LF; Go preserves uniform LF or CRLF in the original file. Ambiguous matches, overlapping edits, stale digests, unread source ranges and protected paths are rejected. Mixed line endings and binary files are unsupported.
 
+The proposal schema lists the exact available incident evidence IDs. Source locations belong in the investigation explanation; they cannot replace incident evidence IDs or introduce prefixes. Go independently validates citations, including missing, stale and duplicate references.
+
 Go renders a canonical diff through a disposable Git index, independently validates it, and runs the binding's registered checks and regression test. Generation leaves the working checkout unchanged. Accepted diff bytes and their digest are retained for approval and publication. Initial limits are five files, twenty replacements and 300 added-plus-removed lines; existing stricter profile and byte limits also apply.
 
 Sealed tool receipts preserve read coverage, source accounting and candidate proof across restart. Recovery uses the same repository profile for every supported source language and does not repeat completed model or test calls. Attempts pinned to an older prompt or proof contract are blocked explicitly and need a new authorized attempt; their accounting is retained. A context that cannot fit its configured limit stops without dropping scope or increasing that limit.

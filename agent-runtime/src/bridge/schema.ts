@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const CONTRACT_VERSION = "1";
 export const ENGINE_VERSION = "1.14.1";
-export const PROMPT_VERSION = "repair-native-v6";
+export const PROMPT_VERSION = "repair-native-v7";
 export const MAX_FRAME_BYTES = 256 * 1024;
 export const INLINE_RESULT_BYTES = 8 * 1024;
 const identifier = z.string().min(1).max(200);
@@ -84,6 +84,15 @@ export const toolSchemas = {
   cannot_determine: z.strictObject({ reason: z.string().min(1).max(2048) }),
 };
 export type GoToolName = keyof typeof toolSchemas;
+
+/** Pin citation choices to available incident evidence, never source aliases. */
+export function schemasForEvidence(evidence: Record<string, unknown>) {
+  const entries = z.array(z.object({ id: identifier, status: z.string() })).safeParse(evidence.entries);
+  if (!entries.success) throw new RuntimeFailure("CONTRACT_INVALID");
+  const ids = entries.data.filter((entry) => entry.status === "available").map((entry) => entry.id).sort();
+  if (!ids.length || new Set(ids).size !== ids.length) throw new RuntimeFailure("CONTRACT_INVALID");
+  return { ...toolSchemas, propose_patch: toolSchemas.propose_patch.extend({ evidence_ids: z.array(z.enum(ids)).min(1).max(20) }) };
+}
 export const GO_TOOLS = Object.keys(toolSchemas) as GoToolName[];
 export const MODEL_TOOLS = [...GO_TOOLS, "read_file"] as const;
 

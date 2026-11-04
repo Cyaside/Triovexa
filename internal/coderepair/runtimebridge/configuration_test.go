@@ -58,14 +58,15 @@ func TestSavedProviderRevisionIsPinnedPerAttempt(t *testing.T) {
 func TestQueuedAttemptEngineMismatchBlocks(t *testing.T) {
 	attempt, _, cipher := pinnedFixture(t)
 	for name, mutate := range map[string]func(*coderepair.Attempt){
-		"legacy":                 func(a *coderepair.Attempt) { a.Runtime = nil },
-		"engine":                 func(a *coderepair.Attempt) { a.Runtime.EngineVersion = "old-version" },
-		"prompt":                 func(a *coderepair.Attempt) { a.PromptVersion = "repair-native-v3" },
-		"previous edit contract": func(a *coderepair.Attempt) { a.PromptVersion = "repair-native-v5" },
-		"previous proof format":  func(a *coderepair.Attempt) { a.Runtime.CheckpointVersion = "1" },
-		"thread":                 func(a *coderepair.Attempt) { a.Runtime.ThreadID = "other:attempt" },
-		"digest":                 func(a *coderepair.Attempt) { a.Runtime.SnapshotSHA256 = strings.Repeat("0", 64) },
-		"model":                  func(a *coderepair.Attempt) { a.Model = "other" },
+		"legacy":                     func(a *coderepair.Attempt) { a.Runtime = nil },
+		"engine":                     func(a *coderepair.Attempt) { a.Runtime.EngineVersion = "old-version" },
+		"prompt":                     func(a *coderepair.Attempt) { a.PromptVersion = "repair-native-v3" },
+		"previous edit contract":     func(a *coderepair.Attempt) { a.PromptVersion = "repair-native-v5" },
+		"previous citation contract": func(a *coderepair.Attempt) { a.PromptVersion = "repair-native-v6" },
+		"previous proof format":      func(a *coderepair.Attempt) { a.Runtime.CheckpointVersion = "1" },
+		"thread":                     func(a *coderepair.Attempt) { a.Runtime.ThreadID = "other:attempt" },
+		"digest":                     func(a *coderepair.Attempt) { a.Runtime.SnapshotSHA256 = strings.Repeat("0", 64) },
+		"model":                      func(a *coderepair.Attempt) { a.Model = "other" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			copy := attempt
