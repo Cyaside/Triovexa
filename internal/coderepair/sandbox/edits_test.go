@@ -145,3 +145,55 @@ func TestReadCoverageAndEditOrderingSurviveRestore(t *testing.T) {
 		t.Fatal("read provenance shrank")
 	}
 }
+
+func TestStructuredMultiFileDiffRetainsOrderingAndLimits(t *testing.T) {
+	w, dir, ctx := patchWorkspace(t)
+	second := "internal/workload/second.py"
+	if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(second)), []byte("value = 12\r\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, dir, "add", second)
+	runTestGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "second source")
+	index := NewSourceIndex(w, runTestGit(t, dir, "rev-parse", "HEAD"))
+	first, err := index.ReadRange("internal/workload/worker.go", 1, 100, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := index.ReadRange(second, 1, 100, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := []FileEdits{
+		{Path: next.Path, ExpectedDigest: next.Digest, Edits: []TextEdit{{OldText: "1", NewText: "3"}, {OldText: "2", NewText: "4"}}},
+		{Path: first.Path, ExpectedDigest: first.Digest, Edits: []TextEdit{{OldText: "old", NewText: "fixed"}}},
+	}
+	a, err := index.BuildPatch(ctx, files, defaultPatchLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	files[0], files[1] = files[1], files[0]
+	b, err := index.BuildPatch(ctx, files, defaultPatchLimits())
+	if err != nil || string(a) != string(b) {
+		t.Fatal("file order changed canonical diff", err)
+	}
+	limits := defaultPatchLimits()
+	limits.MaxFiles = 1
+	if _, err := index.BuildPatch(ctx, files, limits); err == nil {
+		t.Fatal("file limit bypassed")
+	}
+	limits = defaultPatchLimits()
+	limits.MaxChangedLines = 1
+	if _, err := index.BuildPatch(ctx, files, limits); err == nil {
+		t.Fatal("generated diff bypassed changed-line budget")
+	}
+	if status := runTestGit(t, dir, "status", "--porcelain"); status != "" {
+		t.Fatal("generation modified checkout", status)
+	}
+	if _, err := w.ApplyPatch(ctx, a, defaultPatchLimits()); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(second)))
+	if err != nil || string(actual) != "value = 34\r\n" {
+		t.Fatal("adjacent edits lost byte representation", err)
+	}
+}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -228,9 +227,8 @@ func (s *ToolSession) dispatch(ctx context.Context, request ToolRequest) (any, e
 		if len(request.Args) > 64*1024 || args.Format != sandbox.EditFormat {
 			return nil, errors.New("proposal byte limit or format is invalid")
 		}
-		encoded, _ := json.Marshal(agent.Decision{Operation: agent.ProposePatch, Patch: "structured-edit", Hypothesis: args.Hypothesis, EvidenceIDs: args.EvidenceIDs})
-		decision, err := agent.ParseDecision(string(encoded), s.snapshot)
-		if err != nil {
+		decision := agent.Decision{Operation: agent.ProposePatch, Hypothesis: args.Hypothesis, EvidenceIDs: args.EvidenceIDs}
+		if err := decision.ValidateGrounding(s.snapshot); err != nil {
 			return nil, err
 		}
 		if s.candidates >= s.limits.MaxCandidateCount {

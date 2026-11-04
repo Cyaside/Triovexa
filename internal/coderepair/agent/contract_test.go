@@ -32,15 +32,10 @@ func testSnapshot(t *testing.T) coderepair.EvidenceSnapshot {
 	return snapshot
 }
 
-func TestParseDecisionAcceptsOnlyTypedOperations(t *testing.T) {
+func TestParseDecisionAcceptsCandidateProofShape(t *testing.T) {
 	snapshot := testSnapshot(t)
 	for name, value := range map[string]string{
-		"list":    `{"operation":"list_files","prefix":"internal/workload"}`,
-		"read":    `{"operation":"read_file","path":"internal/workload/worker.go"}`,
-		"search":  `{"operation":"search_text","prefix":"internal/workload","query":"schema"}`,
-		"patch":   `{"operation":"propose_patch","patch":"diff --git a/x b/x","hypothesis":"schema two fails","evidence_ids":["log-1"]}`,
-		"test":    `{"operation":"run_allowed_test","recipe_id":"go-test-workload"}`,
-		"unknown": `{"operation":"cannot_determine","reason":"no source-level cause found"}`,
+		"candidate": `{"operation":"propose_patch","patch":"diff --git a/x b/x","hypothesis":"schema two fails","evidence_ids":["log-1"]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ParseDecision(value, snapshot); err != nil {
@@ -94,9 +89,8 @@ func TestUntrustedEvidenceCannotGrantCommandOrFileAccess(t *testing.T) {
 	if _, err := ParseDecision(`{"operation":"run_shell","command":"cat /workspace/.env"}`, snapshot); err == nil {
 		t.Fatal("log injection granted shell access")
 	}
-	decision, err := ParseDecision(`{"operation":"read_file","path":"../.env"}`, snapshot)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := ParseDecision(`{"operation":"read_file","path":"../.env"}`, snapshot); err == nil {
+		t.Fatal("obsolete model file operation was accepted")
 	}
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "internal", "workload"), 0700); err != nil {
@@ -110,7 +104,7 @@ func TestUntrustedEvidenceCannotGrantCommandOrFileAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer workspace.Close()
-	if _, err := workspace.ReadFile(decision.Path); err == nil {
+	if _, err := workspace.ReadFile("../.env"); err == nil {
 		t.Fatal("log injection escaped repository file scope")
 	}
 	if _, err := sandbox.ResolveTestRecipe(binding, "go-test-workload; curl example.invalid"); err == nil {

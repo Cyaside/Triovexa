@@ -74,7 +74,7 @@ func TestHandlerKeepsExpiredEvidenceRecoveryWithinUnchangedScope(t *testing.T) {
 		{"revoked investigation grant", func(store *handlerRecoveryStore) { store.safetyErr = errors.New("grant revoked") }, false, "SCOPE_REVOKED"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			_, binding, initial, root := loopFixture(t)
+			_, binding, initial, root := investigationFixture(t)
 			past := time.Now().UTC().Add(-2 * time.Minute)
 			incident := domain.Incident{ID: initial.IncidentID, ServiceName: binding.ServiceName, Environment: binding.Environment}
 			snapshot, err := coderepair.BuildEvidenceSnapshot(incident, []domain.EvidenceItem{
@@ -86,7 +86,7 @@ func TestHandlerKeepsExpiredEvidenceRecoveryWithinUnchangedScope(t *testing.T) {
 				t.Fatal(err)
 			}
 			repairCase := coderepair.Case{ID: "case-1", IncidentID: incident.ID, BindingID: binding.ID,
-				BaseSHA: strings.TrimSpace(runLoopGit(t, root, "rev-parse", "HEAD")), DeployedSHA: snapshot.DeployedRevision,
+				BaseSHA: strings.TrimSpace(runInvestigationGit(t, root, "rev-parse", "HEAD")), DeployedSHA: snapshot.DeployedRevision,
 				PolicyVersion: binding.PolicyVersion, State: coderepair.StateInvestigating, Version: 2}
 			repairCase.ScopeDigest, err = coderepair.ScopeDigest(repairCase, binding)
 			if err != nil {
@@ -94,7 +94,7 @@ func TestHandlerKeepsExpiredEvidenceRecoveryWithinUnchangedScope(t *testing.T) {
 			}
 			store := &handlerRecoveryStore{repairCase: repairCase, binding: binding, snapshot: snapshot,
 				attempt: coderepair.Attempt{ID: "attempt-1", CaseID: repairCase.ID, Status: coderepair.JobRunning,
-					Provider: "openai-compatible", Model: "fixture-model", PromptVersion: PromptVersion}}
+					Provider: "openai-compatible", Model: "fixture-model", PromptVersion: handlerFixturePromptVersion}}
 			scenario.corrupt(store)
 			engine := &captureRecoveryClaim{}
 			checkouts := 0

@@ -15,27 +15,15 @@ const maxDecisionBytes = 256 * 1024
 
 type Operation string
 
-const (
-	ListFiles       Operation = "list_files"
-	ReadFile        Operation = "read_file"
-	SearchText      Operation = "search_text"
-	ProposePatch    Operation = "propose_patch"
-	RunAllowedTest  Operation = "run_allowed_test"
-	CannotDetermine Operation = "cannot_determine"
-)
+const ProposePatch Operation = "propose_patch"
 
-// Decision is the entire accepted model protocol. In particular there is no
-// command, URL, environment, working-directory or repository-selection field.
+// Decision is the internal candidate-proof shape. Native model proposals use
+// structured edits; repository tools have their own strict transport schemas.
 type Decision struct {
 	Operation   Operation `json:"operation"`
-	Path        string    `json:"path,omitempty"`
-	Prefix      string    `json:"prefix,omitempty"`
-	Query       string    `json:"query,omitempty"`
 	Patch       string    `json:"patch,omitempty"`
-	RecipeID    string    `json:"recipe_id,omitempty"`
 	Hypothesis  string    `json:"hypothesis,omitempty"`
 	EvidenceIDs []string  `json:"evidence_ids,omitempty"`
-	Reason      string    `json:"reason,omitempty"`
 }
 
 // ParseDecision rejects unknown fields, trailing objects and fields that do
@@ -55,22 +43,20 @@ func ParseDecision(content string, snapshot coderepair.EvidenceSnapshot) (Decisi
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return Decision{}, errors.New("agent decision contains trailing content")
 	}
-	if err := d.validate(snapshot); err != nil {
+	if err := d.ValidateGrounding(snapshot); err != nil {
 		return Decision{}, err
+	}
+	if d.Patch == "" {
+		return Decision{}, errors.New("candidate proof requires a diff")
 	}
 	return d, nil
 }
 
-func (d Decision) validate(snapshot coderepair.EvidenceSnapshot) error {
-	validText := func(value string, max int) bool {
-		return len(value) <= max && strings.IndexFunc(value, unicode.IsControl) < 0
-	}
-	if !validText(d.Path, 512) || !validText(d.Prefix, 512) || !validText(d.Query, 256) ||
-		!validText(d.RecipeID, 128) || !validText(d.Hypothesis, 2048) || !validText(d.Reason, 2048) {
-		return errors.New("agent decision text exceeds its bounds")
-	}
-	if len(d.EvidenceIDs) > 20 {
-		return errors.New("agent decision cites too many evidence items")
+// ValidateGrounding runs before diff generation without placeholder patches
+// or JSON round trips. The independent patch authority handles diff validity.
+func (d Decision) ValidateGrounding(snapshot coderepair.EvidenceSnapshot) error {
+	if !snapshot.VerifyDigest() || d.Operation != ProposePatch || d.Hypothesis == "" || len(d.Hypothesis) > 2048 || strings.IndexFunc(d.Hypothesis, unicode.IsControl) >= 0 || len(d.EvidenceIDs) == 0 || len(d.EvidenceIDs) > 20 {
+		return errors.New("candidate requires a bounded hypothesis and available incident evidence")
 	}
 	available := make(map[string]bool, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
@@ -82,35 +68,6 @@ func (d Decision) validate(snapshot coderepair.EvidenceSnapshot) error {
 			return errors.New("agent decision cites missing, stale or duplicate evidence")
 		}
 		seen[id] = true
-	}
-	switch d.Operation {
-	case ListFiles:
-		if d.Prefix == "" || d.Path != "" || d.Query != "" || d.Patch != "" || d.RecipeID != "" || d.Reason != "" || d.Hypothesis != "" || len(d.EvidenceIDs) != 0 {
-			return errors.New("list_files requires only an allowed prefix")
-		}
-	case ReadFile:
-		if d.Path == "" || d.Prefix != "" || d.Query != "" || d.Patch != "" || d.RecipeID != "" || d.Reason != "" || d.Hypothesis != "" || len(d.EvidenceIDs) != 0 {
-			return errors.New("read_file requires only a path")
-		}
-	case SearchText:
-		if d.Prefix == "" || d.Query == "" || d.Path != "" || d.Patch != "" || d.RecipeID != "" || d.Reason != "" || d.Hypothesis != "" || len(d.EvidenceIDs) != 0 {
-			return errors.New("search_text requires a prefix and literal query")
-		}
-	case ProposePatch:
-		if d.Patch == "" || d.Hypothesis == "" || len(d.EvidenceIDs) == 0 ||
-			d.Path != "" || d.Prefix != "" || d.Query != "" || d.RecipeID != "" || d.Reason != "" {
-			return errors.New("propose_patch requires a grounded hypothesis and diff")
-		}
-	case RunAllowedTest:
-		if d.RecipeID == "" || d.Path != "" || d.Prefix != "" || d.Query != "" || d.Patch != "" || d.Reason != "" || d.Hypothesis != "" || len(d.EvidenceIDs) != 0 {
-			return errors.New("run_allowed_test requires only a recipe ID")
-		}
-	case CannotDetermine:
-		if d.Reason == "" || d.Path != "" || d.Prefix != "" || d.Query != "" || d.Patch != "" || d.RecipeID != "" || d.Hypothesis != "" || len(d.EvidenceIDs) != 0 {
-			return errors.New("cannot_determine requires a reason without an action")
-		}
-	default:
-		return errors.New("agent requested an unknown operation")
 	}
 	return nil
 }

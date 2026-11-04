@@ -110,9 +110,7 @@ jobs:
       TEST_AGENT_RUNTIME_ENTRY: ${{ github.workspace }}/agent-runtime/dist/src/main.js
       TEST_REPAIR_SANDBOX_IMAGE: triovexa-repair-sandbox:agent-runtime
       TEST_REPAIR_PYTHON_IMAGE: triovexa-repair-sandbox:agent-runtime-python
-      AI_RUNTIME_BASELINE_REPORT: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-baseline.json
       AI_NATIVE_REPORT: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-native-payload.json
-      AI_MATCHED_CORPUS_REPORT: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-matched-corpus.json
       TEST_NATIVE_EVIDENCE_PATH: ${{ github.workspace }}/artifacts/code-repair/agent-runtime-persisted-evidence.json
       LANGSMITH_TRACING: "false"
       LANGCHAIN_TRACING_V2: "false"
@@ -180,17 +178,6 @@ jobs:
         run: docker build -f Dockerfile.repair-sandbox -t "$TEST_REPAIR_SANDBOX_IMAGE" .
       - name: Compile the opt-in provider validation harness without running it
         run: go test -tags provider_smoke ./internal/coderepair/runtimebridge -run '^$'
-      - name: Record the deterministic legacy request baseline
-        run: go test ./internal/coderepair/agent -run '^TestAgentLoopOfflineBaseline$' -count=1 -v
-      - name: Compare legacy and native context on identical offline inputs
-        run: |
-          test -s "$TEST_AGENT_RUNTIME_ENTRY"
-          go test ./internal/coderepair/runtimebridge -run '^TestMatchedRuntimeContextCorpus$' -count=1 -json | tee artifacts/code-repair/agent-runtime-matched-corpus.jsonl
-          if ! grep -q '"Action":"run".*"Test":' artifacts/code-repair/agent-runtime-matched-corpus.jsonl || grep -q '"Action":"skip"' artifacts/code-repair/agent-runtime-matched-corpus.jsonl; then
-            echo "The required matched context comparison ran no tests or skipped a test."
-            exit 1
-          fi
-          test -s "$AI_MATCHED_CORPUS_REPORT"
       - name: Verify native IPC and both registered sandbox recipes
         run: |
           docker build --build-arg RUNTIME_IMAGE=python:3.12-alpine -f Dockerfile.repair-sandbox -t "$TEST_REPAIR_PYTHON_IMAGE" .
@@ -207,7 +194,6 @@ jobs:
               exit 1
             fi
           done
-          test -s "$AI_RUNTIME_BASELINE_REPORT"
           test -s "$AI_NATIVE_REPORT"
           test -s "$TEST_NATIVE_EVIDENCE_PATH"
           node --input-type=module <<'NODE'
@@ -258,16 +244,8 @@ jobs:
       - name: Verify isolated repair recipe and rejected commands
         shell: pwsh
         run: ./scripts/verify-repair-sandbox.ps1
-      - name: Verify coding loop with a real red-to-green container test
-        env:
-          TEST_REPAIR_SANDBOX_IMAGE: triovexa-repair-sandbox:gate2
-        run: go test ./internal/coderepair/agent -run '^TestInvestigationDockerRedGreenIntegration$' -count=1 -v
-      - name: Build the Python repository sandbox
-        run: docker build -f Dockerfile.repair-sandbox --build-arg RUNTIME_IMAGE=python:3.12-alpine -t triovexa-repair-sandbox:python .
-      - name: Verify language-neutral patching with real Python tests
-        env:
-          TEST_REPAIR_PYTHON_IMAGE: triovexa-repair-sandbox:python
-        run: go test ./internal/coderepair/agent -run '^TestPythonInvestigationDockerRedGreenIntegration$' -count=1 -v
+      - name: Verify structured source edits and protected scope
+        run: go test ./internal/coderepair/sandbox -run '^(TestStructured|TestReadCoverage)' -count=1 -v
       - uses: actions/upload-artifact@v6
         if: always()
         with:

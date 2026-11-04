@@ -3,8 +3,6 @@ package sandbox
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -153,5 +151,3 @@ func (s *SourceIndex) BuildPatch(ctx context.Context, files []FileEdits, limits 
 	}
 	return patch, nil
 }
-
-func byteDigest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }

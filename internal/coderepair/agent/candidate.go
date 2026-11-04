@@ -11,7 +11,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/coderepair/sandbox"
 )
 
-// VerifyCandidate is the authority boundary shared during engine migration.
+// VerifyCandidate is the Go authority for scope, formatting and regression proof.
 // A graph terminal message alone can never produce a publishable patch.
 func VerifyCandidate(ctx context.Context, workspace *sandbox.Workspace, binding coderepair.RepositoryBinding,
 	tests TestRunner, recipeID string, decision Decision, readPaths map[string]bool, result InvestigationResult) InvestigationResult {

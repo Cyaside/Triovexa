@@ -24,7 +24,7 @@ type Handler struct {
 
 func NewHandler(store coderepair.InvestigationStore, engine InvestigationEngine, checkout CheckoutFactory) (*Handler, error) {
 	if store == nil || engine == nil || checkout == nil {
-		return nil, errors.New("repair handler requires store, coding loop and checkout factory")
+		return nil, errors.New("repair handler requires store, investigation engine and checkout factory")
 	}
 	return &Handler{store: store, engine: engine, checkout: checkout}, nil
 }

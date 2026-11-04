@@ -157,7 +157,9 @@ func prepareProviderSmokeFixture(t *testing.T, ctx context.Context, f persistedF
 	// Generate real failing requests. Prometheus evaluates its provisioned rule;
 	// Alertmanager delivers it to the same production HTTP intake handler.
 	var record domain.Incident
-	deadline := time.Now().Add(50 * time.Second)
+	// Prometheus may wait one resend interval when the receiver starts after
+	// its first notification. This is telemetry readiness, not a model retry.
+	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, cfg.ApplicationURL+"/healthz", nil)
 		response, err := (&http.Client{Timeout: 3 * time.Second}).Do(request)

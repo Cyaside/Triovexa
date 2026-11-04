@@ -76,6 +76,8 @@ npm run build
 Pop-Location
 ```
 
+The investigation worker uses the native runtime exclusively. Historical reports remain readable, but legacy JSON-loop attempts cannot silently switch to it; create a new authorized attempt with the current pinned contract. There is no alternate engine or heuristic patch when the native runtime fails.
+
 The pinned runtime currently includes the unresolved `braces` stack-exhaustion advisory [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) through its framework dependency chain. Default glob, grep, shell, and task tools are disabled; passing the offline tests does not establish that every dependency path is unreachable. Review the advisory and a compatible upstream fix before operational deployment. Downgrading the framework to clear the audit report is not a supported upgrade.
 
 Initialize checkpoint storage before starting the worker. Use a dedicated PostgreSQL database and a dedicated runtime role. An administrator runs initialization and framework migrations; the runtime role receives schema `USAGE`, CRUD permissions on the three checkpoint tables, and read-only access to migration metadata. It cannot run migrations or access application tables.
