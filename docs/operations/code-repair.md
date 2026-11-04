@@ -54,6 +54,14 @@ CI exercises duplicate HTTP alerts through durable intake, automatic investigati
 
 Disabling the binding, expiry, removal of its administrator role, or the kill switch blocks further work. The worker rechecks authorization before checkout and at model/tool boundaries. Without the separate publication permission, a verified patch still requires operator review and publication approval.
 
+## Source edits and recovery
+
+The native agent proposes `text-edits-v1` replacements rather than writing unified diffs. Each proposal identifies an existing file, its full-byte SHA-256 returned by `repo_read`, and exact old/new text. Read text uses LF; Go preserves uniform LF or CRLF in the original file. Ambiguous matches, overlapping edits, stale digests, unread source ranges and protected paths are rejected. Mixed line endings and binary files are unsupported.
+
+Go renders a canonical diff through a disposable Git index, independently validates it, and runs the binding's registered checks and regression test. Generation leaves the working checkout unchanged. Accepted diff bytes and their digest are retained for approval and publication. Initial limits are five files, twenty replacements and 300 added-plus-removed lines; existing stricter profile and byte limits also apply.
+
+Sealed tool receipts preserve read coverage, source accounting and candidate proof across restart. Recovery uses the same repository profile for every supported source language and does not repeat completed model or test calls. Attempts pinned to an older prompt or proof contract are blocked explicitly and need a new authorized attempt; their accounting is retained. A context that cannot fit its configured limit stops without dropping scope or increasing that limit.
+
 ## Prepare the investigation runtime
 
 The host investigation worker requires the Go version specified in `go.mod`, Node.js 24, Git, and a running Docker daemon. The Node runtime runs the investigation; Go owns repository access, approved test recipes, budget accounting, and patch validation. Build the runtime from the repository root:

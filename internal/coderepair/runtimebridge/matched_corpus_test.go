@@ -1,6 +1,7 @@
 package runtimebridge
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -240,6 +241,7 @@ func TestMatchedRuntimeContextCorpus(t *testing.T) {
 				started := time.Now()
 				legacyResult := legacy.Investigate(ctx, legacyWorkspace, binding, snapshot, coderepair.AgentSelection{Provider: provider.Name, Model: provider.Model, PromptVersion: agent.PromptVersion}, "go-test-workload")
 				legacyElapsed := time.Since(started)
+				legacySource, legacyReadErr := os.ReadFile(path)
 				fixtureGit(t, root, "checkout", "--", "internal/workload/worker.go")
 				nativeWorkspace := matchedWorkspace(t, root, binding)
 				store := &claimFixture{job: coderepair.Job{ID: "job-" + id, CaseID: "case-" + id, AttemptID: "attempt-" + id, Status: coderepair.JobRunning, LeaseToken: "fixture-fence", LeaseUntil: time.Now().Add(2 * time.Minute)}, caseRecord: coderepair.Case{ID: "case-" + id, BaseSHA: base, State: coderepair.StateInvestigating, Version: 2}}
@@ -265,13 +267,16 @@ func TestMatchedRuntimeContextCorpus(t *testing.T) {
 				started = time.Now()
 				nativeResult := engine.Investigate(claimed, nativeWorkspace, binding, snapshot, coderepair.AgentSelection{Provider: provider.Name, Model: provider.Model, PromptVersion: PromptVersion}, "go-test-workload")
 				nativeElapsed := time.Since(started)
+				nativeSource, nativeReadErr := os.ReadFile(path)
 				fixtureGit(t, root, "checkout", "--", "internal/workload/worker.go")
 				lock.Lock()
 				legacyMetrics := matchedResult(t, legacyResult, append([]matchedWireMetric(nil), legacyCalls...), legacyTests, legacyElapsed)
 				nativeMetrics := matchedResult(t, nativeResult, append([]matchedWireMetric(nil), nativeCalls...), nativeTests, nativeElapsed)
 				lock.Unlock()
-				if legacyMetrics.PatchSHA != nativeMetrics.PatchSHA || legacyResult.Before != nativeResult.Before || legacyResult.After != nativeResult.After {
-					t.Fatal("paired runtimes used different patches or test assumptions")
+				// Git's canonical full-index rendering has a different digest from
+				// the historical hand-rendered fixture. Compare actual source bytes.
+				if legacyReadErr != nil || nativeReadErr != nil || !bytes.Equal(legacySource, nativeSource) || legacyResult.Before != nativeResult.Before || legacyResult.After != nativeResult.After {
+					t.Fatal("paired runtimes produced different source or test assumptions")
 				}
 				evidenceJSON, _ := json.Marshal(snapshot)
 				input, _ := json.Marshal(map[string]any{"source": string(formatted), "evidence": snapshot, "base": base, "recipe": "go-test-workload", "patch": patch})
