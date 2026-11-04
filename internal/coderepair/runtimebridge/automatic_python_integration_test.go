@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/coderepair/agent"
 	"github.com/Cyaside/Triovexa/internal/coderepair/publisher"
 	"github.com/Cyaside/Triovexa/internal/coderepair/sandbox"
+	repairverify "github.com/Cyaside/Triovexa/internal/coderepair/verification"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	api "github.com/Cyaside/Triovexa/internal/http"
@@ -34,7 +36,10 @@ import (
 	"github.com/google/uuid"
 )
 
-type pythonFixtureCollector struct{ revision string }
+type pythonFixtureCollector struct {
+	revision string
+	binding  coderepair.RepositoryBinding
+}
 
 type forbiddenTriage struct{ t *testing.T }
 
@@ -49,11 +54,11 @@ func (f forbiddenTriage) Generate(context.Context, domain.Incident, []domain.Evi
 }
 
 func (c pythonFixtureCollector) Collect(_ context.Context, i domain.Incident) ([]domain.EvidenceItem, error) {
-	metadata, _ := json.Marshal(map[string]any{"target": i.ServiceName, "complete": true, "deployed_revision": c.revision})
+	metadata, _ := json.Marshal(map[string]any{"target": i.ServiceName, "complete": true, "deployed_revision": c.revision, "environment": i.Environment, "profile_sha256": c.binding.TelemetryContract().Digest()})
 	now := time.Now().UTC()
 	return []domain.EvidenceItem{
 		{ID: uuid.NewString(), IncidentID: i.ID, Type: "log", Source: "fixture-logs", Timestamp: now, Snippet: "parser.py rejects supported value one", MetadataJSON: `{}`},
-		{ID: uuid.NewString(), IncidentID: i.ID, Type: "metric", Source: "workload-control", Timestamp: now, Snippet: "queue backlog rising", MetadataJSON: string(metadata)},
+		{ID: uuid.NewString(), IncidentID: i.ID, Type: "metric", Source: "repair-prometheus", Timestamp: now, Snippet: "HTTP 500 responses rising", MetadataJSON: string(metadata)},
 	}, nil
 }
 
@@ -130,15 +135,16 @@ func TestAutomaticPythonAlertToDraftPRIntegration(t *testing.T) {
 	if err := f.store.CreateUser(ctx, domain.User{ID: "fixture-admin", Username: "fixture-admin", PasswordHash: "synthetic", Role: domain.RoleAdmin, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	b := coderepair.RepositoryBinding{ID: uuid.NewString(), ServiceName: "python-worker", Environment: "staging", RepositoryURL: "https://github.com/owner/python-worker", BaseRef: "main", Enabled: true, PolicyVersion: "repair-v2", CreatedAt: now, UpdatedAt: now,
+	b := coderepair.RepositoryBinding{ID: uuid.NewString(), ServiceName: "python-worker", Environment: "staging", RepositoryURL: "https://github.com/owner/python-worker", BaseRef: "main", Enabled: true, PolicyVersion: "repair-v3", CreatedAt: now, UpdatedAt: now,
 		AllowedPaths: []string{"parser.py", "tests", "pyproject.toml"}, TestRecipes: []string{"python-tests"},
+		TelemetryProfile:  &coderepair.TelemetryProfile{Version: coderepair.TelemetryVersion, Kind: "http", AlertName: "PythonHTTPServerErrors", LogSources: []string{"fixture-logs"}, HTTP: &coderepair.HTTPSignals{RequestsMetric: "http_requests_total", HealthMetric: "probe_success", RevisionMetric: "app_build_info", RevisionLabel: "revision", StatusLabel: "status", ServiceLabel: "service", EnvironmentLabel: "environment", WindowSeconds: 30, MinimumRequests: 1, MaxErrorRatio: 0.01}},
 		Automation:        &coderepair.AutomationPolicy{Enabled: true, AuthorizedBy: "fixture-admin", ExpiresAt: now.Add(15 * time.Minute), CampaignID: budget.Campaign.ID, MaxInvestigations: 1, MaxModelRequests: 2, PublishDraftPR: true},
 		ValidationProfile: &coderepair.ValidationProfile{ID: "python-tests", Version: "python-v1", Image: image, RootFiles: []string{"pyproject.toml"}, ProtectedPaths: []string{"tests"}, Test: coderepair.ValidationCommand{Executable: "/usr/local/bin/python", Arguments: []string{"-m", "unittest", "discover", "-s", "tests", "-v"}, TimeoutSeconds: 30}, ExpectedTestName: "test_accepts_one", ExpectedFailure: "one rejected"}}
 	if err := f.store.CreateRepositoryBinding(ctx, b); err != nil {
 		t.Fatal(err)
 	}
 	dispatcher := &coderepair.AutomaticDispatcher{Store: f.store, ResolveBase: func(context.Context, coderepair.RepositoryBinding) (string, error) { return base, nil }, Allowed: func(context.Context) error { return nil }, Selection: func() (coderepair.AgentSelection, error) { return selection, nil }}
-	service := incident.NewService(f.store, pythonFixtureCollector{base}, forbiddenTriage{t}, forbiddenTriage{t}, nil, nil).WithAutomaticInvestigation(dispatcher.Try)
+	service := incident.NewService(f.store, pythonFixtureCollector{revision: base, binding: b}, forbiddenTriage{t}, forbiddenTriage{t}, nil, nil).WithAutomaticInvestigation(dispatcher.Try)
 	server := httptest.NewServer(api.NewServerWithTelemetry(config.Config{DeploymentMode: "local-demo"}, slog.New(slog.NewTextHandler(io.Discard, nil)), f.store, service, nil, nil, nil).Handler)
 	defer server.Close()
 	payload, _ := json.Marshal(alerting.GrafanaWebhookPayload{Title: "Python job parser rejects supported jobs", State: "firing", Alerts: []alerting.GrafanaAlert{{Fingerprint: "python-regression", Status: "firing", StartsAt: now, Labels: map[string]string{"service": b.ServiceName, "environment": b.Environment, "severity": "high"}}}})
@@ -267,5 +273,43 @@ func TestAutomaticPythonAlertToDraftPRIntegration(t *testing.T) {
 	if final.State != coderepair.StatePROpen || calls.Load() != 2 || tests.calls != 2 || remote.branchWrites != 1 || remote.prWrites != 1 || input.Approval.Phase != "automatic_publication" {
 		t.Fatalf("chain: state=%s calls=%d tests=%d branches=%d PRs=%d", final.State, calls.Load(), tests.calls, remote.branchWrites, remote.prWrites)
 	}
-	t.Logf("offline Python alert->native patch->real Docker regression->draft PR: model=%d tests=%d branch=%d PR=%d; no paid calls", calls.Load(), tests.calls, remote.branchWrites, remote.prWrites)
+	// Continue the same native/Docker proof through synthetic review/rollout
+	// events and the binding-selected HTTP recovery contract. No live repository
+	// or deployment is contacted, and no extra model/test dispatch is allowed.
+	merge := strings.Repeat("b", 40)
+	if ok, err := reopened.ApplyRepairPREvent(ctx, coderepair.PREvent{DeliveryID: uuid.NewString(), Repository: "owner/python-worker", Branch: p.BranchName, BaseRef: b.BaseRef, HeadSHA: head, Number: pr.Number, Merged: true, MergeSHA: merge, ReceivedAt: time.Now().UTC()}); err != nil || !ok {
+		t.Fatalf("HTTP fixture merge: %v", err)
+	}
+	clock := time.Now().UTC().Add(-40 * time.Second)
+	baseline := repairverify.Sample{Target: b.ServiceName, Environment: b.Environment, Source: "prometheus-http-v1", Timestamp: clock.Add(-time.Second), ProfileSHA256: b.TelemetryContract().Digest(), Complete: true, AlertObserved: true, DeployedRevision: base, HTTP: &repairverify.HTTPObservation{Healthy: false, Requests: 100, Errors: 100}}
+	deploymentID := uuid.NewString()
+	if ok, err := reopened.StartRepairDeployment(ctx, p.CaseID, deploymentID, b.Environment, merge, baseline, clock); err != nil || !ok {
+		t.Fatalf("HTTP fixture deployment: %v", err)
+	}
+	if ok, err := reopened.CompleteRepairDeployment(ctx, p.CaseID, deploymentID, b.Environment, merge, clock.Add(time.Second)); err != nil || !ok {
+		t.Fatalf("HTTP fixture rollout completion: %v", err)
+	}
+	deployment, err := reopened.ClaimRepairVerification(ctx, clock.Add(2*time.Second), time.Minute)
+	if err != nil || deployment.Contract.Digest() != baseline.ProfileSHA256 {
+		t.Fatalf("HTTP fixture contract: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		at := clock.Add(time.Duration(10+i*10) * time.Second)
+		sample := baseline
+		sample.Timestamp = at
+		sample.DeployedRevision = merge
+		sample.AlertCleared = true
+		sample.HTTP = &repairverify.HTTPObservation{Healthy: true, Requests: 100, Errors: 0}
+		if err := reopened.RecordRepairVerificationSample(ctx, deployment, sample, true, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ok, err := reopened.FinishRepairVerification(ctx, deployment, true, "three synthetic HTTP observations", clock.Add(31*time.Second)); err != nil || !ok {
+		t.Fatalf("HTTP fixture recovery: %v", err)
+	}
+	final, _ = reopened.GetRepairCase(ctx, p.CaseID)
+	if final.State != coderepair.StateRecovered || calls.Load() != 2 || tests.calls != 2 || remote.branchWrites != 1 || remote.prWrites != 1 {
+		t.Fatal("HTTP recovery lost proof or repeated a model/test/publication effect")
+	}
+	t.Logf("offline HTTP alert->native Python patch->real Docker tests->draft PR->synthetic rollout->HTTP recovery: model=%d tests=%d branch=%d PR=%d; no paid calls", calls.Load(), tests.calls, remote.branchWrites, remote.prWrites)
 }
