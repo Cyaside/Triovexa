@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, APIError, Incident } from '../../api'
 import { RepositorySetup } from './RepositorySetup'
+import { RecoveryDetails, type RepairDeployment } from './RecoveryDetails'
 
 type User = { id: string; role: string }
 type RepairCase = { ID: string; IncidentID: string; BindingID: string; BaseSHA: string; DeployedSHA: string; State: string; Version: number; CreatedBy: string }
@@ -10,9 +11,8 @@ type Evidence = { captured_at: string; sha256: string; entries: { id: string; ty
 type Attempt = { ID: string; Status: string; Provider: string; Model: string; ErrorCode: string; ErrorMessage: string }
 type Report = { status: string; hypothesis?: string; recipe_id: string; before_exit: number; after_exit: number; patch_sha256?: string; evidence_ids?: string[]; code?: string; reason?: string }
 type Publication = { State: string; BranchName: string; PatchSHA256: string; HeadSHA: string; MergeSHA: string; PRNumber: number; PRURL: string; LastError: string }
-type Deployment = { DeploymentID: string; Environment: string; RevisionSHA: string; Phase: string; VerificationStatus: string; Baseline: { QueueBacklog: number; JobsProcessed: number } }
 type Event = { ID: string; Type: string; ActorID: string; DetailsJSON: string; CreatedAt: string }
-type CaseDetail = { case: RepairCase; binding: Binding; evidence: Evidence; attempt?: Attempt; report?: Report; patch?: string; review_digest?: string; publish_approval?: { ActorID: string; ExpiresAt: string }; publication?: Publication; deployments: Deployment[]; events: Event[] }
+type CaseDetail = { case: RepairCase; binding: Binding; evidence: Evidence; attempt?: Attempt; report?: Report; patch?: string; review_digest?: string; publish_approval?: { ActorID: string; ExpiresAt: string }; publication?: Publication; deployments: RepairDeployment[]; events: Event[] }
 
 function label(value: string) { return value.replaceAll('_', ' ') }
 function shortSHA(value: string) { return value ? value.slice(0, 12) : '—' }
@@ -79,10 +79,10 @@ function RepairCaseView({ caseID, user }: { caseID: string; user: User }) {
     </section>}
     {data.publish_approval && <p className="repair-note">Publication approved by {data.publish_approval.ActorID}. {approvalExpired ? 'Approval expired; only reconciliation of existing remote effects is allowed.' : `Expires ${new Date(data.publish_approval.ExpiresAt).toLocaleString()}.`}</p>}
     {data.publication && <section className="repair-section"><h3>Pull request</h3><dl className="repair-facts"><div><dt>Status</dt><dd>{label(data.publication.State)}</dd></div><div><dt>Branch</dt><dd><code>{data.publication.BranchName}</code></dd></div><div><dt>Head</dt><dd><code>{shortSHA(data.publication.HeadSHA)}</code></dd></div></dl>{data.publication.PRURL ? <a href={data.publication.PRURL} target="_blank" rel="noreferrer">Open draft PR #{data.publication.PRNumber} ↗</a> : <p className="muted">The publisher has not confirmed a PR yet.</p>}{data.publication.LastError && <p className="repair-note">{data.publication.LastError}</p>}</section>}
-    {data.deployments.length > 0 && <section className="repair-section"><h3>Deployment and recovery</h3>{data.deployments.map((deployment) => <dl className="repair-facts" key={deployment.DeploymentID}><div><dt>Deployment</dt><dd><code>{deployment.DeploymentID}</code></dd></div><div><dt>Revision</dt><dd><code>{shortSHA(deployment.RevisionSHA)}</code></dd></div><div><dt>Phase</dt><dd>{label(deployment.Phase)}</dd></div><div><dt>Verification</dt><dd>{label(deployment.VerificationStatus)}</dd></div></dl>)}</section>}
-    {c.State === 'merged' && <p className="repair-note">The PR is merged. The deployment pipeline must send a signed start event before rollout to capture a baseline, then a completion event for the same revision.</p>}
-    {c.State === 'verifying' && <p className="repair-note">Waiting for three spaced observations of healthy processing, falling backlog, and the deployed merge revision.</p>}
-    {c.State === 'recovered' && <p className="repair-success">Recovery verified from the deployed revision and three workload observations.</p>}
+    <RecoveryDetails deployments={data.deployments} />
+    {c.State === 'merged' && <p className="repair-note">The PR is merged. The deployment pipeline must send an authenticated start event before rollout to capture a baseline, then a completion event for the same revision.</p>}
+    {c.State === 'verifying' && <p className="repair-note">Waiting for three spaced observations matching the configured recovery criteria and deployed merge revision.</p>}
+    {c.State === 'recovered' && <p className="repair-success">Recovery verified from the deployed revision and three telemetry observations.</p>}
     {c.State === 'inconclusive' && <p className="repair-note">Recovery could not be proven. Inspect the deployment and telemetry before closing the incident.</p>}
     <section className="repair-section"><h3>Activity</h3><ol className="repair-activity">{data.events.map((event) => <li key={event.ID}><details><summary><time>{new Date(event.CreatedAt).toLocaleString()}</time><strong>{label(event.Type)}</strong><span>{event.ActorID}</span></summary><pre>{event.DetailsJSON}</pre></details></li>)}</ol></section>
   </div>

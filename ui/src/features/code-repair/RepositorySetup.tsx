@@ -2,8 +2,9 @@ import { FormEvent, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, APIError } from '../../api'
 import { RequestState } from '../../shared/components'
+import { TelemetrySetup, telemetryProfile } from './TelemetrySetup'
 
-type Binding = { ID: string; ServiceName: string; Environment: string; RepositoryURL: string; BaseRef: string; AllowedPaths: string[]; Enabled: boolean; CredentialRef: string; ValidationProfile?: { image: string; id: string }; Automation?: { enabled: boolean; expires_at: string; campaign_id: string; max_investigations: number; max_model_requests: number; publish_draft_pr?: boolean } }
+type Binding = { ID: string; ServiceName: string; Environment: string; RepositoryURL: string; BaseRef: string; AllowedPaths: string[]; Enabled: boolean; CredentialRef: string; ValidationProfile?: { image: string; id: string }; TelemetryProfile?: { kind: string; alert_name: string; log_sources: string[] }; Automation?: { enabled: boolean; expires_at: string; campaign_id: string; max_investigations: number; max_model_requests: number; publish_draft_pr?: boolean } }
 const splitPaths = (value: FormDataEntryValue | null) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean)
 
 export function RepositorySetup({ service = '', environment = '', onCreated }: { service?: string; environment?: string; onCreated?: () => void }) {
@@ -19,7 +20,7 @@ export function RepositorySetup({ service = '', environment = '', onCreated }: {
       if (!Array.isArray(args) || !args.every((item) => typeof item === 'string') || !Array.isArray(checks)) throw new Error('Arguments must be a JSON array of strings; checks must be a JSON array.')
       create.mutate({ service_name: String(data.get('service')).trim(), environment: String(data.get('environment')).trim(),
         repository_url: String(data.get('repository_url')).trim(), base_ref: String(data.get('base_ref')).trim(), allowed_paths: splitPaths(data.get('allowed_paths')),
-        credential_ref: String(data.get('credential_ref') || '').trim(), test_recipes: ['repository-tests'],
+        credential_ref: String(data.get('credential_ref') || '').trim(), test_recipes: ['repository-tests'], telemetry_profile: telemetryProfile(data),
         validation_profile: { id: 'repository-tests', version: 'validation-v1', image: String(data.get('image')).trim(), root_files: splitPaths(data.get('root_files')),
           protected_paths: splitPaths(data.get('protected_paths')), checks, test: { executable: String(data.get('executable')).trim(), arguments: args, timeout_seconds: 120 },
           expected_test_name: String(data.get('expected_test_name')).trim(), expected_failure: String(data.get('expected_failure')).trim() },
@@ -45,6 +46,7 @@ export function RepositorySetup({ service = '', environment = '', onCreated }: {
       <label>Regression test name in failing output<input name="expected_test_name" placeholder="test_accepts_supported_schema" required /></label>
       <label>Regression failure marker<input name="expected_failure" placeholder="supported schema rejected" required /></label>
     </fieldset>
+    <TelemetrySetup />
     <fieldset><legend>Investigation policy</legend>
       <label><input type="checkbox" checked={automatic} onChange={(event) => setAutomatic(event.target.checked)} /> Automatically investigate incoming alerts</label>
       <p className="muted">Investigations can start without a restart. Draft PR publication requires the separate permission below. Merge and deployment remain outside this grant.</p>
@@ -71,7 +73,7 @@ export function RepositorySettings() {
   return <section className="repair-content"><h2>Source repositories</h2>
     {result.isError && <RequestState error={result.error} retry={() => result.refetch()} />}
     {result.data?.items.map((binding) => <section key={binding.ID} className="setting-row"><div><h3>{binding.ServiceName} · {binding.Environment}</h3><p>{binding.RepositoryURL}</p><p>{binding.Enabled ? (binding.Automation?.enabled ? 'Automatic investigation enabled' : 'Manual investigation') : 'Disabled'}</p>
-      <details><summary>Configuration</summary><p>Branch: {binding.BaseRef} · Scope: {binding.AllowedPaths.join(', ')}</p><p>Sandbox: {binding.ValidationProfile?.image || 'Legacy Go fixture'} · Credential: {binding.CredentialRef || 'Public repository'}</p><p>Draft PR publication: {binding.Automation?.publish_draft_pr ? 'Automatic after validation' : 'Operator approval required'}</p>
+      <details><summary>Configuration</summary><p>Branch: {binding.BaseRef} · Scope: {binding.AllowedPaths.join(', ')}</p><p>Sandbox: {binding.ValidationProfile?.image || 'Legacy Go fixture'} · Credential: {binding.CredentialRef || 'Public repository'}</p><p>Telemetry: {binding.TelemetryProfile?.kind || 'Historical queue contract'} · Alert: {binding.TelemetryProfile?.alert_name || 'TriovexaQueueBacklogHigh'}</p><p>Draft PR publication: {binding.Automation?.publish_draft_pr ? 'Automatic after validation' : 'Operator approval required'}</p>
         {binding.Automation?.enabled && <p>Campaign: {binding.Automation.campaign_id} · Up to {binding.Automation.max_investigations} investigations, {binding.Automation.max_model_requests} model requests each · Expires {new Date(binding.Automation.expires_at).toLocaleString()}</p>}
       </details></div><div className="setting-action">
       {binding.Enabled && <><button disabled={operation.isPending} onClick={() => operation.mutate({ id: binding.ID, action: 'check' })}>Check repository access</button><button disabled={operation.isPending} onClick={() => operation.mutate({ id: binding.ID, action: 'disable' })}>Disable</button></>}
