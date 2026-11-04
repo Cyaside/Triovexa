@@ -203,7 +203,7 @@ func TestMatchedRuntimeContextCorpus(t *testing.T) {
 						name := "repo_read"
 						args := map[string]any{"path": "internal/workload/worker.go", "start_line": 1, "end_line": 500}
 						if ordinal == 2 {
-							name, args = "propose_patch", map[string]any{"patch": patch, "hypothesis": "The version check rejects supported schema 2 jobs", "evidence_ids": []string{"log-1", "metric-1"}}
+							name, args = "propose_patch", structuredArgs(t, root, patch, "The version check rejects supported schema 2 jobs", []string{"log-1", "metric-1"})
 						}
 						encoded, _ := json.Marshal(args)
 						message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": fmt.Sprintf("call-%d", ordinal), "type": "function", "function": map[string]any{"name": name, "arguments": string(encoded)}}}}

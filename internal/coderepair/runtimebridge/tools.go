@@ -217,14 +217,18 @@ func (s *ToolSession) dispatch(ctx context.Context, request ToolRequest) (any, e
 		return map[string]any{"exit_code": s.result.Before.ExitCode, "output": security.Redact(s.result.Before.Output), "baseline": true}, nil
 	case "propose_patch":
 		var args struct {
-			Patch       string   `json:"patch"`
-			Hypothesis  string   `json:"hypothesis"`
-			EvidenceIDs []string `json:"evidence_ids"`
+			Format      string              `json:"format"`
+			Files       []sandbox.FileEdits `json:"files"`
+			Hypothesis  string              `json:"hypothesis"`
+			EvidenceIDs []string            `json:"evidence_ids"`
 		}
 		if err := DecodeStrict(request.Args, &args); err != nil {
 			return nil, err
 		}
-		encoded, _ := json.Marshal(agent.Decision{Operation: agent.ProposePatch, Patch: args.Patch, Hypothesis: args.Hypothesis, EvidenceIDs: args.EvidenceIDs})
+		if len(request.Args) > 64*1024 || args.Format != sandbox.EditFormat {
+			return nil, errors.New("proposal byte limit or format is invalid")
+		}
+		encoded, _ := json.Marshal(agent.Decision{Operation: agent.ProposePatch, Patch: "structured-edit", Hypothesis: args.Hypothesis, EvidenceIDs: args.EvidenceIDs})
 		decision, err := agent.ParseDecision(string(encoded), s.snapshot)
 		if err != nil {
 			return nil, err
@@ -232,7 +236,17 @@ func (s *ToolSession) dispatch(ctx context.Context, request ToolRequest) (any, e
 		if s.candidates >= s.limits.MaxCandidateCount {
 			return s.stop("CANDIDATE_BUDGET", "candidate budget was exhausted", false).Value, nil
 		}
-		patchHash := sha256.Sum256([]byte(strings.TrimSpace(decision.Patch)))
+		patchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		patch, err := s.index.BuildPatch(patchCtx, args.Files, sandbox.PatchLimits{MaxPatchBytes: 64 * 1024, MaxFiles: 5, MaxChangedLines: 300})
+		cancel()
+		if err != nil {
+			return s.stop("INVALID_PATCH", "structured edits failed source, scope or diff validation", true).Value, nil
+		}
+		if s.fence(ctx) != nil {
+			return s.stop("LEASE_LOST", "investigation no longer owns its lease", false).Value, nil
+		}
+		decision.Patch = string(patch)
+		patchHash := sha256.Sum256(patch)
 		patchDigest := hex.EncodeToString(patchHash[:])
 		if s.candidateDigests[patchDigest] {
 			return s.stop("NO_PROGRESS", "a previously rejected patch was proposed again", false).Value, nil

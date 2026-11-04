@@ -44,9 +44,9 @@ func candidateSession(t *testing.T, maximum int) (*ToolSession, *sourceTester, c
 	return session, tests, ctx, patch
 }
 
-func proposal(t *testing.T, id, patch, explanation string) ToolRequest {
+func proposal(t *testing.T, root, id, patch, explanation string) ToolRequest {
 	t.Helper()
-	encoded, err := json.Marshal(map[string]any{"patch": patch, "hypothesis": explanation, "evidence_ids": []string{"log-1", "metric-1"}})
+	encoded, err := json.Marshal(structuredArgs(t, root, patch, explanation, []string{"log-1", "metric-1"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestSecondCandidateRestoresCleanApprovedBase(t *testing.T) {
 	sourceBytes := s.index.BytesRead
 	index := s.index
 	bad := strings.Replace(good, "version != 2", "version != 3", 1)
-	response := s.Execute(ctx, proposal(t, "patch-bad", bad, "The schema comparison should accept schema 3"))
+	response := s.Execute(ctx, proposal(t, s.workspace.RootPath(), "patch-bad", bad, "The schema comparison should accept schema 3"))
 	feedback, ok := response.Value.(map[string]any)
 	if !ok || response.Status != "ok" || feedback["terminal"] != false || feedback["outcome"] != "candidate_feedback" || feedback["code"] != "TESTS_FAILED" || feedback["base_restored"] != true || feedback["candidate_count"] != 1 || feedback["max_candidates"] != 2 {
 		t.Fatalf("unexpected candidate feedback: %+v", response)
@@ -75,7 +75,7 @@ func TestSecondCandidateRestoresCleanApprovedBase(t *testing.T) {
 	if !ok || !strings.Contains(source.Text, "version != 1") || s.index.Reads != 1 || s.index.BytesRead != sourceBytes {
 		t.Fatal("restored source did not invalidate candidate cache")
 	}
-	final := s.Execute(ctx, proposal(t, "patch-good", good, "Schema 2 jobs are rejected by the version check"))
+	final := s.Execute(ctx, proposal(t, s.workspace.RootPath(), "patch-good", good, "Schema 2 jobs are rejected by the version check"))
 	value, ok := final.Value.(map[string]any)
 	if !ok || value["terminal"] != true || s.Result().Status != coderepair.StatePatchReady || s.Result().Code != "PATCH_VERIFIED" || tests.calls != 3 || s.candidates != 2 || !reflect.DeepEqual(s.Result().Before, baseline) {
 		t.Fatalf("corrected candidate did not preserve authoritative red-green proof: %+v", final)
@@ -87,12 +87,12 @@ func TestSecondCandidateRestoresCleanApprovedBase(t *testing.T) {
 
 func TestSingleCandidateFailureHasNoHiddenCall(t *testing.T) {
 	s, tests, ctx, good := candidateSession(t, 1)
-	response := s.Execute(ctx, proposal(t, "patch-bad", strings.Replace(good, "version != 2", "version != 3", 1), "Try schema 3"))
+	response := s.Execute(ctx, proposal(t, s.workspace.RootPath(), "patch-bad", strings.Replace(good, "version != 2", "version != 3", 1), "Try schema 3"))
 	value, ok := response.Value.(map[string]any)
 	if !ok || value["terminal"] != true || s.Result().Code != "TESTS_FAILED" || tests.calls != 2 || s.Result().PatchReport.SHA256 != "" {
 		t.Fatalf("single candidate silently corrected or retained failed proof: %+v", response)
 	}
-	s.Execute(ctx, proposal(t, "patch-after-terminal", good, "Try schema 2"))
+	s.Execute(ctx, proposal(t, s.workspace.RootPath(), "patch-after-terminal", good, "Try schema 2"))
 	if tests.calls != 2 || s.candidates != 1 {
 		t.Fatal("terminal candidate failure triggered another test or proposal")
 	}
@@ -104,12 +104,12 @@ func TestCandidateFormatterFeedbackRestoresBaseWithoutRunningFailedSource(t *tes
 	if bad == good {
 		t.Fatal("fixture patch moved")
 	}
-	response := s.Execute(ctx, proposal(t, "patch-invalid-source", bad, "The supported schema is rejected"))
+	response := s.Execute(ctx, proposal(t, s.workspace.RootPath(), "patch-invalid-source", bad, "The supported schema is rejected"))
 	value, ok := response.Value.(map[string]any)
 	if !ok || value["terminal"] != false || value["code"] != "FORMAT_FAILED" || value["base_restored"] != true || tests.calls != 1 {
 		t.Fatalf("formatter failure ran invalid source or became hidden retry: %+v", response)
 	}
-	s.Execute(ctx, proposal(t, "patch-correct-source", good, "Schema 2 must be accepted"))
+	s.Execute(ctx, proposal(t, s.workspace.RootPath(), "patch-correct-source", good, "Schema 2 must be accepted"))
 	if s.Result().Status != coderepair.StatePatchReady || tests.calls != 2 {
 		t.Fatal("explicit corrected source did not run the single allowed post-patch test")
 	}
@@ -118,8 +118,8 @@ func TestCandidateFormatterFeedbackRestoresBaseWithoutRunningFailedSource(t *tes
 func TestCorrectionRejectsRepeatedPatchWithChangedExplanation(t *testing.T) {
 	s, tests, ctx, good := candidateSession(t, 3)
 	bad := strings.Replace(good, "version != 2", "version != 3", 1)
-	s.Execute(ctx, proposal(t, "patch-first", bad, "Try schema 3"))
-	response := s.Execute(ctx, proposal(t, "patch-repeat", bad+"\n", "Different explanation does not change the patch"))
+	s.Execute(ctx, proposal(t, s.workspace.RootPath(), "patch-first", bad, "Try schema 3"))
+	response := s.Execute(ctx, proposal(t, s.workspace.RootPath(), "patch-repeat", bad+"\n", "Different explanation does not change the patch"))
 	value, ok := response.Value.(map[string]any)
 	if !ok || value["terminal"] != true || s.Result().Code != "NO_PROGRESS" || tests.calls != 2 || s.candidates != 1 {
 		t.Fatalf("repeated patch dispatched another candidate: %+v", response)
@@ -141,7 +141,7 @@ func (d dirtyCandidateTester) Run(ctx context.Context, root string, binding code
 func TestCandidateCorrectionBlocksUnexpectedWorktreeChanges(t *testing.T) {
 	s, tests, ctx, good := candidateSession(t, 2)
 	s.tests = dirtyCandidateTester{tests}
-	response := s.Execute(ctx, proposal(t, "patch-dirty", strings.Replace(good, "version != 2", "version != 3", 1), "Try schema 3"))
+	response := s.Execute(ctx, proposal(t, s.workspace.RootPath(), "patch-dirty", strings.Replace(good, "version != 2", "version != 3", 1), "Try schema 3"))
 	value, ok := response.Value.(map[string]any)
 	if !ok || value["terminal"] != true || s.Result().Code != "CANDIDATE_RESTORE_FAILED" || tests.calls != 2 || s.Result().PatchReport.SHA256 != "" {
 		t.Fatalf("unexpected worktree mutation was silently repaired: %+v", response)

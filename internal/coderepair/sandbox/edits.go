@@ -1,9 +1,11 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -17,6 +19,24 @@ const EditFormat = "text-edits-v1"
 type TextEdit struct {
 	OldText string `json:"old_text"`
 	NewText string `json:"new_text"`
+}
+
+// Empty new_text is a deletion, whereas an omitted field is a contract error.
+func (e *TextEdit) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		OldText *string `json:"old_text"`
+		NewText *string `json:"new_text"`
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&fields); err != nil {
+		return errors.New("invalid edit fields")
+	}
+	if fields.OldText == nil || fields.NewText == nil {
+		return errors.New("edit requires old_text and new_text")
+	}
+	e.OldText, e.NewText = *fields.OldText, *fields.NewText
+	return nil
 }
 
 type FileEdits struct {

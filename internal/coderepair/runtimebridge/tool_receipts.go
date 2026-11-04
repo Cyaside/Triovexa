@@ -24,6 +24,7 @@ type toolReceipts struct {
 }
 
 type toolSnapshot struct {
+	ProofVersion     string                    `json:"proof_version"`
 	AttemptID        string                    `json:"attempt_id"`
 	Revision         string                    `json:"revision"`
 	Name             string                    `json:"name"`
@@ -78,7 +79,7 @@ func (r *toolReceipts) open(ctx context.Context, receipt coderepair.ToolReceipt,
 		return toolSnapshot{}, errors.New("tool receipt is corrupt")
 	}
 	var state toolSnapshot
-	if len(plain) > 240000 || DecodeStrict([]byte(plain), &state) != nil || state.Response.CallID != receipt.CallID || state.ReadPaths == nil || state.Repeated == nil ||
+	if len(plain) > 240000 || DecodeStrict([]byte(plain), &state) != nil || state.ProofVersion != CheckpointVersion || state.SourceAccounting.ReadRanges == nil || state.Response.CallID != receipt.CallID || state.ReadPaths == nil || state.Repeated == nil ||
 		state.AttemptID != receipt.AttemptID || state.Revision != receipt.Revision || state.Name != receipt.Name || state.ArgsSHA256 != receipt.ArgsSHA256 {
 		return state, errors.New("tool receipt is corrupt")
 	}
@@ -89,7 +90,7 @@ func (r *toolReceipts) open(ctx context.Context, receipt coderepair.ToolReceipt,
 		return state, errors.New("tool receipt source quota is invalid")
 	}
 	for path := range state.ReadPaths {
-		if _, exists := state.SourceAccounting.Files[path]; !exists {
+		if _, exists := state.SourceAccounting.Files[path]; !exists || len(state.SourceAccounting.ReadRanges[path]) == 0 {
 			return state, errors.New("tool receipt read provenance has no source accounting")
 		}
 	}
@@ -156,7 +157,7 @@ func (r *toolReceipts) execute(ctx context.Context, s *ToolSession, request Tool
 }
 
 func (r *toolReceipts) complete(ctx context.Context, s *ToolSession, receipt coderepair.ToolReceipt, response ToolResult) error {
-	encoded, err := json.Marshal(toolSnapshot{AttemptID: receipt.AttemptID, Revision: receipt.Revision, Name: receipt.Name, ArgsSHA256: receipt.ArgsSHA256, Response: response, Result: s.result, ReadPaths: s.readPaths, SourceAccounting: s.index.Accounting(), Repeated: s.repeated, Candidates: s.candidates, CandidateDigests: s.candidateDigests, Terminal: s.terminal})
+	encoded, err := json.Marshal(toolSnapshot{ProofVersion: CheckpointVersion, AttemptID: receipt.AttemptID, Revision: receipt.Revision, Name: receipt.Name, ArgsSHA256: receipt.ArgsSHA256, Response: response, Result: s.result, ReadPaths: s.readPaths, SourceAccounting: s.index.Accounting(), Repeated: s.repeated, Candidates: s.candidates, CandidateDigests: s.candidateDigests, Terminal: s.terminal})
 	if err != nil || len(encoded) > 240000 {
 		return errors.New("tool receipt exceeds its bound")
 	}

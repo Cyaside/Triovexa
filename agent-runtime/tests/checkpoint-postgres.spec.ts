@@ -8,7 +8,7 @@ import { RuntimeFailure, type Start } from "../src/bridge/schema.js";
 import { investigate } from "../src/runtime/engine.js";
 import { Artifacts } from "../src/context/artifacts.js";
 import { invokeReadOnlyReviewer, type CandidateProof } from "../src/runtime/reviewer.js";
-import { completion, patchArgs, startFixture, stub } from "./fixture.js";
+import { completion, exampleDiff, patchArgs, startFixture, stub } from "./fixture.js";
 
 const databaseURL = process.env.TEST_AGENT_DATABASE_URL;
 const suite = databaseURL ? describe : describe.skip;
@@ -292,7 +292,7 @@ suite("Postgres checkpoint isolation and recovery", () => {
 
   it("allows only explicit internal candidate correction and checkpoints its counter", async () => {
     const start = await fixture(); start.scope.profile = "internal"; start.scope.limits.max_candidate_count = 2;
-    const gateway = await stub((request, index) => ({ body: completion(String(request.body.model), [{ id: `candidate-${index}`, name: "propose_patch", args: { ...patchArgs, patch: patchArgs.patch.replace("+fixed", `+fixed${index}`) } }]) }));
+    const gateway = await stub((request, index) => ({ body: completion(String(request.body.model), [{ id: `candidate-${index}`, name: "propose_patch", args: { ...patchArgs, files: [{ ...patchArgs.files[0]!, edits: [{ old_text: "old", new_text: `fixed${index}` }] }] } }]) }));
     start.transport.model_gateway_url = gateway.url;
     let candidates = 0;
     try {
@@ -322,7 +322,7 @@ suite("Postgres checkpoint isolation and recovery", () => {
 
   it("runs a separately authorized reviewer with only virtual reads and shared request ordinals", async () => {
     const start = await fixture(); start.scope.profile = "internal";
-    const proof: CandidateProof = { candidate_digest: "d".repeat(64), patch: patchArgs.patch, recipe_id: start.scope.recipe_ids[0]!, baseline_exit_code: 1, candidate_exit_code: 0, test_output: "offline regression PASS" };
+    const proof: CandidateProof = { candidate_digest: "d".repeat(64), patch: exampleDiff, recipe_id: start.scope.recipe_ids[0]!, baseline_exit_code: 1, candidate_exit_code: 0, test_output: "offline regression PASS" };
     const artifacts = new Artifacts(start.scope.attempt_id); const path = artifacts.put(JSON.stringify(proof, null, 2));
     const gateway = await stub((request, index) => {
       if (index === 1) return { body: completion(String(request.body.model), [{ id: "review-read", name: "read_file", args: { file_path: path } }]) };
@@ -343,7 +343,7 @@ suite("Postgres checkpoint isolation and recovery", () => {
 
   it.each(["propose_patch", "run_test_recipe", "task"])("reviewer rejects %s without mutation or another request", async (name) => {
     const start = await fixture(); start.scope.profile = "internal";
-    const proof: CandidateProof = { candidate_digest: "d".repeat(64), patch: patchArgs.patch, recipe_id: start.scope.recipe_ids[0]!, baseline_exit_code: 1, candidate_exit_code: 0, test_output: "offline regression PASS" };
+    const proof: CandidateProof = { candidate_digest: "d".repeat(64), patch: exampleDiff, recipe_id: start.scope.recipe_ids[0]!, baseline_exit_code: 1, candidate_exit_code: 0, test_output: "offline regression PASS" };
     const gateway = await stub((request) => ({ body: completion(String(request.body.model), [{ id: "forbidden-review-call", name, args: name === "propose_patch" ? patchArgs : { recipe_id: "worker-regression" } }]) }));
     start.transport.model_gateway_url = gateway.url;
     try {

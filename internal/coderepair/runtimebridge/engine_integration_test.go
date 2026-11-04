@@ -203,7 +203,7 @@ func TestNativeRuntimeIPCProducesGoVerifiedPatchIntegration(t *testing.T) {
 		args := any(map[string]any{"path": "internal/workload/worker.go", "start_line": 1, "end_line": 20})
 		if index == 2 {
 			name = "propose_patch"
-			args = map[string]any{"patch": patch, "hypothesis": "The version check rejects supported schema 2 jobs", "evidence_ids": []string{"log-1", "metric-1"}}
+			args = structuredArgs(t, w.RootPath(), patch, "The version check rejects supported schema 2 jobs", []string{"log-1", "metric-1"})
 		}
 		encoded, _ := json.Marshal(args)
 		response := map[string]any{"id": fmt.Sprintf("completion-%d", index), "model": "fixture-model", "object": "chat.completion", "created": 1,

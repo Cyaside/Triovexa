@@ -79,8 +79,7 @@ func validateRestoredPatch(ctx context.Context, state toolSnapshot, session *Too
 	if hex.EncodeToString(digest[:]) != result.PatchReport.SHA256 {
 		return invalid
 	}
-	normalized := sha256.Sum256([]byte(strings.TrimSpace(result.Patch)))
-	if !state.CandidateDigests[hex.EncodeToString(normalized[:])] {
+	if !state.CandidateDigests[result.PatchReport.SHA256] {
 		return invalid
 	}
 	decision, _ := json.Marshal(agent.Decision{Operation: agent.ProposePatch, Patch: result.Patch, Hypothesis: result.Hypothesis, EvidenceIDs: result.EvidenceIDs})
@@ -88,7 +87,7 @@ func validateRestoredPatch(ctx context.Context, state toolSnapshot, session *Too
 		return invalid
 	}
 	for _, path := range result.PatchReport.Files {
-		if !state.ReadPaths[path] || !session.binding.AllowsPath(path) || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if !state.ReadPaths[path] || !session.binding.CanPatchPath(path) {
 			return invalid
 		}
 	}

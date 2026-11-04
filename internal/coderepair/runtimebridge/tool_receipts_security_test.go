@@ -102,7 +102,7 @@ func sourceRead(callID string) ToolRequest {
 
 func (h *receiptHarness) propose(t *testing.T, session *ToolSession) {
 	t.Helper()
-	args, _ := json.Marshal(map[string]any{"patch": h.patch, "hypothesis": "version check rejects valid schema two jobs", "evidence_ids": []string{"log-1", "metric-1"}})
+	args, _ := json.Marshal(structuredArgs(t, h.w.RootPath(), h.patch, "version check rejects valid schema two jobs", []string{"log-1", "metric-1"}))
 	response := session.Execute(context.Background(), ToolRequest{CallID: "patch-1", Name: "propose_patch", Args: args})
 	if response.Status != "ok" || session.Result().Status != coderepair.StatePatchReady {
 		t.Fatalf("fixture candidate failed before receipt test: response=%+v result=%+v", response, session.Result())
@@ -208,7 +208,7 @@ func TestUnpersistedPatchProofCannotBePublishedOrRetried(t *testing.T) {
 	session := h.session(t, true)
 	session.Execute(context.Background(), sourceRead("read-1"))
 	h.store.completeErr = errors.New("synthetic persistence failure")
-	args, _ := json.Marshal(map[string]any{"patch": h.patch, "hypothesis": "version check rejects valid schema two jobs", "evidence_ids": []string{"log-1", "metric-1"}})
+	args, _ := json.Marshal(structuredArgs(t, h.w.RootPath(), h.patch, "version check rejects valid schema two jobs", []string{"log-1", "metric-1"}))
 	session.Execute(context.Background(), ToolRequest{CallID: "patch-1", Name: "propose_patch", Args: args})
 	result := session.Result()
 	if result.Code != "TOOL_DISPATCH_UNCERTAIN" || result.Status != coderepair.StateBlocked || result.Patch != "" || result.PatchReport.SHA256 != "" || h.tests.calls != 2 {
@@ -294,7 +294,7 @@ func TestVerifiedTerminalReceiptRestoresWithoutApplyingOrTestingAgain(t *testing
 	fixtureGit(t, h.w.RootPath(), "checkout", "--", "internal/workload/worker.go")
 	restarted := h.session(t, true)
 	beforeRuns := h.tests.calls
-	args, _ := json.Marshal(map[string]any{"patch": h.patch, "hypothesis": "version check rejects valid schema two jobs", "evidence_ids": []string{"log-1", "metric-1"}})
+	args, _ := json.Marshal(structuredArgs(t, h.w.RootPath(), h.patch, "version check rejects valid schema two jobs", []string{"log-1", "metric-1"}))
 	response := restarted.Execute(context.Background(), ToolRequest{CallID: "patch-1", Name: "propose_patch", Args: args})
 	result := restarted.Result()
 	if response.Status != "ok" || result.Status != coderepair.StatePatchReady || result.Patch != verified.Patch || result.PatchReport.SHA256 != verified.PatchReport.SHA256 || h.tests.calls != beforeRuns || restarted.index.Reads != 0 || h.store.starts != 2 {

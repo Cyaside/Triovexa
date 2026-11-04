@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -22,11 +23,13 @@ import (
 	"github.com/Cyaside/Triovexa/internal/coderepair"
 	"github.com/Cyaside/Triovexa/internal/coderepair/agent"
 	"github.com/Cyaside/Triovexa/internal/coderepair/publisher"
+	"github.com/Cyaside/Triovexa/internal/coderepair/sandbox"
 	"github.com/Cyaside/Triovexa/internal/config"
 	"github.com/Cyaside/Triovexa/internal/domain"
 	api "github.com/Cyaside/Triovexa/internal/http"
 	"github.com/Cyaside/Triovexa/internal/incident"
 	"github.com/Cyaside/Triovexa/internal/secretstore"
+	"github.com/Cyaside/Triovexa/internal/storage"
 	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 	"github.com/google/uuid"
 )
@@ -99,7 +102,7 @@ func TestAutomaticPythonAlertToDraftPRIntegration(t *testing.T) {
 		case 1:
 			call = contextPreviewCall{"python-read", "repo_read", map[string]any{"path": "parser.py", "start_line": 1, "end_line": 20}}
 		case 2:
-			call = contextPreviewCall{"python-patch", "propose_patch", map[string]any{"patch": patch, "hypothesis": "The lower boundary rejects valid value one", "evidence_ids": evidenceIDs}}
+			call = contextPreviewCall{"python-patch", "propose_patch", structuredArgs(t, root, patch, "The lower boundary rejects valid value one", evidenceIDs)}
 		default:
 			t.Error("unexpected additional model request")
 			w.WriteHeader(500)
@@ -150,6 +153,13 @@ func TestAutomaticPythonAlertToDraftPRIntegration(t *testing.T) {
 		}
 	}
 	triage, err := f.store.ClaimJob(ctx, "python-alert", now.Add(time.Minute))
+	// The host and Docker database clocks may differ slightly. Poll the same
+	// due-job boundary used by the real worker, without changing stored times.
+	until := time.Now().Add(3 * time.Second)
+	for errors.Is(err, storage.ErrNoJobAvailable) && time.Now().Before(until) {
+		time.Sleep(20 * time.Millisecond)
+		triage, err = f.store.ClaimJob(ctx, "python-alert", now.Add(time.Minute))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +193,37 @@ func TestAutomaticPythonAlertToDraftPRIntegration(t *testing.T) {
 		fixtureGit(t, copyRoot, "checkout", "--detach", base)
 		return copyRoot, func() error { return nil }, nil
 	}
-	handler, err := agent.NewHandler(f.store, runner, checkout)
+	recovery := investigationFunc(func(ctx context.Context, w *sandbox.Workspace, binding coderepair.RepositoryBinding, evidence coderepair.EvidenceSnapshot, selection coderepair.AgentSelection, recipe string) agent.InvestigationResult {
+		first := runner.Investigate(ctx, w, binding, evidence, selection, recipe)
+		if first.Status != coderepair.StatePatchReady {
+			return first
+		}
+		reopened, err := postgres.NewPostgresStore(f.appDSN)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer reopened.Close()
+		fresh, _, err := checkout(ctx, binding, base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		workspace, err := sandbox.Open(fresh, binding, sandbox.Limits{MaxFileBytes: 32768, MaxTotalBytes: 204800, MaxListedFiles: 100, MaxSearchHits: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer workspace.Close()
+		copyRunner := *runner
+		copyRunner.Store = reopened
+		beforeCalls, beforeTests := calls.Load(), tests.calls
+		claim, _ := agent.InvestigationClaim(ctx)
+		claim.RecoveryOnly = true
+		replayed := copyRunner.Investigate(agent.WithClaimedInvestigation(ctx, claim), workspace, binding, evidence, selection, recipe)
+		if replayed.Status != coderepair.StatePatchReady || replayed.Patch != first.Patch || calls.Load() != beforeCalls || tests.calls != beforeTests {
+			t.Fatalf("Python durable proof changed or replayed effects: state=%s code=%s", replayed.Status, replayed.Code)
+		}
+		return replayed
+	})
+	handler, err := agent.NewHandler(f.store, recovery, checkout)
 	if err != nil {
 		t.Fatal(err)
 	}

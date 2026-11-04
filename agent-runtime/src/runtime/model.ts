@@ -120,8 +120,11 @@ export class ModelTransport {
         if (!response.ok || !contract.success) throw new RuntimeFailure("CONTEXT_PREVIEW_INVALID");
         return contract.data;
       };
-      const measured = await preview(encoded);
-      if (measured.input_bound > measured.max_input_tokens || Buffer.byteLength(encoded) > this.start.scope.limits.max_input_bytes) {
+      let measured = await preview(encoded);
+      for (let pass = 0; measured.input_bound > measured.max_input_tokens || Buffer.byteLength(encoded) > this.start.scope.limits.max_input_bytes; pass++) {
+        if (pass >= this.start.scope.limits.max_tool_steps) throw new RuntimeFailure("CONTEXT_LIMIT");
+        const priorBytes = Buffer.byteLength(encoded);
+        const priorBound = measured.input_bound;
         const excess = Math.max(measured.input_bound - measured.max_input_tokens, Buffer.byteLength(encoded) - this.start.scope.limits.max_input_bytes);
         const history = archiveOlderWireHistory(body.messages, this.artifacts);
         body.messages = history.messages;
@@ -129,8 +132,10 @@ export class ModelTransport {
         const replacements = remaining ? offloadWireToolResults(body.messages, this.artifacts, remaining) : 0;
         if (!history.archived && !replacements) throw new RuntimeFailure("CONTEXT_LIMIT");
         encoded = JSON.stringify(body);
-        const reduced = await preview(encoded);
-        if (reduced.input_bound > reduced.max_input_tokens) throw new RuntimeFailure("CONTEXT_LIMIT");
+        measured = await preview(encoded);
+        // Byte savings are a selection heuristic, not token arithmetic. Ask
+        // the local gateway again while a permitted reduction makes progress.
+        if (measured.input_bound >= priorBound && Buffer.byteLength(encoded) >= priorBytes) throw new RuntimeFailure("CONTEXT_LIMIT");
       }
     }
     if (Buffer.byteLength(encoded) > this.start.scope.limits.max_input_bytes) throw new RuntimeFailure("CONTEXT_LIMIT");

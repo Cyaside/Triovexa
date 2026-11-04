@@ -12,7 +12,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/secretstore"
 )
 
-const CheckpointVersion = "1"
+const CheckpointVersion = "2"
 
 type PinnedConfiguration struct {
 	Provider ai.ProviderConfig         `json:"provider"`

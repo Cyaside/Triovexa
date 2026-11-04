@@ -35,10 +35,10 @@ func TestProposalsCannotChangeUnreadSourceOrProtectedRegressionTests(t *testing.
 				patch = fixtureGit(t, h.w.RootPath(), "diff", "--", path) + "\n"
 				fixtureGit(t, h.w.RootPath(), "checkout", "--", path)
 			}
-			args, _ := json.Marshal(map[string]any{"patch": patch, "hypothesis": "version check rejects valid schema two jobs", "evidence_ids": []string{"log-1", "metric-1"}})
+			args, _ := json.Marshal(structuredArgs(t, h.w.RootPath(), patch, "version check rejects valid schema two jobs", []string{"log-1", "metric-1"}))
 			session.Execute(context.Background(), ToolRequest{CallID: "patch", Name: "propose_patch", Args: args})
 			result := session.Result()
-			if result.Status != coderepair.StateFailed || result.Code != "UNGROUNDED_PATCH" || result.Patch != "" || result.PatchReport.SHA256 != "" || h.tests.calls != 1 {
+			if result.Status != coderepair.StateFailed || result.Code != "INVALID_PATCH" || result.Patch != "" || result.PatchReport.SHA256 != "" || h.tests.calls != 1 {
 				t.Fatalf("unread/protected patch became publishable: %+v", result)
 			}
 			if status := fixtureGit(t, h.w.RootPath(), "status", "--porcelain"); status != "" {

@@ -71,7 +71,7 @@ func TestPersistedNativeRepairRecoversTerminalProofIntegration(t *testing.T) {
 			for _, evidence := range snapshot.Entries {
 				ids = append(ids, evidence.ID)
 			}
-			args = map[string]any{"patch": patch, "hypothesis": "version check rejects supported schema two jobs", "evidence_ids": ids}
+			args = structuredArgs(t, w.RootPath(), patch, "version check rejects supported schema two jobs", ids)
 		}
 		encoded, _ := json.Marshal(args)
 		response := map[string]any{"id": fmt.Sprintf("fixture-%d", ordinal), "model": "fixture-model", "object": "chat.completion", "created": 1,
@@ -93,11 +93,11 @@ func TestPersistedNativeRepairRecoversTerminalProofIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Match final-smoke numerical limits while keeping all inference offline.
-	// A successful synthetic run makes no claim about live model quality.
+	// The typed edit schema includes file/digest preconditions. This offline
+	// full-tool fixture budgets that schema; final-smoke limits are unchanged.
 	budget := modelgateway.BudgetConfig{Campaign: admission.Campaign{ID: "native-" + uuid.NewString(), Profile: "offline-fixture", Offline: true,
-		MaxRequests: 6, MaxSpendMicroUSD: 200000, MaxInputTokens: 12000}, Pricing: admission.Pricing{Version: "synthetic-v1", Provider: provider.Name, Model: provider.Model},
-		ConfigVersion: "fixture-v1", MaxInputTokens: 6000, MaxOutputTokens: 1500}
+		MaxRequests: 6, MaxSpendMicroUSD: 200000, MaxInputTokens: 16000}, Pricing: admission.Pricing{Version: "synthetic-v1", Provider: provider.Name, Model: provider.Model},
+		ConfigVersion: "fixture-v1", MaxInputTokens: 8000, MaxOutputTokens: 1500}
 	selection, err := SealSelection(client, budget, cipher)
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +167,7 @@ func TestPersistedNativeRepairRecoversTerminalProofIntegration(t *testing.T) {
 		t.Fatalf("restart reran model/tests or lost final proof: state=%s code=%s reason=%s evidence_age=%s models=%d tests=%d err=%v attempt_error=%v", loadedCase.State, loadedAttempt.ErrorCode, loadedAttempt.ErrorMessage, time.Since(snapshot.CapturedAt), calls.Load(), tests.calls, err, attemptErr)
 	}
 	storedPatch, err := reopened.GetRepairArtifactContent(ctx, attempt.ID, "patch")
-	if err != nil || string(storedPatch) != patch {
+	if err != nil || string(storedPatch) != result.Patch {
 		t.Fatal("recovered patch bytes were not stored as an authoritative artifact")
 	}
 	report, err := reopened.GetRepairArtifactContent(ctx, attempt.ID, "investigation_report")

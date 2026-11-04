@@ -19,9 +19,7 @@ import (
 	"github.com/Cyaside/Triovexa/internal/ai/modelgateway"
 	"github.com/Cyaside/Triovexa/internal/coderepair"
 	"github.com/Cyaside/Triovexa/internal/coderepair/agent"
-	"github.com/Cyaside/Triovexa/internal/coderepair/sandbox"
 	"github.com/Cyaside/Triovexa/internal/secretstore"
-	"github.com/Cyaside/Triovexa/internal/storage/postgres"
 	"github.com/google/uuid"
 )
 
@@ -88,7 +86,7 @@ func contextPreviewCompletion(ordinal int, calls []contextPreviewCall) map[strin
 // The provider remains a loopback script. Real PostgreSQL, Node and Docker
 // exercise the same four-tool profile, template preview and shared ledger used
 // by the final smoke; no live credential, shared user database or API is used.
-func TestNativeContextPreviewFitsBatchedSkillReadsIntegration(t *testing.T) {
+func TestNativeContextPreviewRejectsIrreducibleSkillBatchIntegration(t *testing.T) {
 	f := persistedNativeFixture(t)
 	w, binding, base := compatibilityFixture(t)
 	const patch = "diff --git a/internal/workload/worker.go b/internal/workload/worker.go\n--- a/internal/workload/worker.go\n+++ b/internal/workload/worker.go\n@@ -1,4 +1,4 @@\n package workload\n \n // Schemas 1 and 2 are supported; other versions must be rejected.\n-func rejects(version int) bool { return version != 1 }\n+func rejects(version int) bool { return version != 1 && version != 2 }\n"
@@ -163,7 +161,7 @@ func TestNativeContextPreviewFitsBatchedSkillReadsIntegration(t *testing.T) {
 			for _, evidence := range snapshot.Entries {
 				ids = append(ids, evidence.ID)
 			}
-			calls = []contextPreviewCall{{"context-patch", "propose_patch", map[string]any{"patch": patch, "hypothesis": "The version predicate rejects supported schema two jobs", "evidence_ids": ids}}}
+			calls = []contextPreviewCall{{"context-patch", "propose_patch", structuredArgs(t, w.RootPath(), patch, "The version predicate rejects supported schema two jobs", ids)}}
 		default:
 			t.Error("native runtime issued an unplanned model request")
 			writer.WriteHeader(http.StatusServiceUnavailable)
@@ -201,56 +199,26 @@ func TestNativeContextPreviewFitsBatchedSkillReadsIntegration(t *testing.T) {
 	mu.Lock()
 	measured := slices.Clone(bounds)
 	mu.Unlock()
-	if result.Status != coderepair.StatePatchReady || result.Before.ExitCode != 1 || result.After.ExitCode != 0 || len(measured) != 3 || tests.calls != 2 || result.Runtime == nil || result.Runtime.Accounting.ModelRequests != 3 || result.Runtime.Accounting.UsageStatus != "known" {
-		t.Fatalf("native preview chain: status=%s code=%s calls=%d docker_tests=%d dispatched_bounds=%v", result.Status, result.Code, len(measured), tests.calls, measured)
+	// The structured edit schema makes this retained four-call/reasoning batch
+	// irreducible below the historical 6K cap. Preserve that cap and prove an
+	// honest stop instead of discarding scope/thoughts or relaxing admission.
+	if result.Status != coderepair.StateBlocked || result.Code != "CONTEXT_LIMIT" || len(measured) != 1 || tests.calls != 1 || result.Patch != "" || result.After.RecipeID != "" || result.Runtime == nil || result.Runtime.Accounting.ModelRequests != 1 {
+		t.Fatalf("irreducible batch bypassed cap: status=%s code=%s calls=%d tests=%d", result.Status, result.Code, len(measured), tests.calls)
 	}
 	campaign, err := ledger.GetCampaign(ctx, budget.Campaign.ID)
-	if err != nil || campaign.Requests != 3 || campaign.AdmittedInputTokens != 3570 || campaign.ReservedMicroUSD != 0 || campaign.Blocked || campaign.MaxInputTokens != 12000 || campaign.MaxRequests != 6 {
-		t.Fatal("known input usage did not settle into the unchanged cumulative campaign")
+	if err != nil || campaign.Requests != 1 || campaign.AdmittedInputTokens != 1190 || campaign.ReservedMicroUSD != 0 || campaign.Blocked || campaign.MaxInputTokens != 12000 || campaign.MaxRequests != 6 {
+		t.Fatal("local context previews charged inference or changed campaign limits")
 	}
-	var checkpoints int
-	if err := f.admin.QueryRow(`SELECT count(*) FROM `+f.checkpoint+`.checkpoints WHERE thread_id=$1`, attempt.Runtime.ThreadID).Scan(&checkpoints); err != nil || checkpoints == 0 {
-		t.Fatal("bounded native context was not checkpointed")
+	var preserved int
+	if err := f.admin.QueryRow(`SELECT count(*) FROM `+f.checkpoint+`.checkpoint_blobs WHERE thread_id=$1 AND channel='messages' AND position(convert_to($2,'UTF8') IN blob)>0`, attempt.Runtime.ThreadID, strings.Repeat("r", 577)).Scan(&preserved); err != nil || preserved == 0 {
+		t.Fatal("context guard discarded original model reasoning")
 	}
-	// Archiving a completed older exchange changes only the model's view. Its
-	// full original reasoning remains in both durable history and the immutable
-	// virtual transcript; the latest source exchange stays complete on the wire.
-	for _, channel := range []string{"messages", "files"} {
-		var preserved int
-		if err := f.admin.QueryRow(`SELECT count(*) FROM `+f.checkpoint+`.checkpoint_blobs WHERE thread_id=$1 AND channel=$2 AND position(convert_to($3, 'UTF8') IN blob)>0`,
-			attempt.Runtime.ThreadID, channel, strings.Repeat("r", 577)).Scan(&preserved); err != nil || preserved == 0 {
-			t.Fatalf("original reasoning was not retained in checkpoint channel %s", channel)
-		}
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	fixtureGit(t, w.RootPath(), "checkout", "--", "internal/workload/worker.go")
-	reopened, err := postgres.NewPostgresStore(f.appDSN)
+	outcome, err := result.Outcome(job, repairCase.Version, "go-test-workload", time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = reopened.Close() })
-	fresh, err := sandbox.Open(w.RootPath(), binding, sandbox.Limits{MaxFileBytes: 32768, MaxTotalBytes: 204800, MaxListedFiles: 20, MaxSearchHits: 20})
-	if err != nil {
-		t.Fatal(err)
+	if ok, err := f.store.RecordRepairInvestigationOutcome(ctx, outcome); err != nil || !ok {
+		t.Fatal("blocked outcome was not retained")
 	}
-	t.Cleanup(func() { _ = fresh.Close() })
-	recoveredLedger, _ := admission.NewService(reopened.ModelBudgetStore())
-	restarted := &NativeRunner{Process: runner.Process, Tests: tests, Store: reopened, Ledger: recoveredLedger, Cipher: cipher, CheckpointDSN: f.checkpointDSN, CheckpointSchema: f.checkpoint, MaxModelRequests: 3}
-	recovered := restarted.Investigate(agent.WithClaimedInvestigation(ctx, claimed), fresh, binding, snapshot, selection, "go-test-workload")
-	mu.Lock()
-	afterCalls := len(bounds)
-	mu.Unlock()
-	if recovered.Status != coderepair.StatePatchReady || recovered.PatchReport.SHA256 != result.PatchReport.SHA256 || afterCalls != 3 || tests.calls != 2 {
-		t.Fatal("restart lost the accepted candidate or repeated model/test effects")
-	}
-	outcome, err := recovered.Outcome(job, repairCase.Version, "go-test-workload", time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := reopened.RecordRepairInvestigationOutcome(ctx, outcome); err != nil || !ok {
-		t.Fatal("recovered native proof was not durably recorded")
-	}
-	t.Logf("offline context preview: model_requests=3 docker_tests=2 bounds=%v settled_input_tokens=%d checkpoints=%d restart_model_requests=0 restart_test_runs=0", measured, campaign.AdmittedInputTokens, checkpoints)
+	t.Logf("irreducible context: model_requests=1 baseline_tests=1 candidate_tests=0 bounds=%v; original 6K cap unchanged", measured)
 }

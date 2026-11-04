@@ -199,10 +199,6 @@ func (s *SourceIndex) RestoreAccounting(state SourceAccounting) error {
 			return errors.New("source accounting cannot shrink or change within an attempt")
 		}
 	}
-	s.accounted = make(map[string]SourceCharge, len(state.Files))
-	for name, charge := range state.Files {
-		s.accounted[name] = charge
-	}
 	for name, ranges := range s.readRanges {
 		for _, span := range ranges {
 			covered := false
@@ -215,6 +211,10 @@ func (s *SourceIndex) RestoreAccounting(state SourceAccounting) error {
 				return errors.New("read provenance cannot shrink")
 			}
 		}
+	}
+	s.accounted = make(map[string]SourceCharge, len(state.Files))
+	for name, charge := range state.Files {
+		s.accounted[name] = charge
 	}
 	s.readRanges = make(map[string][]LineRange)
 	for name, ranges := range state.ReadRanges {

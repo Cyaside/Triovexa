@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const CONTRACT_VERSION = "1";
 export const ENGINE_VERSION = "1.14.1";
-export const PROMPT_VERSION = "repair-native-v5";
+export const PROMPT_VERSION = "repair-native-v6";
 export const MAX_FRAME_BYTES = 256 * 1024;
 export const INLINE_RESULT_BYTES = 8 * 1024;
 const identifier = z.string().min(1).max(200);
@@ -77,7 +77,10 @@ export const toolSchemas = {
   repo_read: z.strictObject({ path: scopedPath, start_line: z.number().int().min(1), end_line: z.number().int().min(1), expected_digest: z.string().max(128).optional() }),
   repo_search: z.strictObject({ prefix: z.string().max(512), query: z.string().min(1).max(256), ...page }),
   run_test_recipe: z.strictObject({ recipe_id: identifier, candidate_digest: z.string().max(128).optional() }),
-  propose_patch: z.strictObject({ patch: z.string().min(1).max(65536), hypothesis: z.string().min(1).max(2048), evidence_ids: z.array(identifier).min(1).max(20) }),
+  propose_patch: z.strictObject({ format: z.enum(["text-edits-v1"]), files: z.array(z.strictObject({
+    path: scopedPath, expected_digest: z.string().regex(/^[a-f0-9]{64}$/),
+    edits: z.array(z.strictObject({ old_text: z.string().min(1).max(16384), new_text: z.string().max(16384) })).min(1).max(10),
+  })).min(1).max(5), hypothesis: z.string().min(1).max(2048), evidence_ids: z.array(identifier).min(1).max(20) }),
   cannot_determine: z.strictObject({ reason: z.string().min(1).max(2048) }),
 };
 export type GoToolName = keyof typeof toolSchemas;

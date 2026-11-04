@@ -27,7 +27,7 @@ describe("native Chat Completions runtime", () => {
         expect(request.body.max_tokens).toBe(1500);
         expect((request.body.tools as Array<{ function: { name: string } }>).map((tool) => tool.function.name).sort()).toEqual([...MODEL_TOOLS].sort());
         const proposal = (request.body.tools as Array<{ function: { name: string; description: string } }>).find((tool) => tool.function.name === "propose_patch")!;
-        expect(proposal.function.description).toContain("Text Git diff starts diff --git");
+        expect(proposal.function.description).toContain("Exact LF old/new text");
         expect(request.headers["x-triovexa-request-ordinal"]).toBe(String(index + 1));
         expect(JSON.stringify(request.body)).not.toContain(start.transport.capability);
         expect(JSON.stringify(request.body)).not.toContain("model_gateway_url");
