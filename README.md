@@ -195,6 +195,8 @@ Triovexa currently supports a single-tenant deployment and one bounded Redis wor
 
 ## Code repair (staging)
 
+Repository bindings select evidence and recovery profiles for Redis queue workers or HTTP health/5xx regressions. Profiles pin service/environment identity, trusted deployed revision, log sources and recovery criteria. See [evidence and recovery profiles](docs/operations/repair-telemetry.md) for instrumentation and setup.
+
 A staging workflow links an incident to its registered GitHub repository, bounded source investigation, a reviewed patch, and a draft pull request. Repository profiles select language tools and tests; private checkout uses server-side credential references. An administrator can authorize direct alert investigation with an expiring, budgeted grant. Publication, deployment correlation, and telemetry verification remain separate. See [Code repair (staging)](docs/operations/code-repair.md) for setup and current limitations.
 
 ```text
