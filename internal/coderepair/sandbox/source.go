@@ -19,6 +19,7 @@ type SourceRange struct {
 	EndLine   int    `json:"end_line"`
 	Text      string `json:"text"`
 	Untrusted bool   `json:"untrusted"`
+	Newline   string `json:"newline"`
 }
 
 type SourceHit struct {
@@ -38,19 +39,20 @@ type cachedSource struct {
 // source bytes once and never shares code with another attempt or revision.
 // Discard it before applying a candidate; post-patch source has a new digest.
 type SourceIndex struct {
-	workspace *Workspace
-	revision  string
-	mu        sync.Mutex
-	files     map[string]cachedSource
-	listings  map[string][]string
-	accounted map[string]SourceCharge
-	BytesRead int64
-	Reads     int
+	workspace  *Workspace
+	revision   string
+	mu         sync.Mutex
+	files      map[string]cachedSource
+	listings   map[string][]string
+	accounted  map[string]SourceCharge
+	readRanges map[string][]LineRange
+	BytesRead  int64
+	Reads      int
 }
 
 func NewSourceIndex(workspace *Workspace, revision string) *SourceIndex {
 	return &SourceIndex{workspace: workspace, revision: revision,
-		files: make(map[string]cachedSource), listings: make(map[string][]string), accounted: make(map[string]SourceCharge)}
+		files: make(map[string]cachedSource), listings: make(map[string][]string), accounted: make(map[string]SourceCharge), readRanges: make(map[string][]LineRange)}
 }
 
 func (s *SourceIndex) source(name string) (cachedSource, error) {
@@ -98,16 +100,50 @@ type SourceCharge struct {
 }
 
 type SourceAccounting struct {
-	Revision string                  `json:"revision"`
-	Files    map[string]SourceCharge `json:"files"`
+	Revision   string                  `json:"revision"`
+	Files      map[string]SourceCharge `json:"files"`
+	ReadRanges map[string][]LineRange  `json:"read_ranges"`
+}
+
+type LineRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+func (s *SourceIndex) covered(name string, start, end int) bool {
+	for _, span := range s.readRanges[name] {
+		if start >= span.Start && end <= span.End {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeRead(ranges []LineRange, span LineRange) []LineRange {
+	ranges = append(append([]LineRange(nil), ranges...), span)
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].Start < ranges[j].Start })
+	merged := ranges[:0]
+	for _, next := range ranges {
+		if len(merged) > 0 && next.Start <= merged[len(merged)-1].End+1 {
+			if next.End > merged[len(merged)-1].End {
+				merged[len(merged)-1].End = next.End
+			}
+		} else {
+			merged = append(merged, next)
+		}
+	}
+	return merged
 }
 
 func (s *SourceIndex) Accounting() SourceAccounting {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	result := SourceAccounting{Revision: s.revision, Files: make(map[string]SourceCharge, len(s.accounted))}
+	result := SourceAccounting{Revision: s.revision, Files: make(map[string]SourceCharge, len(s.accounted)), ReadRanges: make(map[string][]LineRange)}
 	for name, charge := range s.accounted {
 		result.Files[name] = charge
+	}
+	for name, ranges := range s.readRanges {
+		result.ReadRanges[name] = append([]LineRange(nil), ranges...)
 	}
 	return result
 }
@@ -117,6 +153,21 @@ func (s *SourceIndex) validateAccounting(state SourceAccounting) (int64, error) 
 		return 0, errors.New("source accounting does not match the approved revision or file limit")
 	}
 	var bytes int64
+	spanCount := 0
+	for name, ranges := range state.ReadRanges {
+		charge, ok := state.Files[name]
+		if !ok || len(ranges) == 0 {
+			return 0, errors.New("read provenance has no source accounting")
+		}
+		previous := 0
+		for _, span := range ranges {
+			spanCount++
+			if span.Start <= previous || span.Start < 1 || span.End < span.Start || int64(span.End) > charge.Bytes+1 || spanCount > 100 {
+				return 0, errors.New("read provenance is invalid or oversized")
+			}
+			previous = span.End + 1
+		}
+	}
 	for name, charge := range state.Files {
 		if !s.workspace.binding.AllowsPath(name) || len(charge.Digest) != 64 || strings.ToLower(charge.Digest) != charge.Digest || charge.Bytes < 0 || charge.Bytes > s.workspace.limits.MaxFileBytes || charge.Bytes > s.workspace.limits.MaxTotalBytes-bytes {
 			return 0, errors.New("source accounting path, digest or byte limit is invalid")
@@ -152,6 +203,23 @@ func (s *SourceIndex) RestoreAccounting(state SourceAccounting) error {
 	for name, charge := range state.Files {
 		s.accounted[name] = charge
 	}
+	for name, ranges := range s.readRanges {
+		for _, span := range ranges {
+			covered := false
+			for _, next := range state.ReadRanges[name] {
+				if next.Start <= span.Start && next.End >= span.End {
+					covered = true
+				}
+			}
+			if !covered {
+				return errors.New("read provenance cannot shrink")
+			}
+		}
+	}
+	s.readRanges = make(map[string][]LineRange)
+	for name, ranges := range state.ReadRanges {
+		s.readRanges[name] = append([]LineRange(nil), ranges...)
+	}
 	s.BytesRead = bytes
 	return nil
 }
@@ -175,12 +243,17 @@ func (s *SourceIndex) ReadRange(name string, start, end int, expectedDigest stri
 	if end > len(source.lines) {
 		end = len(source.lines)
 	}
-	text := strings.Join(source.lines[start-1:end], "\n")
+	logical, newline, err := logicalText(source.data)
+	if err != nil {
+		return SourceRange{}, err
+	}
+	text := strings.Join(strings.Split(logical, "\n")[start-1:end], "\n")
 	if len(text) > 32*1024 {
 		return SourceRange{}, errors.New("source range exceeds 32 KiB")
 	}
+	s.readRanges[name] = mergeRead(s.readRanges[name], LineRange{start, end})
 	return SourceRange{Path: name, Revision: s.revision, Digest: source.digest,
-		StartLine: start, EndLine: end, Text: text, Untrusted: true}, nil
+		StartLine: start, EndLine: end, Text: text, Untrusted: true, Newline: newline}, nil
 }
 
 func pageBounds(cursor, limit, count int) (int, error) {

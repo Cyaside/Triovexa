@@ -136,6 +136,11 @@ func gitInput(ctx context.Context, input []byte, args ...string) (string, error)
 }
 
 func gitInputBounded(ctx context.Context, input []byte, limit int, args ...string) (string, error) {
+	return gitInputEnvironment(ctx, input, limit, nil, args...)
+}
+
+// extraEnv is supplied only by trusted workspace operations, never tool input.
+func gitInputEnvironment(ctx context.Context, input []byte, limit int, extraEnv []string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", args...)
 	if input != nil {
 		command.Stdin = bytes.NewReader(input)
@@ -149,6 +154,7 @@ func gitInputBounded(ctx context.Context, input []byte, limit int, args ...strin
 	command.Env = append(command.Env,
 		"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
 	command.Env = append(command.Env, gitCredentialEnvironment(ctx)...)
+	command.Env = append(command.Env, extraEnv...)
 	output := &boundedOutput{limit: limit}
 	command.Stdout = output
 	command.Stderr = output
