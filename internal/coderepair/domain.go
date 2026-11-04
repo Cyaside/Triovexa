@@ -60,7 +60,7 @@ type RepositoryBinding struct {
 	AllowedPaths      []string
 	TestRecipes       []string
 	ValidationProfile *ValidationProfile
-	TelemetryProfile  *TelemetryProfile
+	TelemetryProfile  *TelemetryProfile `json:",omitempty"`
 	CredentialRef     string
 	Automation        *AutomationPolicy
 	PolicyVersion     string

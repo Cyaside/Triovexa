@@ -4,6 +4,8 @@ A repository binding selects the telemetry contract for its service and environm
 
 Register a profile in **Settings → Source repositories → Evidence and recovery**. New bindings require a `telemetry-v1` profile. Profile changes require a replacement binding; they invalidate the previous investigation and publication scope. Deployment stores its own contract snapshot, and the verifier rejects a disabled or changed binding.
 
+Build the API, investigation runtime, verifier and sandbox runner from the same release. Rebuild prepared language images when adopting telemetry profiles so their bundled runner understands the new binding contract. Historical bindings omit absent telemetry fields from sandbox frames and retain their existing queue behavior.
+
 ## HTTP services
 
 The HTTP profile covers health and HTTP 5xx regressions. Configure these signals in the server's Prometheus connection:
